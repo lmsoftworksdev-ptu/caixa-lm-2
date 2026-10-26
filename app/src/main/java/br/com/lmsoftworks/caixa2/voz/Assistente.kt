@@ -136,6 +136,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     /** Se não for null, o pedido atual é uma busca por voz: o texto vai para cá e nada é executado. */
     private var destinoBusca: ((String?) -> Unit)? = null
     private var aoOuvirBusca: (() -> Unit)? = null
+    private var aoParcialBusca: ((String) -> Unit)? = null
 
     val nivelMicrofone: Float get() = escuta?.nivel ?: 0f
 
@@ -189,8 +190,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             // gramática só com os comandos fixos: reconhecidos offline, na hora (o que não bater vai para o Gemini)
             val gramaticaCmd = (FrasesRapidas.todas()).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val cmd = try { Recognizer(m, TAXA, gramaticaCmd).also { it.setWords(true) } } catch (e: Throwable) { Log.w(TAG, "sem comandos rapidos", e); null }
-            val e = EscutaAssistente(rec, cmd) { campo, json -> verificarChamada(json, campo) }
-            if (!e.iniciar()) { rec.close(); cmd?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
+            val livre = try { Recognizer(m, TAXA) } catch (e: Throwable) { Log.w(TAG, "sem texto ao vivo", e); null }
+            val e = EscutaAssistente(rec, cmd, livre, { parcial -> main.post { aoPalavras(parcial) } }) { campo, json -> verificarChamada(json, campo) }
+            if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
             estado = EstadoVoz.ESPERANDO_CHAMADA
             Log.d(TAG, "esperando a chamada (Alexa)")
@@ -239,10 +241,18 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     // ---------------------------------------------------------------- pedido
 
+    /** O que a pessoa está falando AGORA (do reconhecedor offline): aparece na tela letra a letra, antes do texto final do Gemini. */
+    private fun aoPalavras(texto: String) {
+        if (estado != EstadoVoz.OUVINDO_COMANDO) return
+        val busca = aoParcialBusca
+        if (destinoBusca != null) busca?.invoke(texto) else faixa.digitando(texto)
+    }
+
     /** Chamada pelo botão do microfone da busca: ouve um pedido e entrega o texto a [aoTexto] em vez de executar. */
-    fun ouvirParaBusca(aoComecar: () -> Unit, aoTexto: (String?) -> Unit) {
+    fun ouvirParaBusca(aoComecar: () -> Unit, aoParcial: (String) -> Unit, aoTexto: (String?) -> Unit) {
         if (!ativo || escuta == null) { aoTexto(null); return }
         destinoBusca = aoTexto
+        aoParcialBusca = aoParcial
         aoOuvirBusca = aoComecar
         acordou()
     }

@@ -209,6 +209,12 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
         linha.setTextColor(Color.WHITE)
     }
 
+    /** Palavras que a pessoa está falando agora, escritas no alto da tela conforme chegam. */
+    fun digitando(texto: String) {
+        if (!aberta || estado != 1) return
+        linha.text = texto
+    }
+
     fun pensando(dito: String) {
         abrir(2)
         rotulo.text = "Pensando…"; linha.text = dito

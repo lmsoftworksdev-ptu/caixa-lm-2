@@ -363,6 +363,14 @@ class TelaMidia(
         }
     }
 
+    /** Busca por voz: as palavras vão aparecendo na barra enquanto a pessoa fala. */
+    fun mostrarParcial(texto: String) {
+        consulta = texto
+        textoBusca.text = texto
+        dica.visibility = View.GONE
+        botaoLimpar.visibility = View.GONE
+    }
+
     /** Escreve [texto] na barra e pesquisa (usado pela busca por voz). */
     fun pesquisar(texto: String) {
         consulta = texto
@@ -428,6 +436,28 @@ class TelaMidia(
         tecladoAberto = false
         barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 33.d(), Cfg.LINHA)
         teclado.animate().translationY(teclado.height.toFloat()).setDuration(180).withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
+    }
+
+    private var engolirToque = false
+
+    /** Com o teclado aberto, tocar fora dele (e fora da barra) só fecha o teclado: o toque não aciona o que está embaixo. */
+    override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            engolirToque = false
+            if (tecladoAberto) {
+                val p = IntArray(2)
+                teclado.getLocationOnScreen(p)
+                val b = IntArray(2)
+                barra.getLocationOnScreen(b)
+                val fora = e.rawY < p[1] && !(e.rawY >= b[1] && e.rawY <= b[1] + barra.height)
+                if (fora) { fecharTeclado(); engolirToque = true }
+            }
+        }
+        if (engolirToque) {
+            if (e.actionMasked == android.view.MotionEvent.ACTION_UP || e.actionMasked == android.view.MotionEvent.ACTION_CANCEL) engolirToque = false
+            return true
+        }
+        return super.dispatchTouchEvent(e)
     }
 
     /** O teclado fecha primeiro quando o usuário volta. Devolve true se havia teclado aberto. */

@@ -22,6 +22,8 @@ import kotlin.math.sqrt
 class EscutaAssistente(
     private val reconhecedor: Recognizer,
     private val comandos: Recognizer?,
+    private val livre: Recognizer?,
+    private val aoParcial: (String) -> Unit,
     private val aoTexto: (campo: String, json: String) -> Unit
 ) {
     private companion object {
@@ -93,6 +95,11 @@ class EscutaAssistente(
     }
 
     @Volatile private var limpar = false
+    private var textoLivre = ""
+    private var ultimoParcialLivre = ""
+
+    private fun lerJson(json: String?, campo: String): String =
+        try { org.json.JSONObject(json ?: "{}").optString(campo, "") } catch (_: Exception) { "" }
 
     private fun laco(gr: AudioRecord) {
         val bloco = ShortArray(1600) // 0,1 s
@@ -102,7 +109,7 @@ class EscutaAssistente(
             while (rodando) {
                 val n = gr.read(bloco, 0, bloco.size)
                 if (n <= 0) continue
-                if (limpar) { limpar = false; reconhecedor.reset(); comandos?.reset() }
+                if (limpar) { limpar = false; reconhecedor.reset(); comandos?.reset(); livre?.reset(); textoLivre = ""; ultimoParcialLivre = "" }
                 var soma = 0.0
                 for (i in 0 until n) soma += bloco[i] * bloco[i].toDouble()
                 val rmsBruto = sqrt(soma / n).toFloat()
@@ -129,6 +136,7 @@ class EscutaAssistente(
             efeitos.clear()
             try { reconhecedor.close() } catch (_: Throwable) {}
             try { comandos?.close() } catch (_: Throwable) {}
+            try { livre?.close() } catch (_: Throwable) {}
         }
     }
 
@@ -144,6 +152,14 @@ class EscutaAssistente(
         for (i in 0 until n) { bytes[2 * i] = (bloco[i].toInt() and 0xff).toByte(); bytes[2 * i + 1] = (bloco[i].toInt() shr 8).toByte() }
         gravacao.write(bytes)
         comandos?.acceptWaveForm(bloco, n)          // em paralelo: se for um comando fixo, o app executa sem esperar a internet
+        // texto ao vivo: o reconhecedor livre (sem gramática) escreve na tela as palavras enquanto a pessoa fala; o texto final vem do Gemini
+        livre?.let { l ->
+            val fechou = l.acceptWaveForm(bloco, n)
+            val atual = if (fechou) lerJson(l.result, "text") else lerJson(l.partialResult, "partial")
+            if (fechou && atual.isNotBlank()) textoLivre = (textoLivre + " " + atual).trim()
+            val mostrar = if (fechou) textoLivre else (textoLivre + " " + atual).trim()
+            if (mostrar != ultimoParcialLivre) { ultimoParcialLivre = mostrar; aoParcial(mostrar) }
+        }
         if (falando) { falou = true; silencioDesde = 0L } else if (silencioDesde == 0L) silencioDesde = agora
         val total = agora - inicioPedido
         val terminou = (falou && silencioDesde != 0L && agora - silencioDesde >= SILENCIO_FINAL_MS) ||

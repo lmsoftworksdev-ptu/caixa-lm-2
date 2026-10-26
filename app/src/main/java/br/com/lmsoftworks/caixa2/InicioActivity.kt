@@ -120,12 +120,12 @@ class InicioActivity : Activity() {
         musica.local = playerMidia
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.visibility = View.GONE
-        telaVideo = TelaVideo(this, playerMidia) { fecharVideoAnimado() }
+        telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
         telaMidia.aoMicrofone = {
-            assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { texto ->
+            assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { parcial -> telaMidia.mostrarParcial(parcial) }, { texto ->
                 telaMidia.ouvindoVoz(false)
                 if (texto != null) telaMidia.pesquisar(texto)
             })

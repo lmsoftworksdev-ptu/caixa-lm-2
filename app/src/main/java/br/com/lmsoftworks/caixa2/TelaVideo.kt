@@ -42,7 +42,14 @@ class Carregando(c: Context) : View(c) {
  * para fechar). Os controles somem sozinhos depois de alguns segundos tocando.
  */
 @UnstableApi
-class TelaVideo(private val c: Context, private val player: PlayerMidia, private val aoFechar: () -> Unit) : FrameLayout(c) {
+class TelaVideo(
+    private val c: Context,
+    private val player: PlayerMidia,
+    /** Volume do aparelho em porcentagem (0 a 100): o mesmo da pílula de volume da barra de cima. */
+    private val lerVolume: () -> Int,
+    private val definirVolume: (Int) -> Unit,
+    private val aoFechar: () -> Unit
+) : FrameLayout(c) {
 
     private val imagem = SurfaceView(c)
     private val cortina = View(c).apply { setBackgroundColor(Color.BLACK) }
@@ -64,7 +71,7 @@ class TelaVideo(private val c: Context, private val player: PlayerMidia, private
     private val handler = Handler(Looper.getMainLooper())
     private val esconder = Runnable { mostrarControles(false) }
     private val tique = object : Runnable {
-        override fun run() { atualizarTempo(); handler.postDelayed(this, 500) }
+        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; handler.postDelayed(this, 500) }
     }
     private var controlesVisiveis = true
 
@@ -124,10 +131,9 @@ class TelaVideo(private val c: Context, private val player: PlayerMidia, private
 
         barra.aoArrastar = { f -> if (player.duracaoMs > 0) tempoAtual.text = formatar((f * player.duracaoMs).toLong()); agendarEsconder() }
         barra.aoSoltar = { f -> if (player.duracaoMs > 0) player.buscar((f * player.duracaoMs).toLong()) }
-        val audio = c.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-        val limite = Math.round(audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) * PainelVolume.LIMITE_REAL).coerceAtLeast(1)
-        volume.fracao = Math.min(audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC), limite).toFloat() / limite
-        volume.aoArrastar = { f -> audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(f * limite), 0); agendarEsconder() }
+        // a barra de volume do vídeo é a MESMA do aparelho: lê e grava pelo controle de volume do app (níveis de 0 a 10)
+        volume.fracao = lerVolume() / 100f
+        volume.aoArrastar = { f -> definirVolume(Math.round(f * 10) * 10); agendarEsconder() }
         volume.aoSoltar = volume.aoArrastar
 
         val base = LinearLayout(c).apply {
