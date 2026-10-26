@@ -81,8 +81,70 @@ object YouTube {
 
     /** "Em alta": o YouTube não tem mais a página de tendências, então usamos buscas que trazem o que está mais visto. */
     fun emAlta(musica: Boolean): List<Resultado> {
+        // O "em alta" de verdade: as paradas do próprio YouTube (YouTube Charts, Brasil). Se estiverem fora do ar, cai para buscas.
+        try {
+            val r = parada(musica)
+            if (r.size >= 4) return r
+        } catch (e: Exception) { Log.w("Midia", "parada do YouTube falhou: $e") }
+        return emAltaPorBusca(musica)
+    }
+
+    /**
+     * YouTube Charts (charts.youtube.com), Brasil: "Em alta" nos videoclipes (os que mais crescem agora) e as músicas mais ouvidas.
+     * É o mesmo serviço que o site de paradas do YouTube usa; devolve as 12 primeiras.
+     */
+    private fun parada(musica: Boolean): List<Resultado> {
+        val tipo = if (musica) "TRACKS" else "VIDEOS"
+        val corpo = org.json.JSONObject()
+            .put("context", org.json.JSONObject().put("client", org.json.JSONObject()
+                .put("clientName", "WEB_MUSIC_ANALYTICS").put("clientVersion", "2.0").put("hl", "pt").put("gl", "BR").put("theme", "MUSIC")))
+            .put("browseId", "FEmusic_analytics_charts_home")
+            .put("query", "perspective=CHART&chart_params_country_code=br&chart_params_chart_type=$tipo&chart_params_period_type=WEEKLY")
+        val con = java.net.URL("https://charts.youtube.com/youtubei/v1/browse?alt=json&key=AIzaSyBUPetSUmoZL-OhlxA7wSac5XinrygCqMo").openConnection() as java.net.HttpURLConnection
+        con.requestMethod = "POST"; con.doOutput = true
+        con.connectTimeout = 8000; con.readTimeout = 12000
+        con.setRequestProperty("Content-Type", "application/json")
+        con.setRequestProperty("Referer", "https://charts.youtube.com/")
+        con.setRequestProperty("Origin", "https://charts.youtube.com")
+        con.setRequestProperty("User-Agent", AppDownloader.USER_AGENT)
+        con.outputStream.use { it.write(corpo.toString().toByteArray()) }
+        val texto = con.inputStream.bufferedReader().use { it.readText() }
+        val conteudo = org.json.JSONObject(texto).getJSONObject("contents").getJSONObject("sectionListRenderer")
+            .getJSONArray("contents").getJSONObject(0).getJSONObject("musicAnalyticsSectionRenderer").getJSONObject("content")
+        val saida = ArrayList<Resultado>()
+        fun miniaturas(id: String) = listOf("https://i.ytimg.com/vi/$id/hq720.jpg", "https://i.ytimg.com/vi/$id/hqdefault.jpg")
+        if (!musica) {
+            val listas = conteudo.getJSONArray("videos")
+            // "Em alta" (TRENDING_CHART); se não vier, as mais vistas
+            var escolhida: org.json.JSONArray? = null
+            for (preferida in listOf("TRENDING_CHART", "TOP_VIEWS_CHART")) {
+                for (i in 0 until listas.length()) if (listas.getJSONObject(i).optString("listType") == preferida) { escolhida = listas.getJSONObject(i).getJSONArray("videoViews"); break }
+                if (escolhida != null && escolhida.length() > 0) break
+            }
+            if (escolhida != null) for (i in 0 until minOf(escolhida.length(), 12)) {
+                val v = escolhida.getJSONObject(i)
+                val id = v.optString("id")
+                if (id.isEmpty()) continue
+                saida.add(Resultado(v.optString("title"), v.optString("channelName"), v.optLong("videoDuration", 0), "https://www.youtube.com/watch?v=$id", miniaturas(id), v.optString("viewCount").toLongOrNull() ?: -1L))
+            }
+        } else {
+            val tipos = conteudo.getJSONArray("trackTypes")
+            val faixas = tipos.getJSONObject(0).getJSONArray("trackViews")
+            for (i in 0 until minOf(faixas.length(), 12)) {
+                val f = faixas.getJSONObject(i)
+                // a versão "só áudio" oficial (capa do álbum, sem vinheta) quando existir
+                val id = f.optString("atvExternalVideoId").ifEmpty { f.optString("encryptedVideoId") }
+                if (id.isEmpty()) continue
+                val artistas = f.optJSONArray("artists")
+                val nomes = (0 until (artistas?.length() ?: 0)).joinToString(", ") { artistas!!.getJSONObject(it).optString("name") }
+                saida.add(Resultado(f.optString("name"), nomes, 200, "https://www.youtube.com/watch?v=$id", miniaturas(id), f.optString("viewCount").toLongOrNull() ?: -1L))
+            }
+        }
+        return saida
+    }
+
+    private fun emAltaPorBusca(musica: Boolean): List<Resultado> {
         if (musica) return buscar("músicas mais tocadas do brasil", true)
-        // "Vídeos em alta" só de MÚSICA: clipes oficiais de vários estilos, misturados (um de cada estilo por vez), de 1,5 a 10 minutos
         val consultas = listOf("clipe oficial 2026", "clipe oficial sertanejo", "clipe oficial funk", "clipe oficial pagode", "clipe oficial pop brasil", "clipe oficial forró")
         val listas = arrayOfNulls<List<Resultado>>(consultas.size)
         consultas.mapIndexed { i, q -> Thread { listas[i] = try { buscar(q, false) } catch (e: Exception) { null } }.also { it.start() } }.forEach { it.join() }
