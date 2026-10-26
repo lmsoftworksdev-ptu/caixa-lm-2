@@ -125,7 +125,19 @@ object Atualizador {
         }.start()
     }
 
+    /**
+     * Liga "Fontes desconhecidas" sozinho (o Android exige isso para instalar um APK que não vem de loja). Precisa da permissão
+     * WRITE_SECURE_SETTINGS, que o script de preparação do aparelho concede uma vez (pm grant); sem ela, nada acontece aqui.
+     */
+    private fun liberarFontesDesconhecidas(c: Context) {
+        try {
+            if (android.provider.Settings.Secure.getInt(c.contentResolver, "install_non_market_apps", 0) == 0)
+                android.provider.Settings.Secure.putInt(c.contentResolver, "install_non_market_apps", 1)
+        } catch (e: Exception) { Log.w(TAG, "sem permissao para liberar fontes desconhecidas: ${e.message}") }
+    }
+
     private fun instalar(c: Context, apk: File) {
+        liberarFontesDesconhecidas(c)
         val instalador = c.packageManager.packageInstaller
         val sessao = instalador.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
         instalador.openSession(sessao).use { s ->
@@ -221,7 +233,19 @@ class ModalAtualizacao(private val c: Context) : FrameLayout(c) {
         detalhe.text = "Baixando a atualização. Não desligue a caixa."
         Atualizador.baixarEInstalar(c, v, { pct ->
             preenchido.layoutParams = preenchido.layoutParams.apply { width = andamento.width * pct / 100 }
-            if (pct >= 100) detalhe.text = "Instalando… o app vai reiniciar sozinho."
+            if (pct >= 100) {
+                detalhe.text = "Instalando… o app vai reiniciar sozinho."
+                // se o Android não terminar a instalação, não deixa a janela travada
+                postDelayed({
+                    if (baixando && aberto) {
+                        baixando = false
+                        detalhe.text = "A instalação não terminou. Toque para tentar de novo."
+                        botaoAtualizar.text = "Tentar de novo"; botaoAtualizar.alpha = 1f
+                        botaoDepois.visibility = View.VISIBLE
+                        andamento.visibility = View.GONE
+                    }
+                }, 40_000)
+            }
         }, { erro ->
             baixando = false
             detalhe.text = erro

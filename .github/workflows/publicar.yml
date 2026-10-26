@@ -47,8 +47,10 @@ jobs:
         env:
           CHAVE: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
+          if [ -z "$CHAVE" ]; then echo "::error::O segredo DEBUG_KEYSTORE_BASE64 esta vazio ou nao existe. Sem ele o APK sai assinado com outra chave e a caixa recusa a atualizacao."; exit 1; fi
           mkdir -p ~/.android
           echo "$CHAVE" | base64 -d > ~/.android/debug.keystore
+          keytool -list -keystore ~/.android/debug.keystore -storepass android | grep -i "fingerprint"
 
       - name: Compilar
         if: steps.np.outputs.publicar == 'sim'
