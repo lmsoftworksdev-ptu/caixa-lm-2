@@ -78,6 +78,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 if (state == Player.STATE_BUFFERING) carregando = true
                 else if (state == Player.STATE_READY) { carregando = false; if (p.currentPosition > 20_000) recuperacoes = 0 }
                 if (state == Player.STATE_ENDED) {
+                    if (proximoPlayer != null && preparada != null) { concluirFade(); return }      // a próxima já estava carregada: segue nela
                     if (temProxima) proxima() else { tocando = false; aoMudar() }
                     return
                 }
@@ -235,7 +236,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     // ---------------------------------------------------------------- emenda entre músicas (crossfade)
     //
-    // Perto do fim de uma música a próxima já é preparada; nos últimos 5 s a atual baixa e a próxima sobe, tocando juntas, sem parada.
+    // Perto do fim de uma música a próxima já é preparada; nos últimos 3 s a atual baixa e a próxima sobe, tocando juntas, sem parada.
 
     private class Preparada(val item: Resultado, val fonte: Fonte)
 
@@ -245,8 +246,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private var proximoPlayer: ExoPlayer? = null
     private var emFade = false
     private var fadeInicio = 0L
-    private var fadeDuracao = 5000L
-    private val duracaoFade = 5000L
+    private var fadeDuracao = 3000L
+    private val duracaoFade = 3000L
 
     private val vigia = object : Runnable {
         override fun run() {
@@ -267,30 +268,42 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (dur == C.TIME_UNSET || dur < 25_000) return
         val resta = dur - p.currentPosition
         val prox = proximoDaFila() ?: return
-        // 25 s antes do fim: resolve o endereço da próxima (demora uns 2 s) para estar pronta na hora
+        // 25 s antes do fim: descobre o endereço da próxima (demora uns 2 s) e já deixa ela carregando, muda, pausada
         if (resta < 25_000 && preparada?.item?.url != prox.url && !preparando) {
             preparando = true
             val minha = geracao
             Thread {
                 val f = try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
-                handler.post { preparando = false; if (f != null && minha == geracao) preparada = Preparada(prox, f) }
+                handler.post {
+                    preparando = false
+                    if (f != null && minha == geracao && !ehVideo) { preparada = Preparada(prox, f); prepararProximo() }
+                }
             }.start()
         }
-        if (resta <= duracaoFade + 300 && preparada?.item?.url == prox.url) iniciarFade(prox, resta.coerceAtLeast(1500L))
+        // nos últimos 3 s, com a próxima já carregada, começa a emenda
+        val novo = proximoPlayer
+        if (resta <= duracaoFade + 200 && novo != null && novo.playbackState == Player.STATE_READY) iniciarFade(resta.coerceAtLeast(1200L))
     }
 
-    private fun iniciarFade(prox: Resultado, duracao: Long) {
+    /** Carrega a próxima música em outro player, sem tocar, para ela já estar pronta (sem pausa) na hora da emenda. */
+    private fun prepararProximo() {
         val pre = preparada ?: return
+        if (proximoPlayer != null) return
         val novo = novoExo()
         novo.volume = 0f
         novo.setMediaSource(origemDe(pre.fonte))
+        novo.playWhenReady = false
         novo.prepare()
-        novo.playWhenReady = true
         proximoPlayer = novo
+    }
+
+    private fun iniciarFade(duracao: Long) {
+        val novo = proximoPlayer ?: return
+        novo.playWhenReady = true
         emFade = true
         fadeInicio = SystemClock.uptimeMillis()
         fadeDuracao = duracao
-        Log.d(TAG, "emenda: começando ${prox.titulo} em ${duracao} ms")
+        Log.d(TAG, "emenda: começando ${preparada?.item?.titulo} em $duracao ms")
     }
 
     private fun passoDoFade() {
@@ -307,6 +320,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val novo = proximoPlayer ?: return
         val pre = preparada ?: return
         proximoPlayer = null; emFade = false; preparada = null
+        novo.playWhenReady = true
         if (indice + 1 >= fila.size) { fila = fila + relacionados; relacionados = emptyList() }
         player = novo
         try { antigo.release() } catch (_: Throwable) {}
@@ -315,19 +329,18 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         relacionados = pre.fonte.relacionados
         capa = null; erro = null; carregando = false; recuperacoes = 0
         novo.volume = volumeBase
-        tocando = novo.isPlaying
+        tocando = novo.isPlaying || novo.playWhenReady
         val minha = ++geracao
         carregarCapa(pre.item, minha)
         aoMudar()
     }
 
+    /** Descarta a próxima já carregada e volta o volume da atual (o usuário pulou, pausou ou mexeu na barra). */
     private fun cancelarFade() {
         preparada = null
-        if (!emFade) return
-        emFade = false
         try { proximoPlayer?.release() } catch (_: Throwable) {}
         proximoPlayer = null
-        player?.volume = volumeBase
+        if (emFade) { emFade = false; player?.volume = volumeBase }
     }
 
     /** A imagem do vídeo vai para esta superfície (some da tela quando é null). */
