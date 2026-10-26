@@ -192,6 +192,17 @@ class InicioActivity : Activity() {
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) { ir(i.getStringExtra("para") ?: "inicio") }
         }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_IR"))
+        // mostra a animação do assistente: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_ASSISTENTE --es estado ouvindo|pensando|falando|fechar
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                when (i.getStringExtra("estado")) {
+                    "ouvindo" -> faixaAssistente.ouvindo()
+                    "pensando" -> faixaAssistente.pensando("toca anitta")
+                    "falando" -> faixaAssistente.respondendo("São 23 horas e 58 minutos.")
+                    else -> faixaAssistente.esconder()
+                }
+            }
+        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_ASSISTENTE"))
         // toca o primeiro resultado de uma busca: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_MIDIA --es tipo video --es q "texto"
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) {
@@ -521,7 +532,11 @@ class InicioActivity : Activity() {
         if (playerMidia.ehVideo) telaVideo.atualizar() else musica.sincronizarLocal()
     }
 
+    /** A tela que estava por baixo quando o vídeo abriu (a busca, ou o início quando o pedido veio por voz): é para onde o vídeo volta. */
+    private var origemVideo = "midia"
+
     private fun abrirVideo(lista: List<Resultado>, i: Int) {
+        if (!telaVideo.aberto) origemVideo = atual
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
         playerMidia.tocarVideo(lista, i)
@@ -540,9 +555,10 @@ class InicioActivity : Activity() {
         girando = true
         destinoCubo = ""
         telaVideo.cobrir(true)
-        Cubo.preparar(telaVideo, telaMidia)
-        Cubo.aplicar(telaVideo, telaMidia, 0f, 1, metade())
-        animarCubo(telaVideo, telaMidia, 1, 0f, 90f) { terminarGiro(telaVideo, telaMidia, true); fecharVideo() }
+        val debaixo = tela(origemVideo)
+        Cubo.preparar(telaVideo, debaixo)
+        Cubo.aplicar(telaVideo, debaixo, 0f, 1, metade())
+        animarCubo(telaVideo, debaixo, 1, 0f, 90f) { terminarGiro(telaVideo, debaixo, true); fecharVideo() }
     }
 
     private fun tocarMusicaDoYoutube(lista: List<Resultado>, i: Int) {
@@ -563,7 +579,7 @@ class InicioActivity : Activity() {
         } else {
             animarCubo(de, para, 1, grauAtual, 0f) {
                 terminarGiro(de, para, false)
-                if (destinoCubo.isEmpty()) { telaMidia.visibility = View.VISIBLE; telaVideo.cobrir(false) }      // desistiu: o vídeo continua
+                if (destinoCubo.isEmpty()) { tela(origemVideo).visibility = View.VISIBLE; telaVideo.cobrir(false) }      // desistiu: o vídeo continua
             }
         }
     }
@@ -609,7 +625,7 @@ class InicioActivity : Activity() {
             return true
         }
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
-        if (atual != "inicio" && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
+        if ((atual != "inicio" || telaVideo.aberto) && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     arrastando = e.rawX < BORDA_GESTO.d() && !(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY))
@@ -627,7 +643,7 @@ class InicioActivity : Activity() {
                         cancela.recycle()
                         modoCubo = !emDetalheAtual()
                         if (modoCubo) {
-                            if (telaVideo.aberto) { destinoCubo = ""; deCubo = telaVideo; paraCubo = telaMidia; telaVideo.cobrir(true) }
+                            if (telaVideo.aberto) { destinoCubo = ""; deCubo = telaVideo; paraCubo = tela(origemVideo); telaVideo.cobrir(true) }
                             else { destinoCubo = destinoVoltar(); deCubo = tela(atual); paraCubo = tela(destinoCubo) }
                             Cubo.preparar(deCubo!!, paraCubo!!)
                             fundo.parar()      // fundo parado enquanto o dedo gira a caixa

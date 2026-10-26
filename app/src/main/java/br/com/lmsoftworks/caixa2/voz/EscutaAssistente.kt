@@ -30,7 +30,7 @@ class EscutaAssistente(
         const val NIVEL_ALVO = 4500f
         const val NIVEL_SILENCIO = 25f
         const val FALA_MINIMA = 900f           // volume (RMS) acima do qual conta como "falando"
-        const val SILENCIO_FINAL_MS = 1000L     // quanto silêncio depois da fala encerra o pedido
+        const val SILENCIO_FINAL_MS = 700L     // quanto silêncio depois da fala encerra o pedido
         const val ESPERA_FALA_MS = 5000L        // quanto espera a pessoa começar a falar
         const val PEDIDO_MAXIMO_MS = 10000L
     }
@@ -87,8 +87,10 @@ class EscutaAssistente(
     fun cancelarPedido() {
         pedindo = false
         aoPedido = null
-        try { reconhecedor.reset() } catch (_: Throwable) {}
+        limpar = true          // quem zera o reconhecedor é a thread do microfone (mexer nele de outra thread corrompe a memória)
     }
+
+    @Volatile private var limpar = false
 
     private fun laco(gr: AudioRecord) {
         val bloco = ShortArray(1600) // 0,1 s
@@ -98,6 +100,7 @@ class EscutaAssistente(
             while (rodando) {
                 val n = gr.read(bloco, 0, bloco.size)
                 if (n <= 0) continue
+                if (limpar) { limpar = false; reconhecedor.reset() }
                 var soma = 0.0
                 for (i in 0 until n) soma += bloco[i] * bloco[i].toDouble()
                 val rmsBruto = sqrt(soma / n).toFloat()

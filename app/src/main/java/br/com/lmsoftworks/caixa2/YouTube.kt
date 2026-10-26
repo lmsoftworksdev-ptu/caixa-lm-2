@@ -49,6 +49,9 @@ object YouTube {
     @Volatile
     private var iniciado = false
 
+    /** Deixa o NewPipe pronto antes do primeiro pedido (a primeira busca fica mais rápida). */
+    fun aquecer() { Thread { try { garantirInicio() } catch (_: Throwable) {} }.start() }
+
     private fun garantirInicio() {
         if (iniciado) return
         synchronized(this) {

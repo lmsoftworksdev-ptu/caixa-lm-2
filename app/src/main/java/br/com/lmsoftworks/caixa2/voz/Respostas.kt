@@ -594,6 +594,64 @@ object Respostas {
         }
     }
 
+    /** Resultado de [entenderPedido]: o que foi dito e, se for mídia, qual (já interpretado). */
+    class Entendimento(val texto: String, val pedido: PedidoMidia?)
+
+    /**
+     * UMA chamada ao Gemini faz as duas coisas: transcreve o áudio do pedido e já decide a intenção (música, vídeo ou pergunta)
+     * e qual música/vídeo é (corrigindo artista errado ou nome mal ouvido). Mais rápido que duas chamadas em sequência.
+     * Devolve null se não conseguiu (sem internet, chave recusada, travou); texto vazio = sem fala clara.
+     */
+    fun entenderPedido(ctx: Context, wav: ByteArray): Entendimento? {
+        val (chave, modeloConfig) = lerConfig(ctx, "gemini.txt", "", MODELO_GEMINI_PADRAO) ?: return null
+        val base64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
+        val instrucao = "Você é o cérebro de uma caixa de som inteligente brasileira, voltada para MÚSICA. O áudio é um pedido falado " +
+            "em português do Brasil. Faça duas coisas:\n" +
+            "1) \"texto\": transcreva exatamente o que a pessoa disse (vazio se não houver fala clara).\n" +
+            "2) Decida a \"intencao\": \"musica\" (quer ouvir música, artista, álbum ou playlist; inclui só dizer o nome da música ou do " +
+            "artista), \"video\" (quer ASSISTIR vídeo, clipe ou show: disse vídeo, clipe, assistir, ver, ao vivo), \"pergunta\" (quer uma " +
+            "informação: clima, notícias, quem é, quanto custa, quantos graus...) ou \"comando\" (controlar a caixa: volume, pausar, " +
+            "próxima, luzes, alarme, que horas são, abrir uma tela...).\n" +
+            "Se for música ou vídeo, descubra QUAL é, corrigindo erros de reconhecimento e mesmo que o artista dito esteja errado ou " +
+            "faltando (ex.: 'não quero me amarrar Solange Almeida' -> 'Não Quero Me Amarrar Aviões do Forró'); em \"busca\" ponha o melhor " +
+            "texto para procurar no YouTube ('Título Artista'; se pedir só um artista, o artista). Nos outros casos, busca vazia.\n" +
+            "Responda SÓ o JSON: {\"texto\":\"...\",\"intencao\":\"musica|video|pergunta|comando\",\"busca\":\"...\"}"
+        for (modelo in listOf(MODELO_GEMINI_PADRAO, modeloConfig).distinct()) {
+            var tentativas = 0
+            while (tentativas++ < 2) {
+                val corpo = JSONObject()
+                    .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray()
+                        .put(JSONObject().put("text", instrucao))
+                        .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", base64))))))
+                    .put("generationConfig", JSONObject().put("temperature", 0.0).put("maxOutputTokens", 300).put("responseMimeType", "application/json"))
+                val req = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
+                    .header("x-goog-api-key", chave).header("content-type", "application/json")
+                    .post(corpo.toString().toRequestBody("application/json".toMediaType())).build()
+                val (codigo, texto) = try {
+                    Rede.cliente(ctx, leituraSeg = 12).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
+                } catch (e: Exception) { Log.d(TAG, "entenderPedido $modelo: falha de rede: $e"); break }
+                if (codigo == 200) {
+                    try {
+                        val partes = JSONObject(texto).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                        val sb = StringBuilder()
+                        if (partes != null) for (i in 0 until partes.length()) sb.append(partes.optJSONObject(i)?.optString("text").orEmpty())
+                        val j = JSONObject(sb.toString().trim().removePrefix("```json").removeSuffix("```").trim())
+                        val dito = j.optString("texto", "").trim()
+                        val intencao = j.optString("intencao", "").lowercase()
+                        val busca = j.optString("busca", "").trim()
+                        return Entendimento(dito, if (intencao in setOf("musica", "video", "pergunta", "comando")) PedidoMidia(intencao, busca) else null)
+                    } catch (e: Exception) { Log.d(TAG, "entenderPedido: resposta ilegivel: $e"); break }
+                }
+                Log.d(TAG, "entenderPedido $modelo: HTTP $codigo ${texto.replace(Regex("""\s+"""), " ").take(200)}")
+                if (codigo == 401 || codigo == 403) return null
+                if (codigo == 503 || codigo == 429) { Thread.sleep(800); continue }
+                break
+            }
+        }
+        return null
+    }
+
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
     private fun getJson(ctx: Context, url: String): JSONObject? = try {

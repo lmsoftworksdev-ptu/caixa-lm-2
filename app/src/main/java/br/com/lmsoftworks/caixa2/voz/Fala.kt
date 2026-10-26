@@ -32,7 +32,7 @@ object Fala {
         tts = TextToSpeech(ctx.applicationContext) { status ->
             val t = tts
             if (status == TextToSpeech.SUCCESS && t != null) {
-                t.setSpeechRate(1.2f)
+                t.setSpeechRate(1.45f)
                 val r = t.setLanguage(Locale("pt", "BR"))
                 pronto = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
                 Log.d(TAG, "fala: idioma pt-BR resultado=$r pronto=$pronto")
@@ -128,7 +128,7 @@ object Fala {
             mp.prepare()
             mp.start()
             // fala natural, de gente: mais rápida, sem ficar fina (a voz do Tradutor é lenta)
-            try { mp.playbackParams = mp.playbackParams.setSpeed(1.28f).setPitch(1.0f) } catch (_: Throwable) {}
+            try { mp.playbackParams = mp.playbackParams.setSpeed(1.55f).setPitch(1.0f) } catch (_: Throwable) {}
         } catch (e: Exception) {
             Log.d(TAG, "nao consegui tocar a fala online: $e")
             tocarArquivos(arquivos, arquivos.size, minha, fim)

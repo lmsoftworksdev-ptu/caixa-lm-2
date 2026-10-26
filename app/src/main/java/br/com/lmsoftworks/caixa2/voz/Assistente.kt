@@ -78,7 +78,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
         // "Alexa" como o brasileiro fala; "caixa" só vale com ei/oi/ok/olá na frente (a palavra solta aparece em qualquer conversa).
         private val VARIANTES_ALEXA = listOf(
-            "alexia", "a lexia", "alexa", "alexsa", "alequisa", "alequiza", "alequissa", "ale quisa", "ale quiza",
+            "alexia", "alexi", "a lexia", "alexa", "alexsa", "alequisa", "alequiza", "alequissa", "ale quisa", "ale quiza",
             "quiza", "quisa", "quissa", "a quiza", "a quisa", "ale kisa", "ale quissa", "a lequisa", "a lequiza", "alecha", "alexi a", "alexis a", "alé quisa", "alé quiza"
         )
         private val VARIANTES_CAIXA = listOf("caixa", "caixa de som", "ele eme")
@@ -86,8 +86,13 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         private val FRASES_CHAMADA = VARIANTES_ALEXA + PREFIXOS.flatMap { p -> (VARIANTES_ALEXA + VARIANTES_CAIXA).map { p + it } }
         private fun alt(l: List<String>) = l.joinToString("|") { Regex.escape(it) }
         private val REGEX_CHAMADA_FALANDO = Regex("""^(ei|oi|ok|olá) (${alt(VARIANTES_ALEXA.filter { it.length >= 6 } + VARIANTES_CAIXA)})$""")
-        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(VARIANTES_ALEXA + VARIANTES_CAIXA)})|(?:${alt(VARIANTES_ALEXA)}))$""")
-        private val SO_NOME = setOf("alexia", "alexa", "a lexia", "alexsa", "alexi a", "alexis a")
+        // Fragmentos curtos ("quiza", "quisa"...) ficam só na gramática como "isca"; sozinhos NÃO chamam (disparavam à toa).
+        private val FRAGMENTOS = setOf("quiza", "quisa", "quissa", "a quiza", "a quisa", "a lequisa", "a lequiza")
+        private val NOMES_FORTES = VARIANTES_ALEXA.filter { it !in FRAGMENTOS }
+        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(NOMES_FORTES + VARIANTES_CAIXA)})|(?:${alt(NOMES_FORTES)}))$""")
+        private const val CONFIANCA_MINIMA = 0.55
+        private const val ESPERA_ENTRE_CHAMADAS_MS = 2500L
+        private val SO_NOME = setOf("alexia", "alexi", "alexa", "a lexia", "alexsa", "alexi a", "alexis a")
         private val ISCAS = listOf(
             "alice", "caixa", "a caixa", "de som", "caixa de som", "som", "ele", "eme", "ei", "oi", "ok", "olá",
             "e", "a", "o", "que", "de", "um", "uma", "não", "sim", "tá", "né", "é", "ah", "eh", "então", "ale", "leite"
@@ -113,6 +118,8 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     fun iniciar() {
         if (ativo) return
         ativo = true
+        YouTube.aquecer()
+        faixa.preparar()
         Fala.preparar(ctx)
         if (!modeloInstalado()) { estado = EstadoVoz.SEM_MODELO; Log.w(TAG, "modelo de voz ausente em ${pastaModelo()}"); return }
         if (modelo != null) comecarChamada() else carregarModelo()
@@ -150,6 +157,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         try {
             val gramatica = (FRASES_CHAMADA + ISCAS).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val rec = Recognizer(m, TAXA, gramatica)
+            rec.setWords(true)       // devolve a confiança de cada palavra
             val e = EscutaAssistente(rec) { campo, json -> verificarChamada(json, campo) }
             if (!e.iniciar()) { rec.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
@@ -164,11 +172,27 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun lerCampo(json: String?, campo: String): String =
         try { JSONObject(json ?: "{}").optString(campo, "") } catch (_: Exception) { "" }
 
+    /** Menor confiança entre as palavras reconhecidas (0..1); 1 se o Vosk não informou. */
+    private fun confianca(json: String?): Double = try {
+        val arr = JSONObject(json ?: "{}").optJSONArray("result")
+        var menor = 1.0
+        if (arr != null) for (i in 0 until arr.length()) menor = minOf(menor, arr.getJSONObject(i).optDouble("conf", 1.0))
+        menor
+    } catch (_: Exception) { 1.0 }
+
+    private var ultimaChamada = 0L
+
     private fun verificarChamada(json: String?, campo: String) {
+        // só vale a frase TERMINADA (parcial muda a todo instante e disparava com ruído) e com confiança alta
+        if (campo != "text") return
         val texto = lerCampo(json, campo)
         if (texto.isBlank() || texto == "[unk]") return
-        Log.d(TAG, "chamada ($campo): \"$texto\"")
-        if (!REGEX_CHAMADA.matches(texto)) return
+        val conf = confianca(json)
+        Log.d(TAG, "chamada ($campo): \"$texto\" confianca=${"%.2f".format(conf)}")
+        if (!REGEX_CHAMADA.matches(texto) || conf < CONFIANCA_MINIMA) return
+        val agora = System.currentTimeMillis()
+        if (agora - ultimaChamada < ESPERA_ENTRE_CHAMADAS_MS) return
+        ultimaChamada = agora
         // Enquanto a caixa FALA o microfone ouve a voz dela: só vale "ei/oi/ok + nome" completo (ou o nome sozinho, terminado).
         val soNome = texto in SO_NOME
         if (Fala.falando && !soNome && !REGEX_CHAMADA_FALANDO.matches(texto)) return
@@ -201,6 +225,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun acordou() {
         val e = escuta ?: return
         e.cancelarPedido()
+        entendimento = null
         val minha = ++geracao
         Fala.parar()
         acoes.acordarTela()
@@ -220,10 +245,13 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         estado = EstadoVoz.PENSANDO
         if (busca == null) faixa.pensando("")
         Thread {
-            val texto = try { Respostas.transcrever(ctx, wav) } catch (e: Throwable) { Log.w(TAG, "transcricao falhou", e); null }
-            main.post { if (minha == geracao) terminouTranscricao(texto, minha) }
+            // busca por voz só precisa do texto; o pedido normal já vem interpretado (intenção + qual música/vídeo)
+            val e = try { Respostas.entenderPedido(ctx, wav) } catch (ex: Throwable) { Log.w(TAG, "entendimento falhou", ex); null }
+            main.post { if (minha == geracao) { entendimento = e; terminouTranscricao(e?.texto, minha) } }
         }.start()
     }
+
+    private var entendimento: Respostas.Entendimento? = null
 
     private fun terminouTranscricao(texto: String?, minha: Int) {
         Log.d(TAG, "transcricao: ${texto?.let { "\"$it\"" } ?: "FALHOU (sem resposta do Gemini)"}")
@@ -250,7 +278,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             is ComandoVoz.Desconhecido -> resposta("Não consegui entender.", texto, erro = true)
             // sem verbo de tocar: o Gemini decide se é um pedido de música/vídeo (pelo título, artista...) ou uma pergunta
             is ComandoVoz.Pergunta -> resolverMidia(texto, comando.texto, null, minha)
-            // "tocar X": o Gemini descobre qual música é (corrige artista errado, nome mal ouvido)
+            // "tocar X": o Gemini já descobriu qual música é (corrige artista errado, nome mal ouvido)
             is ComandoVoz.Tocar -> resolverMidia(texto, comando.consulta, comando, minha)
             else -> {
                 val frase = acoes.executar(comando, texto)
@@ -266,11 +294,12 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun resolverMidia(dito: String, consulta: String, tocar: ComandoVoz.Tocar?, minha: Int) {
         estado = EstadoVoz.PENSANDO
         faixa.pensando(dito)
+        val jaInterpretado = entendimento?.pedido
         Thread {
-            val pedido = try { Respostas.interpretarMidia(ctx, dito) } catch (e: Throwable) { null }
+            val pedido = jaInterpretado ?: try { Respostas.interpretarMidia(ctx, dito) } catch (e: Throwable) { null }
             Log.d(TAG, "interpretacao: ${pedido?.intencao} / ${pedido?.busca}")
             if (minha != geracao) return@Thread
-            val ehPergunta = tocar == null && (pedido == null || pedido.intencao == "pergunta")
+            val ehPergunta = tocar == null && (pedido == null || pedido.intencao == "pergunta" || pedido.intencao == "comando")
             if (ehPergunta) { main.post { if (minha == geracao) responderPergunta(consulta, dito, minha) }; return@Thread }
             val soAudio = when {
                 tocar != null && !tocar.modoIndefinido -> tocar.soAudio
@@ -283,9 +312,12 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 if (minha != geracao) return@post
                 if (lista == null) { resposta("Não consegui buscar agora.", dito, erro = true); return@post }
                 if (lista.isEmpty()) { resposta("Não encontrei $busca.", dito, erro = true); return@post }
+                // entendeu: tira a tela do assistente na hora e abre a música/vídeo; a caixa só confirma em voz alta
+                faixa.esconder()
                 acoes.tocar(lista, soAudio)
                 val gerundio = tocar?.gerundio ?: if (soAudio) "Tocando" else "Reproduzindo"
-                resposta("$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}", dito, falar = "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}")
+                estado = EstadoVoz.RESPONDENDO
+                Fala.falar(ctx, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}") { fim(0) }
             }
         }.start()
     }
