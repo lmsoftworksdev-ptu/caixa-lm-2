@@ -1,0 +1,76 @@
+# Compila o app e publica o APK em "Releases". Roda:
+#  - sozinho todo dia, e só publica se o NewPipe Extractor (o motor do YouTube) lançou versão nova;
+#  - quando você envia mudanças para o GitHub (push na main);
+#  - quando você manda rodar à mão (Actions > Compilar e publicar > Run workflow).
+name: Compilar e publicar
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ver se o NewPipe lançou versão nova
+        id: np
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ULTIMA=$(gh api repos/TeamNewPipe/NewPipeExtractor/releases/latest --jq .tag_name)
+          ATUAL=$(grep -o 'NewPipeExtractor:v[0-9.]*' app/build.gradle.kts | cut -d: -f2)
+          echo "NewPipe: instalado $ATUAL, mais novo $ULTIMA"
+          echo "ultima=$ULTIMA" >> "$GITHUB_OUTPUT"
+          if [ "$ULTIMA" != "$ATUAL" ]; then echo "mudou=sim" >> "$GITHUB_OUTPUT"; else echo "mudou=nao" >> "$GITHUB_OUTPUT"; fi
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$ULTIMA" = "$ATUAL" ]; then echo "publicar=nao" >> "$GITHUB_OUTPUT"; else echo "publicar=sim" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Trocar para a versão nova do NewPipe
+        if: steps.np.outputs.publicar == 'sim' && steps.np.outputs.mudou == 'sim'
+        run: sed -i "s/NewPipeExtractor:v[0-9.]*/NewPipeExtractor:${{ steps.np.outputs.ultima }}/" app/build.gradle.kts
+
+      - uses: actions/setup-java@v4
+        if: steps.np.outputs.publicar == 'sim'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Chave de assinatura (a mesma do app instalado na caixa)
+        if: steps.np.outputs.publicar == 'sim'
+        env:
+          CHAVE: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p ~/.android
+          echo "$CHAVE" | base64 -d > ~/.android/debug.keystore
+
+      - name: Compilar
+        if: steps.np.outputs.publicar == 'sim'
+        run: |
+          chmod +x gradlew
+          VERSAO=$((100 + GITHUB_RUN_NUMBER))
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+          ./gradlew assembleDebug --no-daemon -PversionCode=$VERSAO -PversionName="1.$VERSAO"
+          cp app/build/outputs/apk/debug/app-debug.apk CaixaLM2.apk
+
+      - name: Publicar o APK
+        if: steps.np.outputs.publicar == 'sim'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSAO" CaixaLM2.apk --title "Versão $VERSAO (NewPipe ${{ steps.np.outputs.ultima }})" --notes "Gerado automaticamente."
+
+      - name: Guardar a versão nova do NewPipe no repositório
+        if: steps.np.outputs.publicar == 'sim' && steps.np.outputs.mudou == 'sim'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "NewPipe Extractor ${{ steps.np.outputs.ultima }}"
+          git push
