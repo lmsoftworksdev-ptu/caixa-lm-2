@@ -203,6 +203,12 @@ class InicioActivity : Activity() {
                 }
             }
         }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_ASSISTENTE"))
+        // pula para 35 s antes do fim da música atual (testa a emenda): adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_FIM
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                relogio.post { playerMidia.buscar(playerMidia.duracaoMs - 35_000) }
+            }
+        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_FIM"))
         // toca o primeiro resultado de uma busca: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_MIDIA --es tipo video --es q "texto"
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) {
@@ -210,7 +216,9 @@ class InicioActivity : Activity() {
                 val q = i.getStringExtra("q") ?: "musica"
                 Thread {
                     try {
-                        val lista = YouTube.buscar(q, musicaTeste)
+                        var lista = YouTube.buscar(q, musicaTeste)
+                        // q2 = uma segunda busca cujo 1º resultado entra na fila logo depois (para testar a emenda com faixas diferentes)
+                        i.getStringExtra("q2")?.let { q2 -> lista = listOf(lista[0]) + YouTube.buscar(q2, musicaTeste && i.getStringExtra("q2video") == null).take(1) }
                         relogio.post { if (musicaTeste) tocarMusicaDoYoutube(lista, 0) else abrirVideo(lista, 0) }
                     } catch (e: Exception) { android.util.Log.w("Midia", "teste falhou", e) }
                 }.start()
@@ -494,15 +502,15 @@ class InicioActivity : Activity() {
     }
 
     private fun aplicarVolumeVoz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume): String? {
-        val p = painelVolume.porcento
+        val n = painelVolume.nivel
         return when (c.acao) {
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.AUMENTAR -> { painelVolume.definirPorcento(p + 10); "Volume ${minOf(100, p + 10)}%" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DIMINUIR -> { painelVolume.definirPorcento(p - 10); "Volume ${maxOf(0, p - 10)}%" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MAXIMO -> { painelVolume.definirPorcento(100); "Volume máximo" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MINIMO -> { painelVolume.definirPorcento(10); "Volume mínimo" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.NIVEL -> { painelVolume.definirPorcento(c.nivel * 10); "Volume ${c.nivel * 10}%" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MUDO -> { if (p > 0) painelVolume.alternarMudo(); null }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DESMUTAR -> { if (p == 0) painelVolume.alternarMudo(); "Som ligado" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.AUMENTAR -> { painelVolume.definirNivel(n + 1); "Volume ${minOf(10, n + 1)}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DIMINUIR -> { painelVolume.definirNivel(n - 1); "Volume ${maxOf(0, n - 1)}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MAXIMO -> { painelVolume.definirNivel(10); "Volume máximo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MINIMO -> { painelVolume.definirNivel(1); "Volume mínimo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.NIVEL -> { painelVolume.definirNivel(c.nivel); "Volume ${c.nivel}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MUDO -> { if (n > 0) painelVolume.alternarMudo(); null }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DESMUTAR -> { if (n == 0) painelVolume.alternarMudo(); "Som ligado" }
         }
     }
 

@@ -303,7 +303,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         emFade = true
         fadeInicio = SystemClock.uptimeMillis()
         fadeDuracao = duracao
-        Log.d(TAG, "emenda: começando ${preparada?.item?.titulo} em $duracao ms")
+        Log.d(TAG, "emenda: começando ${preparada?.item?.titulo} em $duracao ms (próxima: estado=${novo.playbackState}, duração=${novo.duration / 1000}s)")
     }
 
     private fun passoDoFade() {
@@ -332,6 +332,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         tocando = novo.isPlaying || novo.playWhenReady
         val minha = ++geracao
         carregarCapa(pre.item, minha)
+        Log.d(TAG, "emenda concluída: ${pre.item.titulo} (duração ${novo.duration / 1000}s, posição ${novo.currentPosition / 1000}s, estado ${novo.playbackState})")
         aoMudar()
     }
 

@@ -157,10 +157,18 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         atualizar()
     }
 
+    /** Volume em níveis de 0 a 10 (é o que a tela mostra e o que se pede por voz: "volume 7"). */
+    val nivel: Int get() = Math.round(porcento / 10f)
+
+    /** Cada toque em + ou − (e cada tecla) muda um NÍVEL (de 0 a 10). */
     private fun passo(sentido: Int) {
-        if (sentido > 0 && audio.getStreamVolume(canal) >= limite) aoNoLimite?.invoke()
-        audio.setStreamVolume(canal, (audio.getStreamVolume(canal) + sentido).coerceIn(0, limite), 0)
-        atualizar()
+        if (sentido > 0 && nivel >= 10) aoNoLimite?.invoke()
+        definir((nivel + sentido).coerceIn(0, 10) / 10f)
+    }
+
+    fun definirNivel(n: Int) {
+        definir(n.coerceIn(0, 10) / 10f)
+        mostrarTemporario()
     }
 
     /** Define o volume em porcentagem (0 a 100, em relação ao limite) e mostra a pílula. Usado pelo assistente de voz. */
@@ -190,7 +198,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         val mudo = audio.getStreamVolume(canal) == 0
         ultimoPorcento = p
         barra.valor = p / 100f
-        rotulo.text = "$p%"
+        rotulo.text = "$nivel"
         botaoMudo.trocarIcone(if (mudo) R.drawable.ic_volume_x else R.drawable.ic_volume_2)
         aoMudar(p, mudo)
         if (abrindo) { handler.removeCallbacks(fecharSozinho); handler.postDelayed(fecharSozinho, 4000) }

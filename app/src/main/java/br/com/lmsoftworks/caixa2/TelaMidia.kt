@@ -391,7 +391,7 @@ class TelaMidia(
             efeitoToque()
             if (rotulo != null) addView(texto(c, rotulo, 30, Color.WHITE), LayoutParams(-2, -2, Gravity.CENTER))
             else addView(icone(c, recurso, 32, Color.WHITE), LayoutParams(32.d(), 32.d(), Gravity.CENTER))
-            layoutParams = LinearLayout.LayoutParams(0, 64.d(), peso).apply { setMargins(4.d(), 4.d(), 4.d(), 4.d()) }
+            layoutParams = LinearLayout.LayoutParams(0, 77.d(), peso).apply { setMargins(4.d(), 4.d(), 4.d(), 4.d()) }
         }
 
     private fun montarTeclado() {

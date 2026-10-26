@@ -96,6 +96,14 @@ object InterpretadorVoz {
     private val PALAVRAS_VIDEO = setOf("video", "vídeo", "videos", "vídeos")
     private val ARTIGOS_INICIAIS = setOf("a", "o", "as", "os", "uma", "um", "de", "da", "do", "pela", "pelo")
 
+    /** "volume dez" -> "volume 10": o Gemini às vezes escreve o número por extenso. */
+    private fun numerosPorExtenso(t: String): String {
+        if (!t.contains("volume")) return t
+        val m = mapOf("zero" to "0", "um" to "1", "uma" to "1", "dois" to "2", "duas" to "2", "três" to "3", "tres" to "3", "quatro" to "4",
+            "cinco" to "5", "seis" to "6", "sete" to "7", "oito" to "8", "nove" to "9", "dez" to "10")
+        return t.split(" ").joinToString(" ") { m[it] ?: it }
+    }
+
     private val RE_NIVEL = Regex("""volume\s+(?:no\s+|em\s+|para\s+|pra\s+|na\s+)?(\d{1,3})""")
     private val RE_TEMPO = Regex("""(\d{1,3})\s*(segundo|segundos|minuto|minutos)""")
 
@@ -139,7 +147,7 @@ object InterpretadorVoz {
         if (primeira in DESLIGAR) return ComandoVoz.Desligar
 
         // Volume
-        RE_NIVEL.find(texto)?.let { return ComandoVoz.Volume(AcaoVolume.NIVEL, it.groupValues[1].toInt().coerceIn(0, 10)) }
+        RE_NIVEL.find(numerosPorExtenso(texto))?.let { return ComandoVoz.Volume(AcaoVolume.NIVEL, it.groupValues[1].toInt().coerceIn(0, 10)) }
         if (tem("volume maximo") || tem("volume máximo") || tem("volume no maximo") || tem("volume no máximo"))
             return ComandoVoz.Volume(AcaoVolume.MAXIMO)
         if (tem("volume minimo") || tem("volume mínimo")) return ComandoVoz.Volume(AcaoVolume.MINIMO)
