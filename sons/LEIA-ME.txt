@@ -1,0 +1,10 @@
+Sons da caixa (copiados do projeto antigo "Caixa de Som LM", pasta app/src/main/res/raw).
+Os mesmos arquivos estao em app/src/main/res/raw, que e de onde o app toca.
+
+som_inicio         toca quando a caixa liga (so depois de um reinicio de verdade, nao quando o app e reinstalado)
+som_desligar       toca ao desligar ou reiniciar, depois de apagar a fita e desconectar o celular
+som_bt_conectando  celular comecando a conectar por Bluetooth
+som_bt_conectado   celular conectado por Bluetooth
+som_volume_max     tentou passar do volume maximo
+bip_chamada        reservado: assistente (palavra de ativacao)
+som_pesquisando    reservado: assistente (pensando)

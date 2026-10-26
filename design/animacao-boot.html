@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animação de boot LM Sound</title>
+<style>
+  :root { --fundo: #000; --texto: #f2f5f8; --mudo: #9aa7b5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0e12; color: var(--texto); font-family: "Segoe UI", system-ui, sans-serif; padding: 24px; }
+  h1 { font-weight: 600; font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 16px; color: var(--mudo); font-size: 14px; max-width: 760px; }
+  .palco { width: min(100%, 960px); aspect-ratio: 16/9; background: var(--fundo); border: 1px solid #222a33; border-radius: 12px; overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .barra { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  button { background: #1a2029; color: var(--texto); border: 1px solid #2f3a47; border-radius: 8px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #263241; }
+  button:focus-visible { outline: 2px solid #7fe3ff; outline-offset: 2px; }
+  .info { font-size: 13px; color: var(--mudo); }
+</style>
+</head>
+<body>
+<h1>Animação de boot — LM Sound</h1>
+<p class="sub">Horizontal 16:9. Dura cerca de 3 s na abertura (toca uma vez) e depois fica pulsando em repetição até o app abrir. Os valores estão no topo do código para ajustar.</p>
+
+<div class="palco"><canvas id="c" width="1280" height="720" aria-label="Animação de boot com caixa de som pulsando"></canvas></div>
+<div class="barra">
+  <button id="rep">Reiniciar</button>
+  <span class="info" id="tempo"></span>
+</div>
+
+<script>
+window.onerror = (m, u, l) => { document.getElementById('tempo').textContent = 'Erro no script: ' + m + ' (linha ' + l + ')'; };
+// ---- Parâmetros ajustáveis ----
+const P = {
+  corFundo: '#000000',
+  corCorpo: '#11161d',
+  corBorda: '#2ec4b6',
+  corBrilho: '#7fe3ff',
+  corTexto: '#9aa7b5',
+  creditos: 'Desenvolvido por Lucas Monteiro.',
+  duracaoAbertura: 3.0,   // segundos da parte que toca uma vez
+  periodoLoop: 1.6,       // segundos de cada pulso na repetição
+  aneis: [210, 170, 134], // raios dos anéis em px (de fora para dentro)
+  barras: 5               // barras de som que sobem na abertura
+};
+
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2 - 30;
+
+const ease = t => t < 0 ? 0 : t > 1 ? 1 : 1 - Math.pow(1 - t, 3);
+const clamp01 = t => Math.max(0, Math.min(1, t));
+
+function rr(x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+function caixa(s, glow) {
+  g.save(); g.translate(CX, CY); g.scale(s, s);
+  g.shadowColor = P.corBrilho; g.shadowBlur = 30 * glow;
+  rr(-78, -108, 156, 216, 27); g.fillStyle = P.corCorpo; g.fill();
+  g.lineWidth = 8; g.strokeStyle = P.corBrilho; g.stroke();
+  g.shadowBlur = 0; g.lineWidth = 7; g.strokeStyle = P.corBorda;
+  g.beginPath(); g.arc(0, -60, 18, 0, 7); g.stroke();
+  g.fillStyle = P.corBrilho; g.beginPath(); g.arc(0, -60, 6, 0, 7); g.fill();
+  g.beginPath(); g.arc(0, 36, 45, 0, 7); g.stroke();
+  g.globalAlpha = .7; g.lineWidth = 5; g.beginPath(); g.arc(0, 36, 24, 0, 7); g.stroke(); g.globalAlpha = 1;
+  g.fillStyle = P.corBrilho; g.beginPath(); g.arc(0, 36, 10, 0, 7); g.fill();
+  g.restore();
+}
+
+// t em segundos desde o início. Função pura: o mesmo desenho gera os quadros reais depois.
+function desenhar(t) {
+  g.fillStyle = P.corFundo; g.fillRect(0, 0, W, H);
+  const ab = clamp01(t / P.duracaoAbertura);          // progresso da abertura
+  const loop = t > P.duracaoAbertura ? (t - P.duracaoAbertura) % P.periodoLoop / P.periodoLoop : 0;
+  const pulso = t > P.duracaoAbertura ? 0.5 - 0.5 * Math.cos(loop * 2 * Math.PI) : 0;
+
+  // Anéis: surgem em sequência e depois pulsam
+  P.aneis.forEach((r, i) => {
+    const ini = 0.30 + i * 0.12;
+    const k = ease((ab - ini) / 0.30);
+    const respira = 1 + 0.04 * Math.sin((loop - i * 0.12) * 2 * Math.PI) * (t > P.duracaoAbertura ? 1 : 0);
+    g.globalAlpha = k * (0.45 + 0.4 * (1 - i / 3)) * (t > P.duracaoAbertura ? 0.75 + 0.25 * Math.sin((loop - i * 0.12) * 2 * Math.PI) : 1);
+    g.lineWidth = 3 + (2 - i);
+    g.strokeStyle = i === 2 ? P.corBrilho : P.corBorda;
+    g.beginPath(); g.arc(CX, CY, r * (0.6 + 0.4 * k) * respira, 0, 7); g.stroke();
+  });
+  g.globalAlpha = 1;
+
+  // Caixa de som: entra crescendo, depois bate no ritmo
+  const entra = ease(ab / 0.30);
+  const escala = (0.4 + 0.6 * entra) * (1 + 0.06 * pulso);
+  g.globalAlpha = entra;
+  caixa(escala, 0.4 + pulso);
+  g.globalAlpha = 1;
+
+  // Barras de som dos lados, sobem na abertura e ficam oscilando
+  const bw = 14, gap = 22, base = CY + 90;
+  for (let lado = -1; lado <= 1; lado += 2) {
+    for (let i = 0; i < P.barras; i++) {
+      const k = ease((ab - 0.55 - i * 0.04) / 0.25);
+      const osc = t > P.duracaoAbertura ? 0.5 + 0.5 * Math.sin(loop * 2 * Math.PI * 1 + i * 1.3) : 1;
+      const h = (30 + 60 * Math.sin((i + 1) / (P.barras + 1) * Math.PI)) * k * (0.55 + 0.45 * osc);
+      const x = CX + lado * (260 + i * gap) - bw / 2;
+      g.fillStyle = P.corBrilho; g.globalAlpha = 0.85 * k;
+      rr(x, base - h, bw, h, 7); g.fill();
+    }
+  }
+  g.globalAlpha = 1;
+
+  // Crédito no rodapé
+  g.globalAlpha = ease((ab - 0.75) / 0.25);
+  g.fillStyle = P.corTexto; g.font = '22px "Segoe UI", system-ui, sans-serif'; g.textAlign = 'center';
+  g.fillText(P.creditos, CX, H - 48);
+  g.globalAlpha = 1;
+}
+
+const fixo = new URLSearchParams(location.search).get('t');
+let t0 = performance.now();
+const rotulo = document.getElementById('tempo');
+function quadro(agora) {
+  const t = fixo !== null ? parseFloat(fixo) : Math.max(0, (agora - t0) / 1000);
+  desenhar(t);
+  rotulo.textContent = t < P.duracaoAbertura ? 'Abertura… ' + t.toFixed(1) + ' s' : 'Em repetição (até o app abrir)';
+  requestAnimationFrame(quadro);
+}
+document.getElementById('rep').onclick = () => { t0 = performance.now(); };
+requestAnimationFrame(quadro);
+</script>
+</body>
+</html>

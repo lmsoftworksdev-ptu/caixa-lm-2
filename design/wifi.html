@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tela Wi-Fi - LM Sound</title>
+<style>
+  :root { --bg:#07122b; --panel:#0d2048; --line:#ffffff1f; --blue:#2f7bff; --blue2:#6aa8ff; --red:#ff3b4e; --text:#eaf1ff; --muted:#8fa6d4; --ok:#29d391; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #02060f; color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 900px; line-height: 1.5; }
+  .grade { display: flex; flex-wrap: wrap; gap: 28px; }
+  figure { margin: 0; }
+  figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 640px; line-height: 1.5; }
+  figcaption b { color: var(--text); }
+  .moldura { width: 640px; height: 360px; position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #1b2c55; }
+  .tela { width: 1280px; height: 720px; transform: scale(.5); transform-origin: 0 0; position: absolute; left: 0; top: 0;
+          background: linear-gradient(135deg, hsl(215,75%,9%), hsl(223,70%,17%) 60%, hsl(205,75%,24%)); overflow: hidden; }
+  .tela::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 82% 17%, #ff3b4e29, transparent 520px); }
+  .ondas { position: absolute; left: 0; right: 0; bottom: 0; height: 120px; background: linear-gradient(transparent, #6aa8ff22); }
+  .barra { position: absolute; top: 0; left: 0; right: 0; height: 64px; display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 28px; font-size: 18px; color: var(--muted); background: linear-gradient(#050d22cc, transparent); }
+  .barra b { color: var(--text); font-weight: 600; }
+  .cartao { position: absolute; left: 48px; right: 48px; top: 88px; bottom: 36px; background: #0d2048cc; border: 1px solid var(--line); border-radius: 24px; padding: 24px 26px 14px; }
+  .topo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+  .topo span { font-size: 42px; font-weight: 600; }
+  .toggle { width: 64px; height: 34px; border-radius: 17px; background: var(--blue); position: relative; }
+  .toggle::after { content: ""; position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; background: #fff; }
+  .rede { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .rede.on { background: #2f7bff26; border-radius: 16px; border-bottom-color: transparent; }
+  .rede .nm { flex: 1; font-size: 26px; } .rede small { display: block; font-size: 18px; color: var(--muted); margin-top: 4px; }
+  .rede.on small { color: var(--ok); }
+  .cad { width: 24px; height: 24px; margin-right: 18px; stroke: var(--muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 22px; width: 32px; } .bars i { width: 5px; background: #ffffff33; border-radius: 2px; } .bars i.on { background: var(--blue2); }
+  .gesto { position: absolute; left: 0; top: 50%; width: 7px; height: 88px; margin-top: -44px; background: #ffffff46; border-radius: 4px; }
+  .bolha { position: absolute; left: 40px; top: 50%; width: 68px; height: 68px; margin-top: -34px; border-radius: 50%; background: #2f7bffcc; display: grid; place-items: center; box-shadow: 0 0 30px #2f7bff88; }
+  .bolha svg { width: 40px; height: 40px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .btn { display: inline-block; padding: 14px 28px; border-radius: 16px; font-size: 22px; background: var(--blue); }
+  .btn.g { background: #ffffff1f; border: 1px solid var(--line); } .btn.r { background: var(--red); }
+  /* senha */
+  .senha { position: absolute; inset: 64px 48px 28px 48px; }
+  .senha .l1 { display: flex; align-items: center; gap: 12px; } .senha .l1 b { flex: 1; font-size: 30px; font-weight: 600; }
+  .campo { display: flex; gap: 12px; margin-top: 14px; } .campo .c { flex: 1; height: 62px; border-radius: 14px; background: #050d22; border: 1px solid var(--line); padding: 0 20px; display: flex; align-items: center; font-size: 28px; letter-spacing: 4px; }
+  .campo .btn { height: 62px; display: grid; place-items: center; padding: 0 24px; }
+  .tec { position: absolute; left: 0; right: 0; top: 150px; bottom: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tec div { flex: 1; display: flex; gap: 8px; padding: 0; } .tec i { flex: 1; font-style: normal; border-radius: 12px; background: #ffffff18; border: 1px solid var(--line); display: grid; place-items: center; font-size: 26px; }
+  .tec i.w { flex: 1.5; } .tec i.sp { flex: 5; }
+  /* janela */
+  .escuro { position: absolute; inset: 0; background: #000000a0; }
+  .janela { position: absolute; left: 320px; top: 190px; width: 640px; background: #0d2048; border: 1px solid var(--line); border-radius: 26px; padding: 28px 32px; }
+  .janela h2 { margin: 0; font-size: 30px; font-weight: 600; } .janela .ok { color: var(--ok); font-size: 22px; margin: 4px 0 18px; } .janela p { margin: 0 0 8px; font-size: 22px; color: var(--muted); }
+  .janela .bt { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+  ul { color: var(--muted); font-size: 14px; line-height: 1.7; max-width: 1000px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Tela Wi-Fi — referência para ajustes</h1>
+<p class="sub">Mesmo visual do celular (1280×720, reduzido à metade aqui). Diga o que quer mudar em cada tela e eu aplico no app. A barrinha branca no canto esquerdo indica que dá para deslizar para a direita e voltar.</p>
+
+<div class="grade">
+
+<figure>
+  <div class="moldura"><div class="tela">
+    <div class="barra"><span>Wi-Fi POINT-Lucas-2G</span><b>20:48</b></div>
+    <div class="cartao">
+      <div class="topo"><span>Wi-Fi</span><div class="toggle"></div></div>
+      <div class="rede on"><div class="nm">POINT-Lucas-2G<small>Conectado</small></div><svg class="cad" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="bars"><i class="on" style="height:8px"></i><i class="on" style="height:12px"></i><i class="on" style="height:17px"></i><i class="on" style="height:22px"></i></div></div>
+      <div class="rede"><div class="nm">Volte amanha 2.4 G<small>Protegida (WPA2)</small></div><svg class="cad" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="bars"><i class="on" style="height:8px"></i><i class="on" style="height:12px"></i><i class="on" style="height:17px"></i><i class="on" style="height:22px"></i></div></div>
+      <div class="rede"><div class="nm">BASILIO-WIFI6<small>Protegida (WPA2)</small></div><svg class="cad" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="bars"><i class="on" style="height:8px"></i><i class="on" style="height:12px"></i><i class="on" style="height:17px"></i><i style="height:22px"></i></div></div>
+      <div class="rede"><div class="nm">H&amp;V 2.4G<small>Protegida (WPA2)</small></div><svg class="cad" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="bars"><i class="on" style="height:8px"></i><i class="on" style="height:12px"></i><i class="on" style="height:17px"></i><i style="height:22px"></i></div></div>
+    </div>
+    <div class="ondas"></div><div class="gesto"></div>
+  </div></div>
+  <figcaption><b>1. Lista.</b> Sem título nem subtítulo. “Wi-Fi” grande dentro da caixa, com o botão liga/desliga no mesmo lugar e mais distância da lista. A rede conectada fica no topo.</figcaption>
+</figure>
+
+<figure>
+  <div class="moldura"><div class="tela">
+    <div class="barra"><span>Sem Wi-Fi</span><b>20:48</b></div>
+    <div class="senha">
+      <div class="l1"><b>Senha de BASILIO-WIFI6</b><span class="btn g">Cancelar</span><span class="btn">Conectar</span></div>
+      <div class="campo"><div class="c">••••••••</div><span class="btn g">Mostrar</span></div>
+      <div class="tec">
+        <div><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i><i>6</i><i>7</i><i>8</i><i>9</i><i>0</i></div>
+        <div><i>q</i><i>w</i><i>e</i><i>r</i><i>t</i><i>y</i><i>u</i><i>i</i><i>o</i><i>p</i></div>
+        <div><i>a</i><i>s</i><i>d</i><i>f</i><i>g</i><i>h</i><i>j</i><i>k</i><i>l</i></div>
+        <div><i class="w">Aa</i><i>z</i><i>x</i><i>c</i><i>v</i><i>b</i><i>n</i><i>m</i><i class="w">⌫</i></div>
+        <div><i class="w">#+=</i><i class="sp"></i><i>.</i></div>
+      </div>
+    </div>
+    <div class="gesto"></div>
+  </div></div>
+  <figcaption><b>2. Senha.</b> Abre em tela cheia ao tocar numa rede protegida. Teclado grande com letras, números e símbolos (#+=). Deslizar do canto esquerdo cancela.</figcaption>
+</figure>
+
+<figure>
+  <div class="moldura"><div class="tela">
+    <div class="barra"><span>Wi-Fi POINT-Lucas-2G</span><b>20:48</b></div>
+    <div class="cartao"><div class="topo"><span>Wi-Fi</span><div class="toggle"></div></div></div>
+    <div class="escuro"></div>
+    <div class="janela"><h2>POINT-Lucas-2G</h2><div class="ok">Conectado</div><p>Endereço IP: 192.168.0.42</p><p>Sinal: 4/4</p><p>Segurança: WPA2</p><div class="bt"><span class="btn g">Fechar</span><span class="btn r">Esquecer rede</span></div></div>
+    <div class="gesto"></div>
+  </div></div>
+  <figcaption><b>3. Detalhes.</b> Aparece ao tocar na rede conectada ou numa rede salva (que também tem “Conectar”). Rede aberta conecta direto.</figcaption>
+</figure>
+
+
+</div>
+<ul>
+  <li>Nada de botão “Início” na barra de cima: o gesto o substitui nas telas internas.</li>
+  <li>Deslizar do canto esquerdo para a direita volta para o Início (ou fecha o teclado/janela, se estiverem abertos). Vale em todas as telas internas futuras.</li>
+</ul>
+</body>
+</html>

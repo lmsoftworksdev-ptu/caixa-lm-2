@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logo LM Sound</title>
+<style>
+  :root {
+    --fundo: #000000;
+    --corpo: #11161d;
+    --borda: #2ec4b6;
+    --brilho: #7fe3ff;
+    --texto: #f2f5f8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0e12; color: var(--texto); font-family: "Segoe UI", system-ui, sans-serif; padding: 24px; }
+  h1 { font-weight: 600; font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 24px; color: #9aa7b5; font-size: 14px; }
+  .grade { display: flex; flex-wrap: wrap; gap: 24px; }
+  figure { margin: 0; }
+  figcaption { font-size: 14px; color: #9aa7b5; margin-top: 8px; }
+  figcaption b { color: var(--texto); }
+  .tela { background: var(--fundo); border: 1px solid #222a33; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+  .retrato { width: 270px; height: 480px; }
+  .paisagem { width: min(100%, 800px); aspect-ratio: 16/9; }
+  .paisagem svg { width: 70%; height: auto; }
+  svg { display: block; }
+  .onda { transform-origin: center; animation: pulsa 2.4s ease-in-out infinite; }
+  .onda.b { animation-delay: .4s; } .onda.c { animation-delay: .8s; }
+  .pulso { transform-box: fill-box; transform-origin: center; animation: bate 1.2s ease-in-out infinite; }
+  @keyframes bate { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes pulsa { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .onda { animation: none; opacity: .8; } .pulso { animation: none; } }
+</style>
+</head>
+<body>
+<h1>Logo LM Sound</h1>
+<p class="sub">Tudo na horizontal (16:9). Caixa de som no centro pulsando com os anéis; rodapé com o crédito.</p>
+
+<div class="grade">
+  <figure>
+    <div class="tela paisagem">
+      <svg viewBox="0 0 360 200" role="img" aria-label="Versão horizontal">
+        <g transform="translate(180,86)">
+          <circle class="onda c" r="80" fill="none" stroke="var(--borda)" stroke-width="2"/>
+          <circle class="onda b" r="65" fill="none" stroke="var(--borda)" stroke-width="3"/>
+          <circle class="onda" r="50" fill="none" stroke="var(--brilho)" stroke-width="4"/>
+          <g class="pulso">
+          <rect x="-26" y="-36" width="52" height="72" rx="9" fill="var(--corpo)" stroke="var(--brilho)" stroke-width="3.5"/>
+          <circle cx="0" cy="-20" r="6" fill="none" stroke="var(--borda)" stroke-width="2.5"/>
+          <circle cx="0" cy="-20" r="2" fill="var(--brilho)"/>
+          <circle cx="0" cy="12" r="15" fill="none" stroke="var(--borda)" stroke-width="3"/>
+          <circle cx="0" cy="12" r="8" fill="none" stroke="var(--borda)" stroke-width="2" opacity=".7"/>
+          <circle cx="0" cy="12" r="3.5" fill="var(--brilho)"/>
+        </g>
+        </g>
+        <text x="180" y="188" text-anchor="middle" font-size="12" fill="#9aa7b5">Desenvolvido por Lucas Monteiro.</text>
+      </svg>
+    </div>
+    <figcaption><b>Horizontal 16:9</b> — como o celular fica sempre deitado. Na tela de ligar, a imagem será girada para aparecer em pé nesse sentido</figcaption>
+  </figure>
+</div>
+</body>
+</html>
