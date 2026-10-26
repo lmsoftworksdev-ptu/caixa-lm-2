@@ -42,6 +42,33 @@ object TonsVoz {
         }.start()
     }
 
+    private var pensando: android.media.MediaPlayer? = null
+
+    /** O som de "pensando" do projeto anterior (som_pesquisando.mp3): fica repetindo, baixinho, até a caixa terminar de pensar. */
+    fun comecarPensando(ctx: Context) {
+        if (pensando != null) return
+        try {
+            val mp = android.media.MediaPlayer()
+            val afd = ctx.resources.openRawResourceFd(br.com.lmsoftworks.caixa2.R.raw.som_pesquisando)
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            @Suppress("DEPRECATION")
+            mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
+            mp.isLooping = true
+            mp.setVolume(0.12f, 0.12f)
+            mp.setOnPreparedListener { if (pensando === it) it.start() }
+            pensando = mp
+            mp.prepareAsync()
+        } catch (e: Throwable) { Log.d("Assistente", "som de pensando falhou: $e") }
+    }
+
+    fun pararPensando() {
+        val mp = pensando ?: return
+        pensando = null
+        try { mp.stop() } catch (_: Throwable) {}
+        mp.release()
+    }
+
     fun ativacao() = tocar(listOf(660.0 to 90, 880.0 to 120))
     fun confirmacao() = tocar(listOf(784.0 to 80, 988.0 to 110))
     fun erro() = tocar(listOf(520.0 to 100, 392.0 to 140))
@@ -128,6 +155,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     fun parar() {
         ativo = false
         geracao++
+        TonsVoz.pararPensando()
         escuta?.parar(); escuta = null
         Fala.parar()
         acoes.abafar(false)
@@ -219,6 +247,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     /** O usuário tocou na tela: para de falar, de pesquisar e de ouvir, e fecha o assistente. */
     fun cancelar() {
         geracao++
+        TonsVoz.pararPensando()
         Fala.parar()
         escuta?.cancelarPedido()
         val busca = destinoBusca; destinoBusca = null
@@ -231,6 +260,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun acordou() {
         val e = escuta ?: return
         e.cancelarPedido()
+        TonsVoz.pararPensando()
         entendimento = null
         val minha = ++geracao
         Fala.parar()
@@ -249,6 +279,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             return
         }
         estado = EstadoVoz.PENSANDO
+        TonsVoz.comecarPensando(ctx)
         if (busca == null) faixa.pensando("")
         Thread {
             // busca por voz só precisa do texto; o pedido normal já vem interpretado (intenção + qual música/vídeo)
@@ -264,6 +295,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         val busca = destinoBusca
         if (busca != null) {
             destinoBusca = null
+            TonsVoz.pararPensando()
             estado = EstadoVoz.ESPERANDO_CHAMADA
             acoes.abafar(false)
             if (texto.isNullOrBlank()) TonsVoz.erro() else TonsVoz.confirmacao()
@@ -319,6 +351,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 if (lista == null) { resposta("Não consegui buscar agora.", dito, erro = true); return@post }
                 if (lista.isEmpty()) { resposta("Não encontrei $busca.", dito, erro = true); return@post }
                 // entendeu: tira a tela do assistente na hora e abre a música/vídeo; a caixa só confirma em voz alta
+                TonsVoz.pararPensando()
                 faixa.esconder()
                 acoes.tocar(lista, soAudio)
                 val gerundio = tocar?.gerundio ?: if (soAudio) "Tocando" else "Reproduzindo"
@@ -346,6 +379,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     /** Mostra a resposta na faixa e (se [falar] não for null) fala em voz alta; ao terminar, volta o volume. */
     private fun resposta(texto: String, dito: String, erro: Boolean = false, falar: String? = null) {
+        TonsVoz.pararPensando()
         estado = EstadoVoz.RESPONDENDO
         faixa.respondendo(texto, dito)
         if (erro) TonsVoz.erro() else TonsVoz.confirmacao()
