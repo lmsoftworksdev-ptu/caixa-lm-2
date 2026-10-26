@@ -80,8 +80,23 @@ object YouTube {
     }
 
     /** "Em alta": o YouTube não tem mais a página de tendências, então usamos buscas que trazem o que está mais visto. */
-    fun emAlta(musica: Boolean): List<Resultado> =
-        buscar(if (musica) "músicas mais tocadas do brasil" else "vídeos em alta brasil hoje", musica)
+    fun emAlta(musica: Boolean): List<Resultado> {
+        if (musica) return buscar("músicas mais tocadas do brasil", true)
+        // "Vídeos em alta" só de MÚSICA: clipes oficiais de vários estilos, misturados (um de cada estilo por vez), de 1,5 a 10 minutos
+        val consultas = listOf("clipe oficial 2026", "clipe oficial sertanejo", "clipe oficial funk", "clipe oficial pagode", "clipe oficial pop brasil", "clipe oficial forró")
+        val listas = arrayOfNulls<List<Resultado>>(consultas.size)
+        consultas.mapIndexed { i, q -> Thread { listas[i] = try { buscar(q, false) } catch (e: Exception) { null } }.also { it.start() } }.forEach { it.join() }
+        val filtradas = listas.map { l -> l.orEmpty().filter { it.duracaoSeg in 90..600 } }
+        if (filtradas.all { it.isEmpty() }) throw java.io.IOException("sem clipes")
+        val vistos = HashSet<String>()
+        val saida = ArrayList<Resultado>()
+        var k = 0
+        while (saida.size < 14 && filtradas.any { k < it.size }) {
+            for (l in filtradas) l.getOrNull(k)?.let { if (vistos.add(it.url)) saida.add(it) }
+            k++
+        }
+        return saida
+    }
 
     private fun executarBusca(consulta: String, filtro: String): List<Resultado> {
         val handler = service.searchQHFactory.fromQuery(consulta, listOf(filtro), "")
