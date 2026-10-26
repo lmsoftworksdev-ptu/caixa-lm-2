@@ -26,13 +26,13 @@ class EscutaAssistente(
     private companion object {
         const val TAG = "Assistente"
         const val TAXA = 16000
-        const val GANHO_MAXIMO = 10f
-        const val NIVEL_ALVO = 4500f
+        const val GANHO_MAXIMO = 22f
+        const val NIVEL_ALVO = 7000f
         const val NIVEL_SILENCIO = 25f
         const val FALA_MINIMA = 900f           // volume (RMS) acima do qual conta como "falando"
-        const val SILENCIO_FINAL_MS = 700L     // quanto silêncio depois da fala encerra o pedido
-        const val ESPERA_FALA_MS = 5000L        // quanto espera a pessoa começar a falar
-        const val PEDIDO_MAXIMO_MS = 10000L
+        const val SILENCIO_FINAL_MS = 1400L     // quanto silêncio depois da fala encerra o pedido
+        const val ESPERA_FALA_MS = 9000L        // quanto espera a pessoa começar a falar
+        const val PEDIDO_MAXIMO_MS = 16000L
     }
 
     @Volatile private var rodando = false
@@ -135,7 +135,7 @@ class EscutaAssistente(
         blocosVistos++
         if (blocosVistos > 2 && rmsBruto < pisoRuido) pisoRuido = rmsBruto
         // "falando" = bem acima do ruído de fundo da sala (que a própria sala define) e acima de um mínimo
-        val falando = blocosVistos > 2 && rmsBruto > max(FALA_MINIMA / 3f, pisoRuido * 2.5f)
+        val falando = blocosVistos > 2 && rmsBruto > max(110f, pisoRuido * 2.5f)
         if (blocosVistos % 5 == 0) Log.d(TAG, "pedido: volume=${rmsBruto.toInt()} piso=${if (pisoRuido == Float.MAX_VALUE) -1 else pisoRuido.toInt()} falando=$falando")
         val bytes = ByteArray(n * 2)
         for (i in 0 until n) { bytes[2 * i] = (bloco[i].toInt() and 0xff).toByte(); bytes[2 * i + 1] = (bloco[i].toInt() shr 8).toByte() }

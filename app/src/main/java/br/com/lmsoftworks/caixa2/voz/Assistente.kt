@@ -181,13 +181,19 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     } catch (_: Exception) { 1.0 }
 
     private var ultimaChamada = 0L
+    private var ultimoParcial = ""
+    private var parciaisIguais = 0
 
     private fun verificarChamada(json: String?, campo: String) {
-        // só vale a frase TERMINADA (parcial muda a todo instante e disparava com ruído) e com confiança alta
-        if (campo != "text") return
         val texto = lerCampo(json, campo)
-        if (texto.isBlank() || texto == "[unk]") return
-        val conf = confianca(json)
+        if (texto.isBlank() || texto == "[unk]") { parciaisIguais = 0; return }
+        // Frase terminada: vale com confiança. Parcial (mais rápido, ~0,3 s): só se a MESMA palavra estável aparecer 3 vezes seguidas.
+        if (campo == "partial") {
+            if (texto == ultimoParcial) parciaisIguais++ else { ultimoParcial = texto; parciaisIguais = 1 }
+            if (parciaisIguais < 3 || !REGEX_CHAMADA.matches(texto)) return
+        }
+        val conf = if (campo == "partial") 1.0 else confianca(json)
+        parciaisIguais = 0; ultimoParcial = ""
         Log.d(TAG, "chamada ($campo): \"$texto\" confianca=${"%.2f".format(conf)}")
         if (!REGEX_CHAMADA.matches(texto) || conf < CONFIANCA_MINIMA) return
         val agora = System.currentTimeMillis()
