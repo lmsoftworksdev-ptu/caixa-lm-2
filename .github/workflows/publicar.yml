@@ -48,9 +48,10 @@ jobs:
           CHAVE: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$CHAVE" ]; then echo "::error::O segredo DEBUG_KEYSTORE_BASE64 esta vazio ou nao existe. Sem ele o APK sai assinado com outra chave e a caixa recusa a atualizacao."; exit 1; fi
-          mkdir -p ~/.android
-          echo "$CHAVE" | base64 -d > ~/.android/debug.keystore
-          keytool -list -keystore ~/.android/debug.keystore -storepass android | grep -i "fingerprint"
+          echo "$CHAVE" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+          FP=$(keytool -list -keystore "$RUNNER_TEMP/debug.keystore" -storepass android | grep -i "SHA-256\|SHA256" || true)
+          echo "::notice::Chave do segredo: $FP"
 
       - name: Compilar
         if: steps.np.outputs.publicar == 'sim'
@@ -60,6 +61,8 @@ jobs:
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
           ./gradlew assembleDebug --no-daemon -PversionCode=$VERSAO -PversionName="1.$VERSAO"
           cp app/build/outputs/apk/debug/app-debug.apk CaixaLM2.apk
+          FP=$(keytool -printcert -jarfile CaixaLM2.apk | grep -i "SHA256" || true)
+          echo "::notice::Chave do APK gerado: $FP"
 
       - name: Publicar o APK
         if: steps.np.outputs.publicar == 'sim'

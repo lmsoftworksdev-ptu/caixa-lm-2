@@ -17,6 +17,16 @@ android {
         ndk { abiFilters += listOf("armeabi-v7a") }
     }
 
+    // O GitHub passa o caminho da chave de assinatura (a mesma do app instalado na caixa); no computador vale a debug.keystore padrão.
+    System.getenv("KEYSTORE_PATH")?.let { caminho ->
+        signingConfigs.getByName("debug") {
+            storeFile = file(caminho)
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
