@@ -6,7 +6,9 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import androidx.media3.common.C
 import android.view.SurfaceView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -57,6 +59,13 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun criar(): ExoPlayer {
         player?.let { return it }
+        val p = novoExo()
+        player = p
+        superficie?.let { p.setVideoSurfaceView(it) }
+        return p
+    }
+
+    private fun novoExo(): ExoPlayer {
         val controle = DefaultLoadControl.Builder()
             .setBufferDurationsMs(50_000, 120_000, 10_000, 20_000)      // só começa com 10 s guardados; depois de uma parada, espera 20 s
             .setTargetBufferBytes(56 * 1024 * 1024)
@@ -64,6 +73,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val p = ExoPlayer.Builder(ctx).setLoadControl(controle).build()
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                if (p !== player) return
                 if (state == Player.STATE_BUFFERING) Log.d(TAG, "carregando: posicao=${p.currentPosition / 1000}s, guardado adiante=${(p.bufferedPosition - p.currentPosition) / 1000}s")
                 if (state == Player.STATE_BUFFERING) carregando = true
                 else if (state == Player.STATE_READY) { carregando = false; if (p.currentPosition > 20_000) recuperacoes = 0 }
@@ -73,9 +83,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 }
                 aoMudar()
             }
-            override fun onRenderedFirstFrame() { primeiroQuadro = true; aoMudar() }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { tocando = isPlaying; aoMudar() }
+            override fun onRenderedFirstFrame() { if (p === player) { primeiroQuadro = true; aoMudar() } }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; aoMudar() } }
             override fun onPlayerError(e: PlaybackException) {
+                if (p !== player) { if (p === proximoPlayer) cancelarFade(); return }
                 Log.w(TAG, "erro no player", e)
                 // endereço vencido ou rede que caiu: pede um novo e retoma de onde parou (até 3 vezes)
                 val r = item
@@ -88,8 +99,6 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 Log.d(TAG, "rede: ${bps / 1_000_000.0} Mbps estimados")
             }
         })
-        player = p
-        superficie?.let { p.setVideoSurfaceView(it) }
         return p
     }
 
@@ -108,13 +117,15 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun iniciarItem(r: Resultado, video: Boolean, recuperando: Boolean = false) {
         if (!recuperando) { recuperacoes = 0; retomarEm = 0L }
         val minha = ++geracao
+        val pronta = preparada?.takeIf { it.item.url == r.url && !video }
+        cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false; capa = null; relacionados = emptyList(); primeiroQuadro = false
         player?.stop(); player?.clearMediaItems()
         aoMudar()
         carregarCapa(r, minha)
         Thread {
             try {
-                val fonte = YouTube.resolver(r.url, soAudio = !video)
+                val fonte = pronta?.fonte ?: YouTube.resolver(r.url, soAudio = !video)
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
@@ -143,6 +154,15 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun tocarFonte(fonte: Fonte) {
         val p = criar()
+        val origem = origemDe(fonte)
+        p.setMediaSource(origem, retomarEm)
+        retomarEm = 0L
+        p.volume = volumeBase
+        p.prepare()
+        p.playWhenReady = true
+    }
+
+    private fun origemDe(fonte: Fonte): MediaSource {
         val origem: MediaSource = if (fonte.unicaUrl != null) {
             fabricaPara(fonte.unicaUrl).createMediaSource(MediaItem.fromUri(fonte.unicaUrl))
         } else {
@@ -151,10 +171,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 fabricaPara(fonte.audioUrl!!).createMediaSource(MediaItem.fromUri(fonte.audioUrl))
             )
         }
-        p.setMediaSource(origem, retomarEm)
-        retomarEm = 0L
-        p.prepare()
-        p.playWhenReady = true
+        return origem
     }
 
     /** As URLs do YouTube só aceitam o "nome de aplicativo" (User-Agent) do cliente que as gerou (c= na URL). */
@@ -188,6 +205,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun alternar() {
         val p = player ?: return
+        if (emFade) cancelarFade()
         if (erro != null) { item?.let { iniciarItem(it, ehVideo) }; return }
         if (p.isPlaying) p.pause() else { if (p.playbackState == Player.STATE_ENDED) p.seekTo(0); p.play() }
     }
@@ -208,12 +226,109 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun pular(ms: Long) { player?.let { it.seekTo((it.currentPosition + ms).coerceIn(0, duracaoMs.takeIf { d -> d > 0 } ?: Long.MAX_VALUE)) }; aoMudar() }
 
-    fun buscar(ms: Long) { player?.seekTo(ms.coerceAtLeast(0)); aoMudar() }
+    fun buscar(ms: Long) { if (emFade) cancelarFade(); player?.seekTo(ms.coerceAtLeast(0)); aoMudar() }
 
-    fun pausar() { player?.pause() }
+    fun pausar() { if (emFade) cancelarFade(); player?.pause() }
 
     /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
-    fun volume(v: Float) { player?.volume = v }
+    fun volume(v: Float) { volumeBase = v; if (!emFade) player?.volume = v }
+
+    // ---------------------------------------------------------------- emenda entre músicas (crossfade)
+    //
+    // Perto do fim de uma música a próxima já é preparada; nos últimos 5 s a atual baixa e a próxima sobe, tocando juntas, sem parada.
+
+    private class Preparada(val item: Resultado, val fonte: Fonte)
+
+    private var volumeBase = 1f
+    private var preparada: Preparada? = null
+    private var preparando = false
+    private var proximoPlayer: ExoPlayer? = null
+    private var emFade = false
+    private var fadeInicio = 0L
+    private var fadeDuracao = 5000L
+    private val duracaoFade = 5000L
+
+    private val vigia = object : Runnable {
+        override fun run() {
+            try { verificarEmenda() } catch (e: Throwable) { Log.w(TAG, "emenda", e) }
+            handler.postDelayed(this, 200)
+        }
+    }
+
+    init { handler.post(vigia) }
+
+    private fun proximoDaFila(): Resultado? = fila.getOrNull(indice + 1) ?: relacionados.firstOrNull()
+
+    private fun verificarEmenda() {
+        val p = player ?: return
+        if (ehVideo || !tocando || item == null || erro != null) return
+        if (emFade) { passoDoFade(); return }
+        val dur = p.duration
+        if (dur == C.TIME_UNSET || dur < 25_000) return
+        val resta = dur - p.currentPosition
+        val prox = proximoDaFila() ?: return
+        // 25 s antes do fim: resolve o endereço da próxima (demora uns 2 s) para estar pronta na hora
+        if (resta < 25_000 && preparada?.item?.url != prox.url && !preparando) {
+            preparando = true
+            val minha = geracao
+            Thread {
+                val f = try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
+                handler.post { preparando = false; if (f != null && minha == geracao) preparada = Preparada(prox, f) }
+            }.start()
+        }
+        if (resta <= duracaoFade + 300 && preparada?.item?.url == prox.url) iniciarFade(prox, resta.coerceAtLeast(1500L))
+    }
+
+    private fun iniciarFade(prox: Resultado, duracao: Long) {
+        val pre = preparada ?: return
+        val novo = novoExo()
+        novo.volume = 0f
+        novo.setMediaSource(origemDe(pre.fonte))
+        novo.prepare()
+        novo.playWhenReady = true
+        proximoPlayer = novo
+        emFade = true
+        fadeInicio = SystemClock.uptimeMillis()
+        fadeDuracao = duracao
+        Log.d(TAG, "emenda: começando ${prox.titulo} em ${duracao} ms")
+    }
+
+    private fun passoDoFade() {
+        val atual = player ?: return
+        val novo = proximoPlayer ?: return
+        val f = ((SystemClock.uptimeMillis() - fadeInicio).toFloat() / fadeDuracao).coerceIn(0f, 1f)
+        atual.volume = (1f - f) * volumeBase
+        novo.volume = f * volumeBase
+        if (f >= 1f || atual.playbackState == Player.STATE_ENDED) concluirFade()
+    }
+
+    private fun concluirFade() {
+        val antigo = player ?: return
+        val novo = proximoPlayer ?: return
+        val pre = preparada ?: return
+        proximoPlayer = null; emFade = false; preparada = null
+        if (indice + 1 >= fila.size) { fila = fila + relacionados; relacionados = emptyList() }
+        player = novo
+        try { antigo.release() } catch (_: Throwable) {}
+        indice++
+        item = pre.item
+        relacionados = pre.fonte.relacionados
+        capa = null; erro = null; carregando = false; recuperacoes = 0
+        novo.volume = volumeBase
+        tocando = novo.isPlaying
+        val minha = ++geracao
+        carregarCapa(pre.item, minha)
+        aoMudar()
+    }
+
+    private fun cancelarFade() {
+        preparada = null
+        if (!emFade) return
+        emFade = false
+        try { proximoPlayer?.release() } catch (_: Throwable) {}
+        proximoPlayer = null
+        player?.volume = volumeBase
+    }
 
     /** A imagem do vídeo vai para esta superfície (some da tela quando é null). */
     fun ligarImagem(v: SurfaceView?) {
@@ -224,6 +339,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun parar() {
         geracao++
+        cancelarFade()
         player?.stop(); player?.clearMediaItems()
         item = null; fila = emptyList(); indice = -1; carregando = false; tocando = false; erro = null; capa = null; ehVideo = false; primeiroQuadro = false
         aoMudar()
@@ -231,6 +347,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun liberar() {
         geracao++
+        cancelarFade()
+        handler.removeCallbacks(vigia)
         player?.release(); player = null
     }
 }
