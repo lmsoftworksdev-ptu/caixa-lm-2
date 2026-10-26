@@ -163,7 +163,13 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         atualizar()
     }
 
-    private fun alternarMudo() {
+    /** Define o volume em porcentagem (0 a 100, em relação ao limite) e mostra a pílula. Usado pelo assistente de voz. */
+    fun definirPorcento(p: Int) {
+        definir(p.coerceIn(0, 100) / 100f)
+        mostrarTemporario()
+    }
+
+    fun alternarMudo() {
         val atual = audio.getStreamVolume(canal)
         if (atual > 0) { anterior = atual; audio.setStreamVolume(canal, 0, 0) }
         else audio.setStreamVolume(canal, if (anterior > 0) anterior.coerceAtMost(limite) else limite / 2, 0)

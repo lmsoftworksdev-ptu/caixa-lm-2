@@ -40,14 +40,13 @@ class TelaInicio(c: Context, private val aoAbrir: (String) -> Unit) : LinearLayo
         val botoes = LinearLayout(c).apply { orientation = HORIZONTAL; clipChildren = false }
         clipChildren = false
         val lista = listOf(
-            arrayOf("ouvir", "Ouvir", "#5AA0FF", "#1D52C9"),
             arrayOf("midia", "Mídia", "#FF6B8A", "#6A35D9"),
             arrayOf("led", "Luzes LED", "#FFB757", "#E0560F"),
             arrayOf("wifi", "Wi-Fi", "#47DFEB", "#0C8AA0"),
             arrayOf("alarmes", "Alarmes", "#FF7AC0", "#B81F7A")
         )
         val icones = mapOf(
-            "ouvir" to R.drawable.ic_mic, "midia" to R.drawable.ic_video,
+            "midia" to R.drawable.ic_video,
             "led" to R.drawable.ic_bulb, "wifi" to R.drawable.ic_wifi,
             "alarmes" to R.drawable.ic_alarme
         )

@@ -48,4 +48,8 @@ dependencies {
     // Busca e extração de streams do YouTube
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Palavra de ativação offline ("Alexa")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75")
 }

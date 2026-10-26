@@ -212,6 +212,9 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun pausar() { player?.pause() }
 
+    /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
+    fun volume(v: Float) { player?.volume = v }
+
     /** A imagem do vídeo vai para esta superfície (some da tela quando é null). */
     fun ligarImagem(v: SurfaceView?) {
         val antiga = superficie

@@ -90,6 +90,10 @@ class TelaMidia(
     private val textoBusca = texto(c, "", 25, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val dica = texto(c, "Pesquisar vídeos e músicas", 25, Color.parseColor("#B8C6E6"))
     private val botaoLimpar = FrameLayout(c)
+    private val microfone = FrameLayout(c)
+    /** Quem trata o toque no microfone (liga a escuta do assistente). */
+    var aoMicrofone: (() -> Unit)? = null
+    private var pulsoMic: ValueAnimator? = null
     private val barra = FrameLayout(c)
     private val area = LinearLayout(c)
     private val teclado = LinearLayout(c)
@@ -116,10 +120,10 @@ class TelaMidia(
             addView(icone(c, R.drawable.ic_fechar, 22, Color.WHITE), LayoutParams(22.d(), 22.d(), Gravity.CENTER))
         }
         barra.addView(botaoLimpar, LayoutParams(40.d(), 40.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 84.d() })
-        val microfone = FrameLayout(c).apply {
+        microfone.apply {
             background = fundoArredondado(Color.parseColor("#33FFFFFF"), 25.d())
             isClickable = true
-            setOnClickListener { avisoVoz() }
+            setOnClickListener { aoMicrofone?.invoke() ?: avisoVoz() }
             addView(icone(c, R.drawable.ic_mic, 28, Color.WHITE), LayoutParams(28.d(), 28.d(), Gravity.CENTER))
         }
         barra.addView(microfone, LayoutParams(50.d(), 50.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 8.d() })
@@ -337,6 +341,34 @@ class TelaMidia(
         textoBusca.text = consulta
         dica.visibility = if (consulta.isEmpty()) View.VISIBLE else View.GONE
         botaoLimpar.visibility = if (consulta.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Busca por voz: o microfone fica vermelho, pulsando, e a barra mostra "Ouvindo…". */
+    fun ouvindoVoz(sim: Boolean) {
+        pulsoMic?.cancel(); pulsoMic = null
+        principal.removeCallbacks(restaurarDica)
+        if (sim) {
+            fecharTeclado()
+            microfone.background = fundoArredondado(Cfg.VERMELHO, 25.d())
+            dica.text = "Ouvindo…"; dica.visibility = View.VISIBLE
+            pulsoMic = ValueAnimator.ofFloat(1f, 1.18f).apply {
+                duration = 600; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+                addUpdateListener { microfone.scaleX = it.animatedValue as Float; microfone.scaleY = it.animatedValue as Float }
+                start()
+            }
+        } else {
+            microfone.scaleX = 1f; microfone.scaleY = 1f
+            microfone.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 25.d())
+            restaurarDica.run()
+        }
+    }
+
+    /** Escreve [texto] na barra e pesquisa (usado pela busca por voz). */
+    fun pesquisar(texto: String) {
+        consulta = texto
+        atualizarBarra()
+        fecharTeclado()
+        buscar()
     }
 
     private fun avisoVoz() {

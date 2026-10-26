@@ -35,6 +35,8 @@ class InicioActivity : Activity() {
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
     private lateinit var modalAtualizacao: ModalAtualizacao
+    private lateinit var faixaAssistente: br.com.lmsoftworks.caixa2.voz.FaixaAssistente
+    private lateinit var assistente: br.com.lmsoftworks.caixa2.voz.Assistente
     private lateinit var alarmes: AlarmeControle
     private lateinit var telaAlarmes: TelaAlarmes
     private lateinit var telaAlarmeTocando: TelaAlarmeTocando
@@ -119,6 +121,15 @@ class InicioActivity : Activity() {
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia) { fecharVideoAnimado() }
+        faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
+        faixaAssistente.aoToque = { assistente.cancelar() }
+        assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
+        telaMidia.aoMicrofone = {
+            assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { texto ->
+                telaMidia.ouvindoVoz(false)
+                if (texto != null) telaMidia.pesquisar(texto)
+            })
+        }
         telaLed = TelaLed(this, led)
         telaLed.visibility = View.GONE
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
@@ -150,6 +161,7 @@ class InicioActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             addView(conteudo, FrameLayout.LayoutParams(-1, -1))
             addView(telaVideo, FrameLayout.LayoutParams(-1, -1))
+            addView(faixaAssistente, FrameLayout.LayoutParams(-1, -1))
             addView(telaAlarmeTocando, FrameLayout.LayoutParams(-1, -1))
             addView(telaOciosa, FrameLayout.LayoutParams(-1, -1))
             addView(modalEnergia, FrameLayout.LayoutParams(-1, -1))
@@ -221,12 +233,14 @@ class InicioActivity : Activity() {
         relogio.post(temaLed)
         if (apareceu) fundo.iniciar()
         relogio.post(tique)
+        assistente.iniciar()
         Atualizador.conferirAoAbrir(this)
         Atualizador.pendente?.let { if (!modalAtualizacao.aberto) modalAtualizacao.mostrar(it) }
     }
 
     override fun onStop() {
         super.onStop()
+        assistente.parar()
         fundo.parar()
         relogio.removeCallbacksAndMessages(null)
         wifi.parar()
@@ -403,6 +417,92 @@ class InicioActivity : Activity() {
 
     private fun emDetalheAtual() = (atual == "wifi" && telaWifi.emDetalhe) || (atual == "bluetooth" && telaBluetooth.emDetalhe)
 
+    // ------------------------------------------------------------------ assistente de voz
+
+    /** O que o assistente pode mexer no app. Tudo roda na thread principal. */
+    private val acoesAssistente = object : br.com.lmsoftworks.caixa2.voz.AcoesAssistente {
+        override fun acordarTela() { sairOcioso() }
+
+        override fun abafar(sim: Boolean) { playerMidia.volume(if (sim) 0.2f else 1f) }
+
+        override fun videoAberto() = telaVideo.aberto
+
+        override fun tocar(lista: List<Resultado>, soAudio: Boolean) {
+            if (soAudio) { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
+        }
+
+        override fun executar(comando: br.com.lmsoftworks.caixa2.voz.ComandoVoz, textoOuvido: String): String? =
+            executarComando(comando)
+    }
+
+    private fun executarComando(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz): String? {
+        val noVideo = telaVideo.aberto
+        return when (c) {
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pesquisar -> {
+                ir("midia"); telaMidia.pesquisar(c.consulta)
+                "Pesquisando ${br.com.lmsoftworks.caixa2.voz.InterpretadorVoz.consultaFalada(c.consulta)}"
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pausar -> { if (noVideo) { if (playerMidia.tocando) playerMidia.alternar() } else musica.pausar(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Continuar -> { if (noVideo) { if (!playerMidia.tocando) playerMidia.alternar() } else musica.tocar(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Parar -> { if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() }; null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Proxima -> { if (noVideo) playerMidia.proxima() else musica.proxima(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Anterior -> { if (noVideo) playerMidia.anterior() else musica.anterior(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Recomecar -> { if (noVideo) playerMidia.buscar(0) else musica.buscar(0); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.PularTempo -> { if (noVideo || musica.emLocal) playerMidia.pular(c.segundos * 1000L); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.OQueToca ->
+                if (noVideo) playerMidia.item?.titulo?.let { "Está passando $it" } ?: "Não há nada passando."
+                else if (musica.temMusica) "Está tocando ${musica.titulo}" + (if (musica.artista.isNotEmpty()) ", de ${musica.artista}" else "") else "Não há nada tocando."
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Repetir -> "Ainda não sei repetir."
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume -> aplicarVolumeVoz(c)
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Falar -> c.texto
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Voltar -> { if (noVideo) fecharVideoAnimado() else ir("inicio"); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Ir -> { ir(c.destino); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Luz -> comandoLuz(c)
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CriarAlarme -> {
+                val a = alarmes.novo(); a.hora = c.hora; a.minuto = c.minuto; a.ligado = true; alarmes.salvar()
+                "Alarme criado para %d:%02d".format(c.hora, c.minuto)
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Desligar -> "Para desligar a caixa, use o botão de energia."
+            else -> null
+        }
+    }
+
+    /** Pede à busca do YouTube e toca o primeiro resultado (música: só o áudio e tela de música; vídeo: tela cheia). */
+    private fun buscarETocar(consulta: String, soAudio: Boolean, modoIndefinido: Boolean) {
+        val musicaPedida = if (modoIndefinido) !telaVideo.aberto else soAudio
+        Thread {
+            val lista = try { YouTube.buscar(consulta, musicaPedida) } catch (e: Exception) { emptyList() }
+            relogio.post {
+                when {
+                    lista.isEmpty() -> faixaAssistente.respondendo("Não encontrei $consulta.")
+                    musicaPedida -> { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) }
+                    else -> abrirVideo(lista, 0)
+                }
+            }
+        }.start()
+    }
+
+    private fun aplicarVolumeVoz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume): String? {
+        val p = painelVolume.porcento
+        return when (c.acao) {
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.AUMENTAR -> { painelVolume.definirPorcento(p + 10); "Volume ${minOf(100, p + 10)}%" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DIMINUIR -> { painelVolume.definirPorcento(p - 10); "Volume ${maxOf(0, p - 10)}%" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MAXIMO -> { painelVolume.definirPorcento(100); "Volume máximo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MINIMO -> { painelVolume.definirPorcento(10); "Volume mínimo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.NIVEL -> { painelVolume.definirPorcento(c.nivel * 10); "Volume ${c.nivel * 10}%" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MUDO -> { if (p > 0) painelVolume.alternarMudo(); null }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DESMUTAR -> { if (p == 0) painelVolume.alternarMudo(); "Som ligado" }
+        }
+    }
+
+    private fun comandoLuz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Luz): String = when (c.acao) {
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.LIGAR -> { led.definirLigado(true); "Luzes acesas" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.DESLIGAR -> { led.definirLigado(false); "Luzes apagadas" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.COR -> { led.definirModo("fixo"); led.definirCor(c.cor); "Pronto" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.MODO -> { led.definirLigado(true); led.definirModo(c.modo); "Modo ${led.nomeModo()}" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.BRILHO -> { led.definirBrilho(c.brilho); "Brilho ${c.brilho}%" }
+    }
+
     // ------------------------------------------------------------------ mídia (YouTube)
 
     /** O player do YouTube mudou: atualiza a tela de vídeo, a de música, a fita (ritmo) e o fundo. */
@@ -509,7 +609,7 @@ class InicioActivity : Activity() {
             return true
         }
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
-        if (atual != "inicio" && !modalEnergia.aberto && !modalAtualizacao.aberto && alarmeTocando == null) {
+        if (atual != "inicio" && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     arrastando = e.rawX < BORDA_GESTO.d() && !(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY))
