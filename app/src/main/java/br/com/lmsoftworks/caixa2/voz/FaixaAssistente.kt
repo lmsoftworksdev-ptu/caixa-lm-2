@@ -129,8 +129,8 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
 
     init {
         alpha = 0f
-        isClickable = false
         setOnClickListener { aoToque?.invoke() }
+        isClickable = false      // (setOnClickListener liga o clique: tem que desligar DEPOIS, senão a tela inteira fica "tampada" e o toque não passa)
         fundo.scaleType = ImageView.ScaleType.FIT_XY
         addView(fundo, LayoutParams(-1, -1))
         escurecer.background = GradientDrawable().apply {
