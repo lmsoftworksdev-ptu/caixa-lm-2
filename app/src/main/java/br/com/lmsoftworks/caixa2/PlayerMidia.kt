@@ -156,6 +156,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun tocarFonte(fonte: Fonte) {
         val p = criar()
         val origem = origemDe(fonte)
+        p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         p.setMediaSource(origem, retomarEm)
         retomarEm = 0L
         p.volume = volumeBase
@@ -231,6 +232,21 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun pausar() { if (emFade) cancelarFade(); player?.pause() }
 
+    var repetindo = false; private set
+
+    /** Repete a música atual sem parar (sem emenda com a próxima). */
+    fun repetir(ligar: Boolean) {
+        repetindo = ligar
+        cancelarFade()
+        player?.repeatMode = if (ligar) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
+    /** Embaralha o que ainda vai tocar da fila (a música atual continua). */
+    fun embaralhar() {
+        cancelarFade()
+        if (fila.size - indice > 2) fila = fila.take(indice + 1) + fila.drop(indice + 1).shuffled()
+    }
+
     /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
     fun volume(v: Float) { volumeBase = v; if (!emFade) player?.volume = v }
 
@@ -262,7 +278,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun verificarEmenda() {
         val p = player ?: return
-        if (ehVideo || !tocando || item == null || erro != null) return
+        if (ehVideo || !tocando || item == null || erro != null || repetindo) return
         if (emFade) { passoDoFade(); return }
         val dur = p.duration
         if (dur == C.TIME_UNSET || dur < 25_000) return

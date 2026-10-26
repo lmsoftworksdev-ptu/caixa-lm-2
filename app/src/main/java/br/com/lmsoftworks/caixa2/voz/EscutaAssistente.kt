@@ -21,6 +21,7 @@ import kotlin.math.sqrt
  */
 class EscutaAssistente(
     private val reconhecedor: Recognizer,
+    private val comandos: Recognizer?,
     private val aoTexto: (campo: String, json: String) -> Unit
 ) {
     private companion object {
@@ -41,7 +42,7 @@ class EscutaAssistente(
 
     // estado do pedido em andamento (mexido só pela thread do microfone, pedido feito por qualquer uma)
     @Volatile private var pedindo = false
-    private var aoPedido: ((ByteArray?) -> Unit)? = null
+    private var aoPedido: ((ByteArray?, String?) -> Unit)? = null
     private var gravacao = ByteArrayOutputStream()
     private var inicioPedido = 0L
     private var falou = false
@@ -73,7 +74,8 @@ class EscutaAssistente(
     }
 
     /** Passa a gravar o pedido; [fim] recebe o WAV (ou null se a pessoa não falou nada). */
-    fun gravarPedido(fim: (ByteArray?) -> Unit) {
+    fun gravarPedido(fim: (ByteArray?, String?) -> Unit) {
+        limpar = true          // zera os dois reconhecedores (pela thread do microfone) antes de começar o pedido
         aoPedido = fim
         gravacao = ByteArrayOutputStream()
         falou = false
@@ -100,7 +102,7 @@ class EscutaAssistente(
             while (rodando) {
                 val n = gr.read(bloco, 0, bloco.size)
                 if (n <= 0) continue
-                if (limpar) { limpar = false; reconhecedor.reset() }
+                if (limpar) { limpar = false; reconhecedor.reset(); comandos?.reset() }
                 var soma = 0.0
                 for (i in 0 until n) soma += bloco[i] * bloco[i].toDouble()
                 val rmsBruto = sqrt(soma / n).toFloat()
@@ -126,6 +128,7 @@ class EscutaAssistente(
             efeitos.forEach { try { it.release() } catch (_: Throwable) {} }
             efeitos.clear()
             try { reconhecedor.close() } catch (_: Throwable) {}
+            try { comandos?.close() } catch (_: Throwable) {}
         }
     }
 
@@ -140,6 +143,7 @@ class EscutaAssistente(
         val bytes = ByteArray(n * 2)
         for (i in 0 until n) { bytes[2 * i] = (bloco[i].toInt() and 0xff).toByte(); bytes[2 * i + 1] = (bloco[i].toInt() shr 8).toByte() }
         gravacao.write(bytes)
+        comandos?.acceptWaveForm(bloco, n)          // em paralelo: se for um comando fixo, o app executa sem esperar a internet
         if (falando) { falou = true; silencioDesde = 0L } else if (silencioDesde == 0L) silencioDesde = agora
         val total = agora - inicioPedido
         val terminou = (falou && silencioDesde != 0L && agora - silencioDesde >= SILENCIO_FINAL_MS) ||
@@ -149,8 +153,10 @@ class EscutaAssistente(
         val pcm = gravacao.toByteArray()
         val cb = aoPedido; aoPedido = null
         reconhecedor.reset()
+        val jsonComando = try { comandos?.finalResult } catch (_: Throwable) { null }
+        try { comandos?.reset() } catch (_: Throwable) {}
         Log.d(TAG, "pedido gravado: ${total} ms, falou=$falou, ${pcm.size} bytes")
-        cb?.invoke(if (falou) wav(pcm) else null)
+        cb?.invoke(if (falou) wav(pcm) else null, jsonComando)
     }
 
     private fun wav(pcm: ByteArray): ByteArray {

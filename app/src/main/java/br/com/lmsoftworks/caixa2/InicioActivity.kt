@@ -463,7 +463,11 @@ class InicioActivity : Activity() {
             }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pausar -> { if (noVideo) { if (playerMidia.tocando) playerMidia.alternar() } else musica.pausar(); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Continuar -> { if (noVideo) { if (!playerMidia.tocando) playerMidia.alternar() } else musica.tocar(); null }
-            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Parar -> { if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() }; null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Parar -> {
+                if (alarmeTocando != null) pararAlarme(false)
+                else if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() }
+                null
+            }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Proxima -> { if (noVideo) playerMidia.proxima() else musica.proxima(); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Anterior -> { if (noVideo) playerMidia.anterior() else musica.anterior(); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Recomecar -> { if (noVideo) playerMidia.buscar(0) else musica.buscar(0); null }
@@ -471,7 +475,15 @@ class InicioActivity : Activity() {
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.OQueToca ->
                 if (noVideo) playerMidia.item?.titulo?.let { "Está passando $it" } ?: "Não há nada passando."
                 else if (musica.temMusica) "Está tocando ${musica.titulo}" + (if (musica.artista.isNotEmpty()) ", de ${musica.artista}" else "") else "Não há nada tocando."
-            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Repetir -> "Ainda não sei repetir."
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Repetir ->
+                if (musica.emLocal) { playerMidia.repetir(c.ligar); if (c.ligar) "Repetindo esta música" else "Repetição desligada" } else "Só consigo repetir músicas que eu mesma toco."
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Embaralhar -> { if (musica.emLocal) { playerMidia.embaralhar(); "Fila embaralhada" } else null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Soneca -> { if (alarmeTocando != null) pararAlarme(true); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Timer -> { iniciarTimer(c.segundos); "Timer de ${textoDuracao(c.segundos)}" }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CancelarTimer -> { cancelarTimer(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.TempoTimer ->
+                if (timerFim == 0L) "Não há nenhum timer ligado." else "Faltam ${textoDuracao(((timerFim - android.os.SystemClock.uptimeMillis()) / 1000).toInt().coerceAtLeast(1))}"
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.DesligarCaixa -> { sequenciaEnergia(!c.reiniciar); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume -> aplicarVolumeVoz(c)
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Falar -> c.texto
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Voltar -> { if (noVideo) fecharVideoAnimado() else ir("inicio"); null }
@@ -501,6 +513,34 @@ class InicioActivity : Activity() {
         }.start()
     }
 
+    // ---- timer por voz ----
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private var timerFim = 0L
+    private val timerAcabou = Runnable {
+        timerFim = 0L
+        sairOcioso()
+        br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao()
+        timerHandler.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao() }, 900)
+        timerHandler.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao() }, 1800)
+        faixaAssistente.respondendo("O timer terminou")
+        faixaAssistente.fecharEm(6000)
+        br.com.lmsoftworks.caixa2.voz.Fala.falar(this, "O timer terminou") {}
+    }
+
+    private fun iniciarTimer(segundos: Int) {
+        timerHandler.removeCallbacks(timerAcabou)
+        timerFim = android.os.SystemClock.uptimeMillis() + segundos * 1000L
+        timerHandler.postDelayed(timerAcabou, segundos * 1000L)
+    }
+
+    private fun cancelarTimer() { timerHandler.removeCallbacks(timerAcabou); timerFim = 0L }
+
+    private fun textoDuracao(s: Int): String = when {
+        s >= 3600 && s % 3600 == 0 -> if (s / 3600 == 1) "1 hora" else "${s / 3600} horas"
+        s >= 60 -> { val m = (s + 30) / 60; if (m == 1) "1 minuto" else "$m minutos" }
+        else -> "$s segundos"
+    }
+
     private fun aplicarVolumeVoz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume): String? {
         val n = painelVolume.nivel
         return when (c.acao) {
@@ -520,6 +560,10 @@ class InicioActivity : Activity() {
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.COR -> { led.definirModo("fixo"); led.definirCor(c.cor); "Pronto" }
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.MODO -> { led.definirLigado(true); led.definirModo(c.modo); "Modo ${led.nomeModo()}" }
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.BRILHO -> { led.definirBrilho(c.brilho); "Brilho ${c.brilho}%" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.MAIS_FRACA -> { led.definirLigado(true); led.definirBrilho(led.brilho - 20); "Luz mais fraca" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.MAIS_FORTE -> { led.definirLigado(true); led.definirBrilho(led.brilho + 20); "Luz mais forte" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.QUENTE -> { led.definirModo("fixo"); led.definirCor(0xFFFFA040.toInt()); led.definirLigado(true); "Luz quente" }
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.LEITURA -> { led.definirModo("fixo"); led.definirCor(0xFFFFD9A0.toInt()); led.definirBrilho(90); led.definirLigado(true); "Luz de leitura" }
     }
 
     // ------------------------------------------------------------------ mídia (YouTube)

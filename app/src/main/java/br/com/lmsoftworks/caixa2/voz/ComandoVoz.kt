@@ -46,6 +46,19 @@ sealed class ComandoVoz {
 
     object Voltar : ComandoVoz()
 
+    /** Timer em segundos; [CancelarTimer]; [TempoTimer] = "quanto falta?". */
+    data class Timer(val segundos: Int) : ComandoVoz()
+    object CancelarTimer : ComandoVoz()
+    object TempoTimer : ComandoVoz()
+    object Embaralhar : ComandoVoz()
+    object Soneca : ComandoVoz()
+    /** "desligar a caixa" / "reiniciar a caixa" (a caixa pede confirmação antes). */
+    data class DesligarCaixa(val reiniciar: Boolean) : ComandoVoz()
+    object Sim : ComandoVoz()
+    object Nao : ComandoVoz()
+    /** "cancelar" / "esquece": fecha o assistente sem fazer nada. */
+    object Cancelar : ComandoVoz()
+
     /** Fita de LED: [acao] = ligar, desligar, cor, modo ou brilho. */
     data class Luz(val acao: AcaoLuz, val cor: Int = 0, val modo: String = "", val brilho: Int = 0) : ComandoVoz()
 
@@ -63,7 +76,7 @@ sealed class ComandoVoz {
 
 enum class AcaoVolume { AUMENTAR, DIMINUIR, MAXIMO, MINIMO, NIVEL, MUDO, DESMUTAR }
 
-enum class AcaoLuz { LIGAR, DESLIGAR, COR, MODO, BRILHO }
+enum class AcaoLuz { LIGAR, DESLIGAR, COR, MODO, BRILHO, MAIS_FRACA, MAIS_FORTE, QUENTE, LEITURA }
 
 object InterpretadorVoz {
 
@@ -98,11 +111,15 @@ object InterpretadorVoz {
 
     /** "volume dez" -> "volume 10": o Gemini às vezes escreve o número por extenso. */
     private fun numerosPorExtenso(t: String): String {
-        if (!t.contains("volume")) return t
+        if (!(t.contains("volume") || t.contains("timer") || t.contains("temporizador") || t.contains("segundo") || t.contains("minuto") || t.contains("brilho") || t.contains("hora"))) return t
         val m = mapOf("zero" to "0", "um" to "1", "uma" to "1", "dois" to "2", "duas" to "2", "três" to "3", "tres" to "3", "quatro" to "4",
-            "cinco" to "5", "seis" to "6", "sete" to "7", "oito" to "8", "nove" to "9", "dez" to "10")
-        return t.split(" ").joinToString(" ") { m[it] ?: it }
+            "cinco" to "5", "seis" to "6", "sete" to "7", "oito" to "8", "nove" to "9", "dez" to "10", "onze" to "11", "doze" to "12",
+            "quinze" to "15", "vinte" to "20", "trinta" to "30", "quarenta" to "40", "cinquenta" to "50", "sessenta" to "60",
+            "setenta" to "70", "oitenta" to "80", "noventa" to "90", "cem" to "100")
+        return t.replace("meia hora", "30 minutos").split(" ").joinToString(" ") { m[it] ?: it }
     }
+
+    private val RE_TIMER = Regex("""(?:timer|temporizador|cronometro|cronômetro).*?(\d{1,4})\s*(segundo|minuto|hora)""")
 
     private val RE_NIVEL = Regex("""volume\s+(?:no\s+|em\s+|para\s+|pra\s+|na\s+)?(\d{1,3})""")
     private val RE_TEMPO = Regex("""(\d{1,3})\s*(segundo|segundos|minuto|minutos)""")
@@ -128,11 +145,30 @@ object InterpretadorVoz {
         for (a in ABERTURAS_EDUCADAS) if (texto.startsWith(a)) texto = texto.removePrefix(a).trim()
         if (texto.isEmpty()) return ComandoVoz.Desconhecido(textoBruto)
 
+        texto = numerosPorExtenso(texto)
         val palavras = texto.split(" ").filter { it.isNotEmpty() }
         val primeira = palavras.first()
         val resto = palavras.drop(1)
         fun tem(p: String) = texto.contains(p)
         fun temPalavra(vararg ps: String) = palavras.any { it in ps }
+
+        // ---------- respostas curtas, controle do assistente, timer e sistema (antes de tudo) ----------
+        if (texto in setOf("sim", "confirmar", "confirmo", "pode", "isso", "isso mesmo", "pode desligar", "pode reiniciar")) return ComandoVoz.Sim
+        if (texto in setOf("nao", "não", "negativo", "nao quero", "não quero")) return ComandoVoz.Nao
+        if (texto in setOf("cancelar", "cancela", "esquece", "esqueça", "deixa pra la", "deixa pra lá", "fechar", "fecha")) return ComandoVoz.Cancelar
+        if (texto == "soneca" || texto == "me acorde depois" || tem("mais cinco minutos")) return ComandoVoz.Soneca
+        if (temPalavra("caixa") && temPalavra("desligar", "desliga", "desligue")) return ComandoVoz.DesligarCaixa(false)
+        if (temPalavra("caixa") && temPalavra("reiniciar", "reinicia", "reinicie")) return ComandoVoz.DesligarCaixa(true)
+        if (temPalavra("timer", "temporizador", "cronometro", "cronômetro")) {
+            if (tem("quanto falta")) return ComandoVoz.TempoTimer
+            if (temPalavra("cancelar", "cancela", "parar", "pare", "apagar", "apaga", "desligar", "desliga")) return ComandoVoz.CancelarTimer
+            RE_TIMER.find(texto)?.let { m ->
+                val n = m.groupValues[1].toInt()
+                val s = when (m.groupValues[2]) { "hora" -> n * 3600; "minuto" -> n * 60; else -> n }
+                if (s in 1..86400) return ComandoVoz.Timer(s)
+            }
+        }
+        if (tem("embaralhar") || tem("aleatorio") || tem("aleatório")) return ComandoVoz.Embaralhar
 
         // ---------- luzes, navegação e alarme (antes de "desligar", que também apaga a luz) ----------
         interpretarLuz(texto, palavras)?.let { return it }
@@ -274,6 +310,10 @@ object InterpretadorVoz {
         if (tem("qual", "quem", "quando", "onde", "por", "porque", "quanto")) return null
         val apagar = tem("apagar", "apaga", "apague", "desligar", "desliga", "desligue", "apagada")
         val acender = tem("acender", "acende", "acenda", "ligar", "liga", "ligue", "ligada")
+        if (tem("leitura")) return ComandoVoz.Luz(AcaoLuz.LEITURA)
+        if (tem("quente") || tem("amarelada")) return ComandoVoz.Luz(AcaoLuz.QUENTE)
+        if (tem("fraca") || tem("fraco") || tem("escura") || tem("mais baixa") || tem("menos")) return ComandoVoz.Luz(AcaoLuz.MAIS_FRACA)
+        if (tem("forte") || tem("clara") || tem("mais alta")) return ComandoVoz.Luz(AcaoLuz.MAIS_FORTE)
         for ((nome, cor) in CORES) if (nome in palavras) return ComandoVoz.Luz(AcaoLuz.COR, cor = cor)
         if (tem("ambilight")) return ComandoVoz.Luz(AcaoLuz.MODO, modo = "ambilight")
         if (texto.contains("arco iris") || tem("arcoiris")) return ComandoVoz.Luz(AcaoLuz.MODO, modo = "arco")

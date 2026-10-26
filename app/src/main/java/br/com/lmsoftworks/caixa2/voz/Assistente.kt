@@ -186,8 +186,11 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             val gramatica = (FRASES_CHAMADA + ISCAS).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val rec = Recognizer(m, TAXA, gramatica)
             rec.setWords(true)       // devolve a confiança de cada palavra
-            val e = EscutaAssistente(rec) { campo, json -> verificarChamada(json, campo) }
-            if (!e.iniciar()) { rec.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
+            // gramática só com os comandos fixos: reconhecidos offline, na hora (o que não bater vai para o Gemini)
+            val gramaticaCmd = (FrasesRapidas.todas()).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
+            val cmd = try { Recognizer(m, TAXA, gramaticaCmd).also { it.setWords(true) } } catch (e: Throwable) { Log.w(TAG, "sem comandos rapidos", e); null }
+            val e = EscutaAssistente(rec, cmd) { campo, json -> verificarChamada(json, campo) }
+            if (!e.iniciar()) { rec.close(); cmd?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
             estado = EstadoVoz.ESPERANDO_CHAMADA
             Log.d(TAG, "esperando a chamada (Alexa)")
@@ -269,11 +272,26 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         TonsVoz.ativacao()
         estado = EstadoVoz.OUVINDO_COMANDO
         if (destinoBusca == null) faixa.ouvindo() else aoOuvirBusca?.invoke()
-        e.gravarPedido { wav -> main.post { if (minha == geracao) processarPedido(wav, minha) } }
+        e.gravarPedido { wav, jsonCmd -> main.post { if (minha == geracao) processarPedido(wav, jsonCmd, minha) } }
     }
 
-    private fun processarPedido(wav: ByteArray?, minha: Int) {
+    /** Comando fixo reconhecido offline (com confiança), ou null se o pedido tem que ir para o Gemini. */
+    private fun comandoRapido(json: String?): Pair<String, ComandoVoz>? {
+        if (json == null) return null
+        val texto = lerCampo(json, "text").trim()
+        if (texto.isBlank() || texto.contains("[unk]")) return null
+        if (confianca(json) < 0.6) return null
+        val c = InterpretadorVoz.interpretar(texto)
+        if (c is ComandoVoz.Pergunta || c is ComandoVoz.Desconhecido || c is ComandoVoz.Tocar || c is ComandoVoz.Pesquisar) return null
+        return texto to c
+    }
+
+    private fun processarPedido(wav: ByteArray?, jsonCmd: String?, minha: Int) {
         val busca = destinoBusca
+        if (busca == null && wav != null) {
+            val r = comandoRapido(jsonCmd)
+            if (r != null) { Log.d(TAG, "comando rapido: \"${r.first}\" -> ${r.second}"); executarRapido(r.first, r.second); return }
+        }
         if (wav == null) {
             if (busca != null) { destinoBusca = null; busca(null) } else resposta("Não ouvi nada.", "", erro = true)
             return
@@ -289,6 +307,45 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     private var entendimento: Respostas.Entendimento? = null
+    /** "desligar a caixa" espera um "sim" antes de agir. */
+    private var pendente: ComandoVoz.DesligarCaixa? = null
+
+    /** Comandos que mostram o resultado na própria tela (volume, luz, tocador...): só um toquinho e o assistente some, sem falar. */
+    private fun silencioso(c: ComandoVoz) = c is ComandoVoz.Volume || c is ComandoVoz.Luz || c is ComandoVoz.Pausar || c is ComandoVoz.Continuar ||
+        c is ComandoVoz.Parar || c is ComandoVoz.Proxima || c is ComandoVoz.Anterior || c is ComandoVoz.Recomecar || c is ComandoVoz.PularTempo ||
+        c is ComandoVoz.Ir || c is ComandoVoz.Voltar || c is ComandoVoz.Embaralhar || c is ComandoVoz.Soneca || c is ComandoVoz.CancelarTimer
+
+    private fun executarRapido(texto: String, c: ComandoVoz) {
+        TonsVoz.pararPensando()
+        pendente?.let { p ->
+            pendente = null
+            if (c is ComandoVoz.Sim) { acoes.executar(p, texto); fechar(); return }
+            if (c is ComandoVoz.Nao || c is ComandoVoz.Cancelar) { resposta("Certo, cancelado.", texto, falar = "Certo, cancelado."); return }
+        }
+        when (c) {
+            is ComandoVoz.Cancelar, is ComandoVoz.Nao, is ComandoVoz.Sim -> { fechar(); return }
+            is ComandoVoz.DesligarCaixa -> {
+                pendente = c
+                val frase = if (c.reiniciar) "Quer reiniciar a caixa? Diga sim ou não." else "Quer desligar a caixa? Diga sim ou não."
+                estado = EstadoVoz.RESPONDENDO
+                faixa.respondendo(frase)
+                Fala.falar(ctx, frase) { if (ativo && pendente != null && escuta != null) acordou() }
+                return
+            }
+            else -> {}
+        }
+        val frase = acoes.executar(c, texto)
+        if (silencioso(c) && (frase == null || c is ComandoVoz.Volume || c is ComandoVoz.Luz)) { fechar(); return }
+        resposta(frase ?: "Pronto", texto, falar = frase)
+    }
+
+    /** Termina na hora: toquinho de confirmação, a tela do assistente some e o volume da música volta. */
+    private fun fechar() {
+        TonsVoz.confirmacao()
+        faixa.esconder()
+        acoes.abafar(false)
+        if (ativo && escuta != null) estado = EstadoVoz.ESPERANDO_CHAMADA
+    }
 
     private fun terminouTranscricao(texto: String?, minha: Int) {
         Log.d(TAG, "transcricao: ${texto?.let { "\"$it\"" } ?: "FALHOU (sem resposta do Gemini)"}")
@@ -311,6 +368,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     private fun executarTexto(texto: String, minha: Int) {
         val comando = InterpretadorVoz.interpretar(texto)
+        if (pendente != null || comando is ComandoVoz.DesligarCaixa || comando is ComandoVoz.Sim || comando is ComandoVoz.Nao || comando is ComandoVoz.Cancelar) {
+            executarRapido(texto, comando); return
+        }
         Log.d(TAG, "pedido: \"$texto\" -> $comando")
         when (comando) {
             is ComandoVoz.Desconhecido -> resposta("Não consegui entender.", texto, erro = true)
