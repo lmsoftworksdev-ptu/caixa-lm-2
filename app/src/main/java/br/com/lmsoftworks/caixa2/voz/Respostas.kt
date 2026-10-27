@@ -615,6 +615,9 @@ object Respostas {
             "Se for música ou vídeo, descubra QUAL é, corrigindo erros de reconhecimento e mesmo que o artista dito esteja errado ou " +
             "faltando (ex.: 'não quero me amarrar Solange Almeida' -> 'Não Quero Me Amarrar Aviões do Forró'); em \"busca\" ponha o melhor " +
             "texto para procurar no YouTube ('Título Artista'; se pedir só um artista, o artista). Nos outros casos, busca vazia.\n" +
+            "IMPORTANTE: se o áudio tiver só ruído, silêncio, música ao fundo ou voz que você não consegue entender com certeza, responda texto vazio " +
+            "(\"texto\":\"\") e intencao \"comando\". NUNCA invente um pedido que não foi dito.
+" +
             "Responda SÓ o JSON: {\"texto\":\"...\",\"intencao\":\"musica|video|pergunta|comando\",\"busca\":\"...\"}"
         for (modelo in listOf(MODELO_GEMINI_PADRAO, modeloConfig).distinct()) {
             var tentativas = 0

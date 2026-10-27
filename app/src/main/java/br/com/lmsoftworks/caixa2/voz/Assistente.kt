@@ -117,7 +117,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         private val FRAGMENTOS = setOf("quiza", "quisa", "quissa", "a quiza", "a quisa", "a lequisa", "a lequiza")
         private val NOMES_FORTES = VARIANTES_ALEXA.filter { it !in FRAGMENTOS }
         private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(NOMES_FORTES + VARIANTES_CAIXA)})|(?:${alt(NOMES_FORTES)}))$""")
-        private const val CONFIANCA_MINIMA = 0.55
+        private const val CONFIANCA_MINIMA = 0.4
         private const val ESPERA_ENTRE_CHAMADAS_MS = 2500L
         private val SO_NOME = setOf("alexia", "alexi", "alexa", "a lexia", "alexsa", "alexi a", "alexis a")
         private val ISCAS = listOf(
@@ -223,7 +223,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         // Frase terminada: vale com confiança. Parcial (mais rápido, ~0,3 s): só se a MESMA palavra estável aparecer 3 vezes seguidas.
         if (campo == "partial") {
             if (texto == ultimoParcial) parciaisIguais++ else { ultimoParcial = texto; parciaisIguais = 1 }
-            if (parciaisIguais < 3 || !REGEX_CHAMADA.matches(texto)) return
+            if (parciaisIguais < 2 || !REGEX_CHAMADA.matches(texto)) return
         }
         val conf = if (campo == "partial") 1.0 else confianca(json)
         parciaisIguais = 0; ultimoParcial = ""
@@ -289,8 +289,8 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun comandoRapido(json: String?): Pair<String, ComandoVoz>? {
         if (json == null) return null
         val texto = lerCampo(json, "text").trim()
-        if (texto.isBlank() || texto.contains("[unk]")) return null
-        if (confianca(json) < 0.6) return null
+        if (texto.isBlank()) return null
+        if (texto.contains("[unk]") || confianca(json) < 0.6) { Log.d(TAG, "comando rapido recusado: \"$texto\" confianca=${"%.2f".format(confianca(json))}"); return null }
         val c = InterpretadorVoz.interpretar(texto)
         if (c is ComandoVoz.Pergunta || c is ComandoVoz.Desconhecido || c is ComandoVoz.Tocar || c is ComandoVoz.Pesquisar) return null
         return texto to c
