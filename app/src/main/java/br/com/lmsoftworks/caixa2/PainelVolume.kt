@@ -27,7 +27,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     companion object {
         /** O amplificador da caixa distorce acima de 87% do volume do aparelho: o 100% do app é esse 87% real. */
-        const val LIMITE_REAL = 0.87f
+        const val LIMITE_REAL = 1.0f
         private const val LARGURA_DP = 500
         private const val ALTURA_DP = 66
     }
