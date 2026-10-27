@@ -190,7 +190,8 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             // gramática só com os comandos fixos: reconhecidos offline, na hora (o que não bater vai para o Gemini)
             val gramaticaCmd = (FrasesRapidas.todas()).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val cmd = try { Recognizer(m, TAXA, gramaticaCmd).also { it.setWords(true) } } catch (e: Throwable) { Log.w(TAG, "sem comandos rapidos", e); null }
-            val livre = try { Recognizer(m, TAXA) } catch (e: Throwable) { Log.w(TAG, "sem texto ao vivo", e); null }
+            // O texto ao vivo (reconhecedor sem gramática) não roda em tempo real neste aparelho e acertava pouco: desligado.
+            val livre: Recognizer? = null
             val e = EscutaAssistente(rec, cmd, livre, { parcial -> main.post { aoPalavras(parcial) } }) { campo, json -> verificarChamada(json, campo) }
             if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e

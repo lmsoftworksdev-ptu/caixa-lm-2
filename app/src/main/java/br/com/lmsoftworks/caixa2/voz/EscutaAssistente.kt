@@ -63,6 +63,13 @@ class EscutaAssistente(
     private var blocosFala = 0
     @Volatile private var pedidoNovo = false
 
+    // Porta de voz da CHAMADA: o reconhecimento só roda quando há som de fala (com uns blocos de antes e de depois). Na sala quieta o
+    // Vosk fica parado, em vez de gastar um núcleo inteiro do processador o tempo todo.
+    private var pisoSala = -1f
+    private var restoVoz = 0
+    private var enviandoChamada = false
+    private val antes = java.util.ArrayDeque<ShortArray>()
+
     /** Volume (0..1) do que o microfone ouve agora, para a tela animar a esfera. */
     @Volatile var nivel = 0f
         private set
@@ -82,8 +89,8 @@ class EscutaAssistente(
             Log.d(TAG, "microfone: ${efeitos.size} efeitos ligados (eco/ruido/ganho)")
         } catch (e: Throwable) { Log.d(TAG, "microfone: sem efeitos: $e") }
         rodando = true
-        threadVosk = Thread({ lacoVosk() }, "escuta-vosk").also { it.priority = Thread.NORM_PRIORITY - 1; it.start() }
-        threadMic = Thread({ lacoMicrofone(gr) }, "escuta-mic").also { it.priority = Thread.MAX_PRIORITY; it.start() }
+        threadVosk = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT); lacoVosk() }, "escuta-vosk").also { it.start() }
+        threadMic = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO); lacoMicrofone(gr) }, "escuta-mic").also { it.start() }
         return true
     }
 
@@ -129,9 +136,20 @@ class EscutaAssistente(
                     fila.offer(Bloco(bloco.copyOf(n), Bloco.PEDIDO))
                     tratarPedido(bloco, n, rmsBruto)
                 } else {
-                    // modo chamada: se o reconhecimento ficou para trás, descarta o mais antigo (só interessa o que se fala agora)
-                    if (fila.size > 25) fila.poll()
-                    fila.offer(Bloco(bloco.copyOf(n), Bloco.CHAMADA))
+                    // modo chamada, só com voz: guarda 3 blocos de antes e segue 8 blocos (0,8 s) depois de a voz parar
+                    if (pisoSala < 0f) pisoSala = max(3f, rmsBruto)
+                    pisoSala = if (rmsBruto < pisoSala) max(3f, rmsBruto) else pisoSala * 0.9995f + rmsBruto * 0.0005f
+                    val voz = rmsBruto > max(70f, pisoSala * 2.2f)
+                    if (voz) restoVoz = 8 else if (restoVoz > 0) restoVoz--
+                    val copia = bloco.copyOf(n)
+                    if (voz || restoVoz > 0) {
+                        if (!enviandoChamada) { enviandoChamada = true; for (a in antes) fila.offer(Bloco(a, Bloco.CHAMADA)); antes.clear() }
+                        if (fila.size > 25) fila.poll()
+                        fila.offer(Bloco(copia, Bloco.CHAMADA))
+                    } else {
+                        enviandoChamada = false
+                        antes.addLast(copia); if (antes.size > 3) antes.removeFirst()
+                    }
                 }
             }
         } catch (e: Throwable) {
