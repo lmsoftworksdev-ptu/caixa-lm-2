@@ -41,7 +41,7 @@ class EscutaAssistente(
         const val BLOCOS_FALA_MINIMOS = 4       // menos que isso (0,4 s de voz) é ruído, não pedido: nada vai ao Gemini
     }
 
-    private class Bloco(val dados: ShortArray?, val tipo: Int, val wav: ByteArray? = null, val fim: ((ByteArray?, String?) -> Unit)? = null) {
+    private class Bloco(val dados: ShortArray?, val tipo: Int, val rapido: ((String?) -> Unit)? = null) {
         companion object { const val CHAMADA = 0; const val PEDIDO = 1; const val ZERAR = 2; const val FIM = 3; const val ENCERRAR = 4 }
     }
 
@@ -53,7 +53,8 @@ class EscutaAssistente(
 
     // estado do pedido em andamento (mexido só pela thread do microfone)
     @Volatile private var pedindo = false
-    private var aoPedido: ((ByteArray?, String?) -> Unit)? = null
+    private var aoPedido: ((ByteArray?) -> Unit)? = null
+    private var aoRapido: ((String?) -> Unit)? = null
     private var gravacao = ByteArrayOutputStream()
     private var inicioPedido = 0L
     private var falou = false
@@ -94,9 +95,13 @@ class EscutaAssistente(
         return true
     }
 
-    /** Passa a gravar o pedido; [fim] recebe o WAV (ou null se não houve fala de verdade) e o JSON dos comandos fixos. */
-    fun gravarPedido(fim: (ByteArray?, String?) -> Unit) {
+    /**
+     * Passa a gravar o pedido. [fim] recebe o WAV NA HORA em que a pessoa para de falar (null = não houve fala de verdade), para o
+     * Gemini já começar; [rapido] recebe, quando o reconhecimento offline terminar, o JSON dos comandos fixos. Quem chegar primeiro vale.
+     */
+    fun gravarPedido(fim: (ByteArray?) -> Unit, rapido: (String?) -> Unit) {
         aoPedido = fim
+        aoRapido = rapido
         pedidoNovo = true           // a thread do microfone zera tudo e começa a gravar
         pedindo = true
     }
@@ -189,10 +194,12 @@ class EscutaAssistente(
         pedindo = false
         val pcm = gravacao.toByteArray()
         val cb = aoPedido; aoPedido = null
+        val cbRapido = aoRapido; aoRapido = null
         val voz = falou && blocosFala >= BLOCOS_FALA_MINIMOS
         Log.d(TAG, "pedido gravado: $total ms, audio=${pcm.size / 32} ms, blocos de voz=$blocosFala, voz=$voz")
-        // quem entrega o resultado é a thread do reconhecimento, depois de terminar de decodificar tudo o que já chegou
-        fila.offer(Bloco(null, Bloco.FIM, if (voz) wav(pcm) else null, cb))
+        cb?.invoke(if (voz) wav(pcm) else null)          // o Gemini já começa a trabalhar agora
+        // o reconhecimento offline entrega o comando fixo (se houver) quando terminar de decodificar o que já chegou
+        if (voz && cbRapido != null) fila.offer(Bloco(null, Bloco.FIM, cbRapido))
     }
 
     // ---------------------------------------------------------------- thread do reconhecimento (Vosk)
@@ -227,17 +234,11 @@ class EscutaAssistente(
                         reconhecedor.reset(); comandos?.reset(); livre?.reset(); textoLivre = ""; ultimoParcial = ""
                     }
                     Bloco.FIM -> {
-                        val cb = b.fim ?: continue
+                        val cb = b.rapido ?: continue
                         val json = try { comandos?.finalResult } catch (_: Throwable) { null }
-                        val vivo = try { livre?.finalResult } catch (_: Throwable) { null }
-                        val dito = (textoLivre + " " + lerJson(vivo, "text")).trim()
-                        val cmd = lerJson(json, "text")
-                        Log.d(TAG, "reconhecimento offline: comandos=\"$cmd\" | livre=\"$dito\"")
-                        // sem palavra nenhuma (só ruído): nada vai ao Gemini, que inventaria uma frase
-                        val wav = if (b.wav != null && (dito.isNotBlank() || (cmd.isNotBlank() && cmd != "[unk]"))) b.wav else null
-                        if (b.wav != null && wav == null) Log.d(TAG, "o reconhecimento offline não ouviu palavra nenhuma: pedido descartado (ruído)")
+                        Log.d(TAG, "reconhecimento offline: comandos=\"${lerJson(json, "text")}\"")
                         reconhecedor.reset(); comandos?.reset(); livre?.reset(); textoLivre = ""; ultimoParcial = ""
-                        cb(wav, json)
+                        cb(json)
                     }
                 }
             }

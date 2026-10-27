@@ -283,7 +283,11 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         TonsVoz.ativacao()
         estado = EstadoVoz.OUVINDO_COMANDO
         if (destinoBusca == null) faixa.ouvindo() else aoOuvirBusca?.invoke()
-        e.gravarPedido { wav, jsonCmd -> main.post { if (minha == geracao) processarPedido(wav, jsonCmd, minha) } }
+        resolvido = false
+        e.gravarPedido(
+            { wav -> main.post { if (minha == geracao) processarPedido(wav, minha) } },
+            { json -> main.post { if (minha == geracao) comandoRapidoPronto(json) } }
+        )
     }
 
     /** Comando fixo reconhecido offline (com confiança), ou null se o pedido tem que ir para o Gemini. */
@@ -297,12 +301,21 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         return texto to c
     }
 
-    private fun processarPedido(wav: ByteArray?, jsonCmd: String?, minha: Int) {
+    /** Já foi tratado (pelo comando rápido ou pelo Gemini): a outra resposta, se chegar depois, é ignorada. */
+    private var resolvido = false
+
+    /** O reconhecimento offline terminou: se for um comando fixo e o Gemini ainda não respondeu, executa agora e descarta o Gemini. */
+    private fun comandoRapidoPronto(json: String?) {
+        if (resolvido || destinoBusca != null) return
+        val r = comandoRapido(json) ?: return
+        resolvido = true
+        geracao++            // a resposta do Gemini, se vier, fica obsoleta
+        Log.d(TAG, "comando rapido: \"${r.first}\" -> ${r.second}")
+        executarRapido(r.first, r.second)
+    }
+
+    private fun processarPedido(wav: ByteArray?, minha: Int) {
         val busca = destinoBusca
-        if (busca == null && wav != null) {
-            val r = comandoRapido(jsonCmd)
-            if (r != null) { Log.d(TAG, "comando rapido: \"${r.first}\" -> ${r.second}"); executarRapido(r.first, r.second); return }
-        }
         if (wav == null) {
             if (busca != null) { destinoBusca = null; busca(null) } else resposta("Não ouvi nada.", "", erro = true)
             return
@@ -359,6 +372,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     private fun terminouTranscricao(texto: String?, minha: Int) {
+        resolvido = true
         Log.d(TAG, "transcricao: ${texto?.let { "\"$it\"" } ?: "FALHOU (sem resposta do Gemini)"}")
         val busca = destinoBusca
         if (busca != null) {
