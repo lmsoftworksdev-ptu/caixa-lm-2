@@ -73,6 +73,11 @@ sealed class ComandoVoz {
     /** "adiciona leite e pão na lista de compras", "o que tem na lista", "tira o leite da lista", "limpa a lista". */
     data class Lista(val acao: AcaoLista, val nome: String, val itens: List<String> = emptyList()) : ComandoVoz()
 
+    /** "minha hora de dormir é às 10 da noite": todo dia, nesse horário, a caixa avisa. */
+    data class HoraDeDormir(val hora: Int, val minuto: Int) : ComandoVoz()
+    object DesligarHoraDeDormir : ComandoVoz()
+    object ConsultarHoraDeDormir : ComandoVoz()
+
     /** "bom dia" ([manha] = true) ou "boa noite": a caixa faz uma sequência (luz, clima, lembretes, alarme...). */
     data class Rotina(val manha: Boolean) : ComandoVoz()
 
@@ -89,7 +94,7 @@ enum class AcaoVolume { AUMENTAR, DIMINUIR, MAXIMO, MINIMO, NIVEL, MUDO, DESMUTA
 
 enum class AcaoLista { ADICIONAR, REMOVER, LER, LIMPAR }
 
-enum class AcaoLuz { LIGAR, DESLIGAR, COR, MODO, BRILHO, MAIS_FRACA, MAIS_FORTE, QUENTE, LEITURA }
+enum class AcaoLuz { APAGAR_SUAVE, LIGAR, DESLIGAR, COR, MODO, BRILHO, MAIS_FRACA, MAIS_FORTE, QUENTE, LEITURA }
 
 object InterpretadorVoz {
 
@@ -131,6 +136,8 @@ object InterpretadorVoz {
             "setenta" to "70", "oitenta" to "80", "noventa" to "90", "cem" to "100")
         return t.replace("meia hora", "30 minutos").split(" ").joinToString(" ") { m[it] ?: it }
     }
+
+    private val RE_DORMIR_HORA = Regex("""(?:às|as|para as|pras)\s+(\d{1,2})(?:(?:\s*(?:e|:|h)\s*|\s+)(meia|\d{1,2}))?\s*(?:horas?)?\s*(da manhã|da manha|da tarde|da noite|da madrugada)?""")
 
     // ---- listas ("lista de compras") ----
     private val RE_LISTA_ADD = Regex("""(?:adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|anota|anote|anotar|põe|poe|inclui|inclua|incluir)\s+(.+?)\s+(?:na|no|à|em)\s+(?:minha\s+)?lista(?:\s+de\s+(\p{L}+))?""")
@@ -211,6 +218,23 @@ object InterpretadorVoz {
                 val s = when (m.groupValues[2]) { "hora" -> n * 3600; "minuto" -> n * 60; else -> n }
                 if (s in 1..86400) return ComandoVoz.Timer(s)
             }
+        }
+        // hora de dormir: "minha hora de dormir é às 10 da noite", "desativar a hora de dormir", "qual é a minha hora de dormir"
+        if (tem("hora de dormir") || tem("horário de dormir") || tem("horario de dormir") || (tem("dormir") && (tem("todo dia") || tem("todos os dias")))) {
+            if (temPalavra("desativar", "desativa", "desligar", "desliga", "cancelar", "cancela", "apagar", "apaga", "remover", "remove", "parar", "para"))
+                return ComandoVoz.DesligarHoraDeDormir
+            RE_DORMIR_HORA.find(texto)?.let { m ->
+                var h = m.groupValues[1].toInt()
+                val min = when (val g = m.groupValues[2]) { "" -> 0; "meia" -> 30; else -> g.toIntOrNull() ?: 0 }
+                val periodo = m.groupValues[3]
+                when {
+                    periodo.contains("noite") || periodo.contains("tarde") -> { if (h < 12) h += 12 else if (h == 12 && periodo.contains("noite")) h = 0 }
+                    periodo.contains("madrugada") || periodo.contains("manhã") || periodo.contains("manha") -> { if (h == 12) h = 0 }
+                    h in 6..11 -> h += 12        // sem dizer o período: hora de dormir é à noite
+                }
+                if (h in 0..23 && min in 0..59) return ComandoVoz.HoraDeDormir(h, min)
+            }
+            return ComandoVoz.ConsultarHoraDeDormir
         }
         // lembretes: "me lembra de...", "meus lembretes", "apagar os lembretes", "me avisa daqui a 10 minutos"
         if (temPalavra("lembrete", "lembretes", "lembra", "lembre", "lembrar") || tem("me avisa") || tem("me avise")) {

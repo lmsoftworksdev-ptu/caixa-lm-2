@@ -173,12 +173,20 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     val conectandoParaTela: Boolean get() = conectando || (conectado && !recebeuAviso)
     var erro: String? = null; private set
 
+    /** Fade-out da rotina "boa noite": multiplica o brilho por [f] (1 = normal, 0 = preto) sem mexer no brilho guardado. Não é gravado. */
+    @Volatile private var escalaFade = 1f
+
+    fun definirEscalaFade(f: Float) {
+        escalaFade = f.coerceIn(0f, 1f)
+        if (conectado && ligado && modo == "fixo") enviarCor(corFinal(0f))
+    }
+
     fun nomeModo(): String = MODOS.firstOrNull { it.first == modo }?.second ?: "Fixo"
 
     /** Cor que a fita mostra agora (com brilho e efeito aplicados). A prévia da tela usa a mesma. */
     fun corFinal(t: Float): Int {
         if (!ligado) return Color.BLACK
-        val base = brilho / 100f
+        val base = brilho / 100f * escalaFade
         return when (modo) {
             "arco" -> escalar(Color.HSVToColor(floatArrayOf((t * 40f) % 360f, 1f, 1f)), base)
             "ritmo" -> if (cor2 != 0 && batidaMedia) escalar(cor2, base * BRILHO_SEGUNDA * nivelAudio) else escalar(cor, base * nivelAudio)    // nivelAudio é 1 (aceso) ou 0 (apagado): piscada seca

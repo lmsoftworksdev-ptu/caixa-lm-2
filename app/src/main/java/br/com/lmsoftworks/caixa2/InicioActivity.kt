@@ -71,11 +71,17 @@ class InicioActivity : Activity() {
     private lateinit var lembretes: LembreteControle
     private lateinit var listas: ListaControle
 
+    private lateinit var dormir: HoraDeDormir
+
     /** Chegou a hora de um lembrete: toca o aviso, mostra na tela e fala em voz alta. */
     private fun dispararLembrete(l: Lembrete) {
-        sairOcioso()
         val atraso = System.currentTimeMillis() - l.quandoMs > 10 * 60_000L      // a caixa estava desligada na hora
-        val frase = (if (atraso) "Lembrete atrasado: " else "Lembrete: ") + l.texto
+        avisarFalando((if (atraso) "Lembrete atrasado: " else "Lembrete: ") + l.texto)
+    }
+
+    /** Aviso da caixa (lembrete, hora de dormir...): dois toquinhos, o texto na tela e a fala em voz alta; a música baixa enquanto isso. */
+    private fun avisarFalando(frase: String) {
+        sairOcioso()
         br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao()
         relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao() }, 900)
         faixaAssistente.respondendo(frase)
@@ -91,6 +97,7 @@ class InicioActivity : Activity() {
             barra.atualizarHora()
             alarmes.verificar()?.let { tocarAlarme(it) }
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
+            if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto())
             if (!ocioso) {
@@ -152,6 +159,7 @@ class InicioActivity : Activity() {
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
         lembretes = LembreteControle(this)
         listas = ListaControle(this)
+        dormir = HoraDeDormir(this)
         telaAlarmes = TelaAlarmes(this, alarmes) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
@@ -530,6 +538,13 @@ class InicioActivity : Activity() {
                 "Alarme criado para %d:%02d".format(c.hora, c.minuto)
             }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Lista -> listas.executar(c)
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.HoraDeDormir -> {
+                dormir.definir(c.hora, c.minuto)
+                "Combinado! Todo dia às %02d:%02d eu aviso que é hora de dormir.".format(c.hora, c.minuto)
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.DesligarHoraDeDormir -> { dormir.desligar(); "Pronto, desliguei o aviso de hora de dormir." }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.ConsultarHoraDeDormir ->
+                if (dormir.ativa) "Sua hora de dormir é às %02d:%02d.".format(dormir.hora, dormir.minuto) else "Você ainda não definiu uma hora de dormir."
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.ListarLembretes -> {
                 val todos = lembretes.todos
                 if (todos.isEmpty()) "Você não tem nenhum lembrete."
@@ -601,7 +616,48 @@ class InicioActivity : Activity() {
         }
     }
 
-    private fun comandoLuz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Luz): String = when (c.acao) {
+    // ---- fade-out da luz (rotina "boa noite"): o brilho desce aos poucos (a fita não aguenta cores em rajada) e então apaga ----
+    private var fadeLed: Runnable? = null
+
+    private fun cancelarFadeLed() {
+        val r = fadeLed ?: return
+        relogio.removeCallbacks(r)
+        fadeLed = null
+        led.definirEscalaFade(1f)
+    }
+
+    /** O brilho desce até ZERO em ~3,5 s (curva ao quadrado, que parece linear para o olho) e só então apaga: sem pulo no fim. */
+    private fun apagarLuzSuave() {
+        if (!led.ligado) return
+        cancelarFadeLed()
+        val passos = 14
+        var i = 0
+        val r = object : Runnable {
+            override fun run() {
+                i++
+                if (i >= passos) {
+                    fadeLed = null
+                    led.definirEscalaFade(0f)
+                    led.definirLigado(false)
+                    led.definirEscalaFade(1f)           // apagada; o brilho guardado continua o de antes
+                    return
+                }
+                val k = 1f - i / passos.toFloat()
+                led.definirEscalaFade(k * k)
+                relogio.postDelayed(this, 250)
+            }
+        }
+        fadeLed = r
+        relogio.post(r)
+    }
+
+    private fun comandoLuz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Luz): String {
+        if (c.acao != br.com.lmsoftworks.caixa2.voz.AcaoLuz.APAGAR_SUAVE) cancelarFadeLed()
+        return comandoLuzAgora(c)
+    }
+
+    private fun comandoLuzAgora(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Luz): String = when (c.acao) {
+        br.com.lmsoftworks.caixa2.voz.AcaoLuz.APAGAR_SUAVE -> { apagarLuzSuave(); "Luzes apagando" }
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.LIGAR -> { led.definirLigado(true); "Luzes acesas" }
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.DESLIGAR -> { led.definirLigado(false); "Luzes apagadas" }
         br.com.lmsoftworks.caixa2.voz.AcaoLuz.COR -> { led.definirModo("fixo"); led.definirCor(c.cor); "Pronto" }

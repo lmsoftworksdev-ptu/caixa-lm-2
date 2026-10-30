@@ -70,3 +70,30 @@ class LembreteControle(contexto: Context) {
         }
     }
 }
+
+/** "Minha hora de dormir é às 22h": todo dia, nesse horário, a caixa avisa em voz alta. Guardado no aparelho. */
+class HoraDeDormir(contexto: Context) {
+
+    private val prefs = contexto.applicationContext.getSharedPreferences("dormir", Context.MODE_PRIVATE)
+
+    val ativa: Boolean get() = prefs.getBoolean("ativa", false)
+    val hora: Int get() = prefs.getInt("hora", 22)
+    val minuto: Int get() = prefs.getInt("minuto", 0)
+
+    fun definir(h: Int, m: Int) {
+        prefs.edit().putBoolean("ativa", true).putInt("hora", h).putInt("minuto", m).putString("ultimo", "").apply()
+    }
+
+    fun desligar() { prefs.edit().putBoolean("ativa", false).apply() }
+
+    /** true uma única vez por dia, no minuto marcado. */
+    fun chegouAHora(): Boolean {
+        if (!ativa) return false
+        val c = Calendar.getInstance()
+        if (c.get(Calendar.HOUR_OF_DAY) != hora || c.get(Calendar.MINUTE) != minuto) return false
+        val hoje = SimpleDateFormat("yyyyMMdd", Locale.US).format(c.time)
+        if (prefs.getString("ultimo", "") == hoje) return false
+        prefs.edit().putString("ultimo", hoje).apply()
+        return true
+    }
+}

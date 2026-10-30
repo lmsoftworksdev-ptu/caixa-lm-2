@@ -497,9 +497,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 }
             }.start()
         } else {
-            acoes.executar(ComandoVoz.Luz(AcaoLuz.DESLIGAR), "")
+            acoes.executar(ComandoVoz.Luz(AcaoLuz.APAGAR_SUAVE), "")
             acoes.executar(ComandoVoz.Pausar, "")
-            val frase = "Boa noite! Apaguei as luzes e pausei a música. ${acoes.resumoRotina(false)} Durma bem.".replace("  ", " ")
+            val frase = "Boa noite! Estou apagando as luzes e pausei a música. ${acoes.resumoRotina(false)} Durma bem.".replace("  ", " ")
             resposta(frase, "", falar = frase)
         }
     }
