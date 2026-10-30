@@ -524,7 +524,17 @@ class InicioActivity : Activity() {
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Embaralhar -> { if (musica.emLocal) { playerMidia.embaralhar(); "Fila embaralhada" } else null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Soneca -> { if (alarmeTocando != null) pararAlarme(true); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Timer -> { iniciarTimer(c.segundos); "Timer de ${textoDuracao(c.segundos)}" }
-            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CancelarTimer -> { cancelarTimer(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CancelarTimer -> {
+                // "cancelar o temporizador" também cancela o de sono (o reconhecimento rápido às vezes não ouve a palavra "sono")
+                val tinhaTimer = timerFim != 0L
+                val tinhaSono = cancelarSono()
+                cancelarTimer()
+                when {
+                    tinhaTimer -> "Cancelei o timer."
+                    tinhaSono -> "Cancelei o temporizador de sono."
+                    else -> "Não há nenhum timer ligado."
+                }
+            }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.TempoTimer ->
                 if (timerFim == 0L) "Não há nenhum timer ligado." else "Faltam ${textoDuracao(((timerFim - android.os.SystemClock.uptimeMillis()) / 1000).toInt().coerceAtLeast(1))}"
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.DesligarCaixa -> { sequenciaEnergia(!c.reiniciar); null }
@@ -537,6 +547,12 @@ class InicioActivity : Activity() {
                 val a = alarmes.novo(); a.hora = c.hora; a.minuto = c.minuto; a.ligado = true; alarmes.salvar()
                 "Alarme criado para %d:%02d".format(c.hora, c.minuto)
             }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.TemporizadorSono -> {
+                agendarSono(c.segundos)
+                "Pronto, vou desligar o som daqui a ${textoDuracao(c.segundos)}."
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CancelarSono ->
+                if (cancelarSono()) "Cancelei o temporizador de sono." else "Não há nenhum temporizador de sono."
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Lista -> listas.executar(c)
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.HoraDeDormir -> {
                 dormir.definir(c.hora, c.minuto)
@@ -573,6 +589,53 @@ class InicioActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    // ---- temporizador de sono: no fim, o volume desce em ~18 s, a música para e o volume volta ao que era ----
+    private val sonoAcabou = Runnable { iniciarFadeSono() }
+    private var fadeSono: Runnable? = null
+    private var volumeAntesDoSono = -1
+
+    private var sonoAgendadoEm = 0L
+
+    private fun agendarSono(segundos: Int) {
+        cancelarSono()
+        sonoAgendadoEm = android.os.SystemClock.uptimeMillis()
+        relogio.postDelayed(sonoAcabou, segundos * 1000L)
+    }
+
+    /** Cancela o temporizador de sono (agendado ou no meio do fade, devolvendo o volume). true se havia um. */
+    private fun cancelarSono(): Boolean {
+        var tinha = sonoAgendadoEm != 0L
+        relogio.removeCallbacks(sonoAcabou)
+        fadeSono?.let { relogio.removeCallbacks(it); fadeSono = null; tinha = true }
+        if (volumeAntesDoSono >= 0) { painelVolume.definirSilencioso(volumeAntesDoSono); volumeAntesDoSono = -1 }
+        sonoAgendadoEm = 0L
+        return tinha
+    }
+
+    private fun iniciarFadeSono() {
+        sonoAgendadoEm = 0L
+        val original = painelVolume.porcento
+        volumeAntesDoSono = original
+        val passos = 12
+        var i = 0
+        val r = object : Runnable {
+            override fun run() {
+                i++
+                if (i >= passos) {
+                    fadeSono = null
+                    if (telaVideo.aberto) { if (playerMidia.tocando) playerMidia.alternar() } else musica.pausar()
+                    painelVolume.definirSilencioso(volumeAntesDoSono.coerceAtLeast(0))
+                    volumeAntesDoSono = -1
+                    return
+                }
+                painelVolume.definirSilencioso(original * (passos - i) / passos)
+                relogio.postDelayed(this, 1500)
+            }
+        }
+        fadeSono = r
+        relogio.post(r)
     }
 
     // ---- timer por voz ----

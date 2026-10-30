@@ -177,6 +177,9 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         mostrarTemporario()
     }
 
+    /** Muda o volume (0 a 100) sem abrir a pílula: usado no fade do temporizador de sono. */
+    fun definirSilencioso(p: Int) = definir(p.coerceIn(0, 100) / 100f)
+
     fun alternarMudo() {
         val atual = audio.getStreamVolume(canal)
         if (atual > 0) { anterior = atual; audio.setStreamVolume(canal, 0, 0) }

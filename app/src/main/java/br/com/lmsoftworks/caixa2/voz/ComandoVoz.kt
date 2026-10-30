@@ -73,6 +73,10 @@ sealed class ComandoVoz {
     /** "adiciona leite e pão na lista de compras", "o que tem na lista", "tira o leite da lista", "limpa a lista". */
     data class Lista(val acao: AcaoLista, val nome: String, val itens: List<String> = emptyList()) : ComandoVoz()
 
+    /** "desliga a música em 30 minutos": o volume desce aos poucos e a música para. */
+    data class TemporizadorSono(val segundos: Int) : ComandoVoz()
+    object CancelarSono : ComandoVoz()
+
     /** "minha hora de dormir é às 10 da noite": todo dia, nesse horário, a caixa avisa. */
     data class HoraDeDormir(val hora: Int, val minuto: Int) : ComandoVoz()
     object DesligarHoraDeDormir : ComandoVoz()
@@ -137,7 +141,9 @@ object InterpretadorVoz {
         return t.replace("meia hora", "30 minutos").split(" ").joinToString(" ") { m[it] ?: it }
     }
 
-    private val RE_DORMIR_HORA = Regex("""(?:às|as|para as|pras)\s+(\d{1,2})(?:(?:\s*(?:e|:|h)\s*|\s+)(meia|\d{1,2}))?\s*(?:horas?)?\s*(da manhã|da manha|da tarde|da noite|da madrugada)?""")
+    private val RE_SONO = Regex("""(?:em|daqui a|daqui|por|de|para)\s+(\d{1,3})\s*(minuto|hora)""")
+
+    private val RE_DORMIR_HORA =Regex("""(?:às|as|para as|pras)\s+(\d{1,2})(?:(?:\s*(?:e|:|h)\s*|\s+)(meia|\d{1,2}))?\s*(?:horas?)?\s*(da manhã|da manha|da tarde|da noite|da madrugada)?""")
 
     // ---- listas ("lista de compras") ----
     private val RE_LISTA_ADD = Regex("""(?:adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|anota|anote|anotar|põe|poe|inclui|inclua|incluir)\s+(.+?)\s+(?:na|no|à|em)\s+(?:minha\s+)?lista(?:\s+de\s+(\p{L}+))?""")
@@ -210,6 +216,18 @@ object InterpretadorVoz {
         if (texto == "soneca" || texto == "me acorde depois" || tem("mais cinco minutos")) return ComandoVoz.Soneca
         if (temPalavra("caixa") && temPalavra("desligar", "desliga", "desligue")) return ComandoVoz.DesligarCaixa(false)
         if (temPalavra("caixa") && temPalavra("reiniciar", "reinicia", "reinicie")) return ComandoVoz.DesligarCaixa(true)
+        // temporizador de sono: "desliga a música em 30 minutos", "temporizador de sono de meia hora", "cancelar o sono"
+        val falaDeSono = temPalavra("sono") && temPalavra("timer", "temporizador", "cronometro", "cronômetro")
+        val desligaMidia = (temPalavra("desliga", "desligar", "desligue", "para", "parar", "pare", "pausa", "pausar") &&
+            temPalavra("musica", "música", "som", "video", "vídeo", "tudo", "tela"))
+        if (temPalavra("sono") && temPalavra("cancelar", "cancela", "desativar", "desativa", "parar", "pare")) return ComandoVoz.CancelarSono
+        if ((falaDeSono || desligaMidia) && !tem("quanto falta")) {
+            RE_SONO.find(texto)?.let { m ->
+                val n = m.groupValues[1].toInt()
+                val s = if (m.groupValues[2] == "hora") n * 3600 else n * 60
+                if (s in 60..43200) return ComandoVoz.TemporizadorSono(s)
+            }
+        }
         if (temPalavra("timer", "temporizador", "cronometro", "cronômetro")) {
             if (tem("quanto falta")) return ComandoVoz.TempoTimer
             if (temPalavra("cancelar", "cancela", "parar", "pare", "apagar", "apaga", "desligar", "desliga")) return ComandoVoz.CancelarTimer

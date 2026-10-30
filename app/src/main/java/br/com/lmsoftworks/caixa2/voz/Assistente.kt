@@ -93,7 +93,7 @@ interface AcoesAssistente {
 }
 
 /**
- * O assistente de voz ("Alexa"):
+ * O assistente de voz ("LM"):
  *  1) CHAMADA, offline (Vosk): fica escutando só a palavra de ativação, com pouca CPU e sem internet;
  *  2) PEDIDO: grava a fala até a pessoa parar e o Gemini (Google) transforma o áudio em texto;
  *  3) EXECUÇÃO: o interpretador entende o texto (tocar, volume, luzes...) ou, se for uma pergunta, pesquisa na internet;
@@ -107,28 +107,22 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         private const val TAXA = 16000f
         @Volatile private var modelo: Model? = null
 
-        // "Alexa" como o brasileiro fala; "caixa" só vale com ei/oi/ok/olá na frente (a palavra solta aparece em qualquer conversa).
-        private val VARIANTES_ALEXA = listOf(
-            "alexia", "alexi", "a lexia", "alexa", "alexsa", "alequisa", "alequiza", "alequissa", "ale quisa", "ale quiza",
-            "quiza", "quisa", "quissa", "a quiza", "a quisa", "ale kisa", "ale quissa", "a lequisa", "a lequiza", "alecha", "alexi a", "alexis a", "alé quisa", "alé quiza"
-        )
-        // Só "Alexa" chama: "ok caixa", "oi caixa de som" e parecidos já não ativam (a palavra "caixa" fica só como isca na gramática).
-        private val VARIANTES_CAIXA = emptyList<String>()
+        // O nome da caixa é "LM", que se fala "ele eme" (duas palavras seguidas: sozinha, "ele" aparece em qualquer conversa).
+        // Só ele chama: "Alexa", "ok caixa" e parecidos já não ativam.
+        // "eme" sozinho também vale: quando o "ele" some, é o que o reconhecimento ouve (o "eme" quase nunca aparece em fala normal)
+        private val VARIANTES_NOME = listOf("ele eme", "eme")
         private val PREFIXOS = listOf("ei ", "oi ", "ok ", "olá ")
-        private val FRASES_CHAMADA = VARIANTES_ALEXA + PREFIXOS.flatMap { p -> (VARIANTES_ALEXA + VARIANTES_CAIXA).map { p + it } }
+        private val FRASES_CHAMADA = VARIANTES_NOME + PREFIXOS.flatMap { p -> VARIANTES_NOME.map { p + it } }
         private fun alt(l: List<String>) = l.joinToString("|") { Regex.escape(it) }
-        private val REGEX_CHAMADA_FALANDO = Regex("""^(ei|oi|ok|olá) (${alt(VARIANTES_ALEXA.filter { it.length >= 6 } + VARIANTES_CAIXA)})$""")
-        // Fragmentos curtos ("quiza", "quisa"...) ficam só na gramática como "isca"; sozinhos NÃO chamam (disparavam à toa).
-        private val FRAGMENTOS = setOf("quiza", "quisa", "quissa", "a quiza", "a quisa", "a lequisa", "a lequiza")
-        private val NOMES_FORTES = VARIANTES_ALEXA.filter { it !in FRAGMENTOS }
-        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(NOMES_FORTES + VARIANTES_CAIXA)})|(?:${alt(NOMES_FORTES)}))$""")
+        private val REGEX_CHAMADA_FALANDO = Regex("""^(ei|oi|ok|olá) (${alt(VARIANTES_NOME)})$""")
+        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(VARIANTES_NOME)})|(?:${alt(VARIANTES_NOME)}))$""")
         private const val CONFIANCA_MINIMA = 0.4
         private val REGEX_PLAYLIST = Regex("""\b(playlist|mais tocad[ao]s?|as melhores|top \d+|sucessos)\b""")
         private fun semAcento(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
         private const val ESPERA_ENTRE_CHAMADAS_MS = 2500L
-        private val SO_NOME = setOf("alexia", "alexi", "alexa", "a lexia", "alexsa", "alexi a", "alexis a")
+        private val SO_NOME = setOf("ele eme")
         private val ISCAS = listOf(
-            "alice", "caixa", "a caixa", "de som", "caixa de som", "som", "ele", "eme", "ei", "oi", "ok", "olá",
+            "alice", "caixa", "a caixa", "de som", "caixa de som", "som", "ele", "eme", "ei", "oi", "ok", "olá", "alexa", "alexia", "ela", "elo", "ele e", "eles",
             "e", "a", "o", "que", "de", "um", "uma", "não", "sim", "tá", "né", "é", "ah", "eh", "então", "ale", "leite"
         )
     }
@@ -203,7 +197,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
             estado = EstadoVoz.ESPERANDO_CHAMADA
-            Log.d(TAG, "esperando a chamada (Alexa)")
+            Log.d(TAG, "esperando a chamada (LM)")
         } catch (e: Throwable) {
             Log.w(TAG, "falha ao iniciar a escuta", e)
             estado = EstadoVoz.ERRO
@@ -344,7 +338,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     /** Comandos que mostram o resultado na própria tela (volume, luz, tocador...): só um toquinho e o assistente some, sem falar. */
     private fun silencioso(c: ComandoVoz) = c is ComandoVoz.Volume || c is ComandoVoz.Luz || c is ComandoVoz.Pausar || c is ComandoVoz.Continuar ||
         c is ComandoVoz.Parar || c is ComandoVoz.Proxima || c is ComandoVoz.Anterior || c is ComandoVoz.Recomecar || c is ComandoVoz.PularTempo ||
-        c is ComandoVoz.Ir || c is ComandoVoz.Voltar || c is ComandoVoz.Embaralhar || c is ComandoVoz.Soneca || c is ComandoVoz.CancelarTimer
+        c is ComandoVoz.Ir || c is ComandoVoz.Voltar || c is ComandoVoz.Embaralhar || c is ComandoVoz.Soneca
 
     private fun executarRapido(texto: String, c: ComandoVoz) {
         TonsVoz.pararPensando()

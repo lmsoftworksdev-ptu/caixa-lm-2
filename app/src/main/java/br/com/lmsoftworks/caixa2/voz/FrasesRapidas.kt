@@ -38,6 +38,18 @@ object FrasesRapidas {
             l += listOf("$nome de um minuto", "$nome de meia hora", "$nome de uma hora", "$nome de dez segundos", "$nome de trinta segundos",
                 "cancelar o $nome", "parar o $nome", "quanto falta no $nome", "quanto falta para o $nome")
         }
+        // ---- temporizador de sono ("desligar a música em 30 minutos") ----
+        for (nome in listOf("timer", "temporizador")) {
+            for (m in listOf("dez", "quinze", "vinte", "trinta", "quarenta", "cinquenta", "sessenta"))
+                l += "$nome de sono de $m minutos"
+            l += listOf("$nome de sono de meia hora", "$nome de sono de uma hora", "cancelar o $nome de sono")
+        }
+        for (v in listOf("desligar", "desliga")) {
+            for (m in listOf("dez", "quinze", "vinte", "trinta", "quarenta", "cinquenta", "sessenta"))
+                l += "$v a música em $m minutos"
+            l += listOf("$v a música em meia hora", "$v a música em uma hora")
+        }
+        l += "cancelar o sono"
         // ---- hora e data ----
         l += listOf("que horas são", "que horas são agora", "que dia é hoje", "qual é a data", "qual a data de hoje")
         // ---- telas ----
