@@ -26,8 +26,11 @@ class GestoVoltar(c: Context) : View(c) {
     override fun onDraw(canvas: Canvas) {
         if (!ativo) return
         val meio = height / 2f
-        p.color = Color.argb(70, 255, 255, 255)
-        canvas.drawRoundRect(0f, meio - 44.d(), 7.d().toFloat(), meio + 44.d(), 4.d().toFloat(), 4.d().toFloat(), p)
+        val puxando = progresso > 0f
+        // alça: 6 x 100 px na borda esquerda (branco 20%); enquanto o dedo puxa, vira 20 px de largura e 55% de brilho
+        val larg = (if (puxando) 20 else 6).d().toFloat()
+        p.color = if (puxando) Color.argb(140, 255, 255, 255) else Color.argb(51, 255, 255, 255)
+        canvas.drawRoundRect(-8.d().toFloat(), meio - 50.d(), larg, meio + 50.d(), 4.d().toFloat(), 4.d().toFloat(), p)
     }
 
     companion object { const val DISTANCIA = 150 }

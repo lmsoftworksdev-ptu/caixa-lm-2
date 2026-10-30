@@ -28,14 +28,14 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     companion object {
         /** O amplificador da caixa distorce acima de 87% do volume do aparelho: o 100% do app é esse 87% real. */
         const val LIMITE_REAL = 1.0f
-        private const val LARGURA_DP = 500
-        private const val ALTURA_DP = 66
+        private const val LARGURA_DP = 540
+        private const val ALTURA_DP = 64
     }
 
     private val audio = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val canal = AudioManager.STREAM_MUSIC
-    private val barra = Deslizante(c, false, true)
-    private val rotulo: TextView = texto(c, "", 22, Color.WHITE, true)
+    private val barra = BarraVolume(c)
+    private val rotulo: TextView = texto(c, "", 26, Color.WHITE, true)
     private val botaoMudo = BotaoRedondo(c, R.drawable.ic_volume_2, "Mudo", 30)
     private var anterior = 0
     private var registrado = false
@@ -71,28 +71,29 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         // fora da pílula: um toque em qualquer lugar fecha
         addView(View(c).apply { isClickable = true; setOnClickListener { fechar() } }, LayoutParams(-1, -1))
 
-        val menos = BotaoRedondo(c, R.drawable.ic_menos, "Diminuir volume", 30).apply { pintar(Color.WHITE, false); setOnClickListener { passo(-1) } }
-        val mais = BotaoRedondo(c, R.drawable.ic_mais, "Aumentar volume", 30).apply { pintar(Color.WHITE, false); setOnClickListener { passo(+1) } }
+        val menos = BotaoRedondo(c, R.drawable.ic_menos, "Diminuir volume", 28).apply { pintar(Color.WHITE, false); setOnClickListener { passo(-1) } }
+        val mais = BotaoRedondo(c, R.drawable.ic_mais, "Aumentar volume", 28).apply { pintar(Color.WHITE, false); setOnClickListener { passo(+1) } }
         botaoMudo.setOnClickListener { alternarMudo() }
-        barra.aoMudar = { f, _ -> definir(f) }
+        barra.aoMudar = { f -> definir(Math.round(f * 10) / 10f) }
         botaoMudo.pintar(Color.WHITE, false)
         // dentro da pílula os botões não têm círculo próprio: só o ícone
         for (b in listOf(botaoMudo, menos, mais)) b.background = null
 
+        // o botão de volume da barra (64 px) fica sobre o começo da pílula; o conteúdo começa depois dele
         val conteudo = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8.d(), 0, 20.d(), 0)
-            addView(botaoMudo, LinearLayout.LayoutParams(54.d(), 54.d()))
-            addView(menos, LinearLayout.LayoutParams(54.d(), 54.d()))
-            addView(barra, LinearLayout.LayoutParams(0, ALTURA_DP.d(), 1f).apply { leftMargin = 4.d(); rightMargin = 4.d() })
-            addView(mais, LinearLayout.LayoutParams(54.d(), 54.d()))
-            addView(rotulo, LinearLayout.LayoutParams(74.d(), LayoutParams.WRAP_CONTENT))
-            rotulo.gravity = Gravity.END
+            addView(View(c), LinearLayout.LayoutParams(64.d(), 1))
+            addView(botaoMudo, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
+            addView(menos, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
+            addView(barra, LinearLayout.LayoutParams(0, ALTURA_DP.d(), 1f).apply { leftMargin = 6.d(); rightMargin = 6.d() })
+            addView(mais, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
+            addView(rotulo, LinearLayout.LayoutParams(56.d(), LayoutParams.WRAP_CONTENT))
+            rotulo.gravity = Gravity.CENTER
         }
         // o conteúdo tem largura fixa; só a pílula cresce, e o que passa da borda é cortado (efeito de abrir)
         pilula.apply {
-            background = fundoArredondado(Color.argb(0x12, 255, 255, 255), (ALTURA_DP / 2).d(), Cfg.LINHA)
+            background = fundoArredondado(Color.parseColor("#1A1A22"), (ALTURA_DP / 2).d())
             visibility = View.GONE
             alpha = 0f
             addView(conteudo, FrameLayout.LayoutParams(LARGURA_DP.d(), ALTURA_DP.d()))
@@ -205,5 +206,37 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         botaoMudo.trocarIcone(if (mudo) R.drawable.ic_volume_x else R.drawable.ic_volume_2)
         aoMudar(p, mudo)
         if (abrindo) { handler.removeCallbacks(fecharSozinho); handler.postDelayed(fecharSozinho, 4000) }
+    }
+}
+
+/** Barra do volume da v2: trilho de 10 px (branco 12%) e preenchimento branco; toque ou arrasto escolhe o nível. */
+class BarraVolume(c: Context) : View(c) {
+    private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    var valor = 0f
+        set(v) { if (!arrastando) { field = v.coerceIn(0f, 1f); invalidate() } }
+    var aoMudar: ((Float) -> Unit)? = null
+    private var arrastando = false
+    private var atual = 0f
+
+    private fun fracaoDe(x: Float) = (x / width).coerceIn(0f, 1f)
+
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> { parent?.requestDisallowInterceptTouchEvent(true); arrastando = true; atual = fracaoDe(e.x); aoMudar?.invoke(atual); invalidate() }
+            android.view.MotionEvent.ACTION_MOVE -> { atual = fracaoDe(e.x); aoMudar?.invoke(atual); invalidate() }
+            android.view.MotionEvent.ACTION_UP -> { atual = fracaoDe(e.x); arrastando = false; valor = atual; aoMudar?.invoke(atual); invalidate() }
+            android.view.MotionEvent.ACTION_CANCEL -> { arrastando = false; invalidate() }
+        }
+        return true
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val f = if (arrastando) atual else valor
+        val meio = height / 2f
+        val r = 5.d().toFloat()
+        p.color = Color.parseColor("#1FFFFFFF")
+        canvas.drawRoundRect(0f, meio - r, width.toFloat(), meio + r, r, r, p)
+        p.color = Color.WHITE
+        canvas.drawRoundRect(0f, meio - r, width * f, meio + r, r, r, p)
     }
 }

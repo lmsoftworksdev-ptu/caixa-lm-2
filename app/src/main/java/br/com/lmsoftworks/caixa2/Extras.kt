@@ -84,27 +84,18 @@ object CorCapa {
 }
 
 /**
- * Troca de tela em formato de caixa (cubo 3D): a tela de saída e a de destino são duas faces vizinhas de um cubo que gira.
- * [dir] = +1 voltar (a atual sai pela direita e a anterior entra pela esquerda), -1 avançar (ao contrário).
- * Cada face fica escura quando está de lado e some/aparece suavemente nas pontas, para não sobrar uma tirinha da outra tela.
+ * Troca de tela da v2: deslize lateral. [dir] = -1 avançar (a tela nova entra da direita por cima e a antiga recua 30% para a
+ * esquerda, escurecendo até 60%); +1 voltar (a atual sai pela direita e a anterior vem de -30%, clareando). O nome "Cubo" ficou
+ * para não mexer nos chamadores.
  */
 object Cubo {
-    /** Ajuste do sentido da rotação no Android (testado por captura de tela). */
-    private const val SINAL = 1f
-
     private val tintaA = Paint()
     private val tintaB = Paint()
 
-    private fun suave(x: Float): Float { val t = x.coerceIn(0f, 1f); return t * t * (3f - 2f * t) }
-
-    /**
-     * Cada face vira uma "camada de hardware": o conteúdo é desenhado UMA vez numa textura e o giro, a transparência e o
-     * escurecimento são aplicados pela placa de vídeo, sem redesenhar a tela a cada quadro (era o que travava).
-     */
+    /** Cada tela vira uma "camada de hardware": o conteúdo é desenhado UMA vez numa textura e o deslize é feito pela placa de vídeo. */
     fun preparar(a: View, b: View) {
         for (v in listOf(a, b)) {
             v.visibility = View.VISIBLE
-            v.cameraDistance = 14000f
             v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         }
     }
@@ -114,21 +105,22 @@ object Cubo {
         v.setLayerPaint(tinta)
     }
 
-    /** [grau] de 0 a 90; [metade] = metade da largura da tela, em pixels (a distância do centro do cubo até a face). */
+    /** [grau] de 0 a 90 (o progresso do deslize); [metade] = metade da largura da tela, em pixels. */
     fun aplicar(a: View, b: View, grau: Float, dir: Int, metade: Float) {
-        val g = grau.coerceIn(0f, 90f)
-        val r = Math.toRadians(g.toDouble())
-        val s = sin(r).toFloat(); val c = cos(r).toFloat()
-        val f = min(1f, g / 90f)
-        a.translationX = dir * metade * s
-        a.rotationY = SINAL * dir * g
-        b.translationX = -dir * metade * c
-        b.rotationY = SINAL * dir * (g - 90f)
-        // (sem translationZ de propósito: Z negativo fazia o fundo animado ser desenhado POR CIMA das telas, e elas sumiam no giro)
-        a.alpha = 1f - suave((f - .72f) / .28f)        // a que sai some nos últimos 28% do giro
-        b.alpha = suave(f / .22f)                       // a que entra só aparece depois de 22% do giro
-        escurecer(a, tintaA, .55f * f)                  // a que sai escurece até 45% do brilho
-        escurecer(b, tintaB, .55f * (1f - f))           // a que entra clareia de 45% a 100%
+        val f = grau.coerceIn(0f, 90f) / 90f
+        val l = metade * 2f
+        a.alpha = 1f; b.alpha = 1f; a.rotationY = 0f; b.rotationY = 0f
+        if (dir < 0) {
+            a.translationX = -0.3f * l * f
+            b.translationX = l * (1f - f)
+            a.translationZ = 0f; b.translationZ = 4f
+            escurecer(a, tintaA, .6f * f); escurecer(b, tintaB, 0f)
+        } else {
+            a.translationX = l * f
+            b.translationX = -0.3f * l * (1f - f)
+            a.translationZ = 4f; b.translationZ = 0f
+            escurecer(a, tintaA, 0f); escurecer(b, tintaB, .6f * (1f - f))
+        }
     }
 
     fun limpar(v: View) {

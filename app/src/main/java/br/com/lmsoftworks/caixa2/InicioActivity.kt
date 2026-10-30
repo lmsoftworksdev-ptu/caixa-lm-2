@@ -153,6 +153,7 @@ class InicioActivity : Activity() {
         barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
         barra.colocarPilulaVolume(painelVolume.pilula)
         gesto = GestoVoltar(this)
+        barra.translationZ = 30f; painelVolume.translationZ = 20f; gesto.translationZ = 30f      // acima das telas que deslizam
         inicio = TelaInicio(this) { abrir(it) }
         telaWifi = TelaWifi(this, wifi)
         telaWifi.visibility = View.GONE
@@ -198,7 +199,7 @@ class InicioActivity : Activity() {
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
-            addView(barra, FrameLayout.LayoutParams(-1, 84.d()))
+            addView(barra, FrameLayout.LayoutParams(-1, 92.d()))
             addView(gesto, FrameLayout.LayoutParams(-1, -1))
         }
 
@@ -317,7 +318,7 @@ class InicioActivity : Activity() {
     }
 
     private fun aoMudarWifi() {
-        barra.definirWifi(wifi.ligado && wifi.conectadoSsid != null)
+        barra.definirWifi(wifi.ligado, wifi.ligado && wifi.conectadoSsid != null)
         if (atual == "wifi") telaWifi.atualizar()
     }
 
@@ -331,16 +332,12 @@ class InicioActivity : Activity() {
 
     private fun aplicarTemaLed() {
         val t = android.os.SystemClock.uptimeMillis() / 1000f
-        val c1 = led.corDestaque(t)
-        val hsv = FloatArray(3)
-        Color.colorToHSV(c1, hsv)
-        val c2 = Color.HSVToColor(floatArrayOf((hsv[0] + 45f) % 360f, hsv[1], hsv[2] * 0.55f))
-        fundo.tema(c1, c2)
+        fundo.tema(led.corDestaque(t), Color.parseColor("#2A1A7A"))
         Cfg.AZUL = Cfg.COR_FIXA   // o fundo acompanha a fita, mas os botões ficam na cor padrão
     }
 
     private fun aoMudarLed() {
-        barra.definirLed(led.online, !led.online && led.erro == null)
+        barra.definirLed(led.online, led.ligado)
         if (atual == "led") telaLed.atualizar()
     }
 
@@ -387,14 +384,15 @@ class InicioActivity : Activity() {
 
     /** Cores do fundo e cor de destaque de cada menu. */
     private fun aplicarTema(menu: String) {
+        // (cor 1 do fundo, cor 2 do fundo, cor de destaque do menu) — interface v2
         val (a, b, destaque) = when (menu) {
-            "wifi" -> Triple("#12C7D6", "#2F7BFF", "#12C7D6")
-            "bluetooth" -> Triple("#3D8BFF", "#1A3FA8", "#3D8BFF")
+            "wifi" -> Triple("#12C7D6", "#2F6BFF", "#38D5FF")
+            "bluetooth" -> Triple("#3D8BFF", "#8A4DFF", "#5B8CFF")
             "musica" -> temaMusica()
-            "midia" -> Triple("#2F7BFF", "#FF3B4E", "#2F7BFF")
-            "led" -> Triple("#2F7BFF", "#8A5CFF", "#2F7BFF")
-            "alarmes" -> Triple("#FF4FA3", "#7A3CFF", "#FF4FA3")
-            else -> Triple("#0B3B9C", "#06214F", "#2F7BFF")
+            "midia" -> Triple("#FF4F7A", "#6A4DFF", "#FF5C7A")
+            "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
+            "alarmes" -> Triple("#FF4FA3", "#7A3CFF", "#B07CFF")
+            else -> Triple("#2A62FF", "#7A3CFF", "#FFB84D")
         }
         fundo.tema(Color.parseColor(a), Color.parseColor(b))
         Cfg.AZUL = Color.parseColor(destaque)
@@ -437,10 +435,10 @@ class InicioActivity : Activity() {
 
     /** Gira o cubo de [desde] até [ate] graus (640 ms no giro inteiro; nos parciais, proporcional, no mínimo 240 ms). */
     private fun animarCubo(de: View, para: View, dir: Int, desde: Float, ate: Float, aoFim: () -> Unit) {
-        val dur = if (desde == 0f && ate == 90f) 640L else maxOf(240L, (640f * Math.abs(ate - desde) / 90f).toLong())
+        val dur = if (desde == 0f && ate == 90f) 500L else maxOf(200L, (500f * Math.abs(ate - desde) / 90f).toLong())
         // giro inteiro (abrir menu, botão voltar): começa e termina devagar (ease in-out cúbico).
         // Terminar um arrasto: o dedo já vinha rápido, então a caixa continua na mesma velocidade e só freia (sem "paradinha").
-        val interpolador = if (desde == 0f && ate == 90f) android.view.animation.PathInterpolator(0.65f, 0f, 0.35f, 1f)
+        val interpolador = if (desde == 0f && ate == 90f) android.view.animation.PathInterpolator(0.3f, 0.7f, 0.2f, 1f)
                            else android.view.animation.PathInterpolator(0f, 0f, 0.2f, 1f)
         var t0 = -1L
         fundo.parar()      // o fundo animado fica parado durante o giro (menos redesenho); volta no fim

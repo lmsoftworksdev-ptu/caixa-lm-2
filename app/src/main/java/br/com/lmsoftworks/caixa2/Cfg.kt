@@ -25,6 +25,16 @@ object Cfg {
     val MUDO = Color.parseColor("#8FA6D4")
     val OK = Color.parseColor("#29D391")
 
+    // ----- Interface v2 -----
+    val TX = Color.parseColor("#F6F6FA")          // texto principal
+    val TX2 = Color.parseColor("#B7BACB")         // texto secundário
+    val TX_MUDO = Color.parseColor("#8A8DA0")
+    val SUPERFICIE = Color.parseColor("#12FFFFFF")        // tiles, faixas (7%)
+    val SUPERFICIE2 = Color.parseColor("#1FFFFFFF")       // forte (12%)
+    val DIVISOR = Color.parseColor("#17FFFFFF")
+    val VERM2 = Color.parseColor("#FF4D5E")
+    val OK2 = Color.parseColor("#3DDC97")
+
     // ----- Fundo animado -----
     const val MATIZ = 215f        // tom base do degradê (graus)
     const val MATIZ_VAR = 12f     // quanto o tom sobe e desce
