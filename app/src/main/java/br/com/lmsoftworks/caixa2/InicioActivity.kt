@@ -68,6 +68,24 @@ class InicioActivity : Activity() {
     private var apareceu = false
     private val relogio = Handler(Looper.getMainLooper())
 
+    private var climaEm = 0L
+    private var climaBuscando = false
+
+    /** A cada 30 minutos (ou 5 se a internet falhou) busca a previsão e mostra na tela inicial. */
+    private fun atualizarClimaInicio() {
+        val agora = android.os.SystemClock.uptimeMillis()
+        if (climaBuscando || (climaEm != 0L && agora - climaEm < 30 * 60_000L)) return
+        climaBuscando = true
+        climaEm = agora
+        Thread {
+            val c = try { br.com.lmsoftworks.caixa2.voz.Respostas.climaHoje(this) } catch (e: Throwable) { null }
+            relogio.post {
+                climaBuscando = false
+                if (c != null) inicio.definirClima(c.texto()) else climaEm = android.os.SystemClock.uptimeMillis() - 25 * 60_000L
+            }
+        }.start()
+    }
+
     private lateinit var lembretes: LembreteControle
     private lateinit var listas: ListaControle
 
@@ -100,6 +118,8 @@ class InicioActivity : Activity() {
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto())
+            inicio.definirLembrete(lembretes.todos.firstOrNull()?.let { "${it.texto}, ${LembreteControle.quando(it.quandoMs)}" })
+            atualizarClimaInicio()
             if (!ocioso) {
                 if (android.os.SystemClock.uptimeMillis() - ultimoToque > IDLE_MS && !ocupado()) entrarOcioso()
             } else {

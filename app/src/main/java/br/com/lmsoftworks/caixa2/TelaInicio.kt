@@ -17,6 +17,8 @@ class TelaInicio(c: Context, private val aoAbrir: (String) -> Unit) : LinearLayo
     private val data = texto(c, "", 26, Color.WHITE).apply { alpha = .9f }
     private val ola = texto(c, "", 22, Color.parseColor("#D6E0F7"))
     private val proximo = texto(c, "", 24, Color.parseColor("#FFD2EA"))
+    private val clima = texto(c, "", 22, Color.parseColor("#D6E0F7")).apply { visibility = android.view.View.GONE }
+    private val lembrete = texto(c, "", 22, Color.parseColor("#FFD2EA")).apply { visibility = android.view.View.GONE }
     private val formatoData = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
 
     init {
@@ -34,6 +36,8 @@ class TelaInicio(c: Context, private val aoAbrir: (String) -> Unit) : LinearLayo
             addView(data, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 2.d() })
             addView(ola, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8.d() })
             addView(proximo, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8.d() })
+            addView(lembrete, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8.d() })
+            addView(clima, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 8.d() })
         }
         addView(topo, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -66,6 +70,18 @@ class TelaInicio(c: Context, private val aoAbrir: (String) -> Unit) : LinearLayo
     fun definirProximoAlarme(t: String?) {
         proximo.text = if (t == null) "" else "⏰  $t"
         proximo.visibility = if (t == null) android.view.View.GONE else android.view.View.VISIBLE
+    }
+
+    /** A previsão de hoje, abaixo dos avisos (some se não há internet ainda). */
+    fun definirClima(t: String?) {
+        clima.text = t ?: ""
+        clima.visibility = if (t == null) android.view.View.GONE else android.view.View.VISIBLE
+    }
+
+    /** O próximo lembrete ("🔔 beber água, daqui a 5 minutos"); some se não há nenhum. */
+    fun definirLembrete(t: String?) {
+        lembrete.text = if (t == null) "" else "🔔  $t"
+        lembrete.visibility = if (t == null) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     fun atualizar() {

@@ -376,6 +376,44 @@ object Respostas {
         "tempo", "clima", "previsão", "previsao", "temperatura", "chover", "chuva", "graus", "frio", "calor"
     )
 
+    /** A previsão de hoje em números, para a tela inicial. */
+    class ClimaHoje(val cidade: String, val temp: Int, val min: Int?, val max: Int?, val chuva: Int?, val codigo: Int) {
+        /** "⛅  24°  ·  mín 18° / máx 29°  ·  chuva 10%  ·  Cidade" */
+        fun texto(): String = buildString {
+            append(emoji(codigo)).append("  ").append(temp).append("°")
+            if (min != null && max != null) append("  ·  mín ").append(min).append("° / máx ").append(max).append("°")
+            if (chuva != null && chuva > 0) append("  ·  chuva ").append(chuva).append("%")
+            if (cidade.isNotBlank()) append("  ·  ").append(cidade)
+        }
+        private fun emoji(c: Int) = when (c) {
+            0 -> "☀️"; 1, 2 -> "⛅"; 3 -> "☁️"; 45, 48 -> "🌫️"; in 51..67 -> "🌧️"; in 71..77 -> "❄️"; in 80..82 -> "🌦️"; in 95..99 -> "⛈️"; else -> "🌡️"
+        }
+    }
+
+    /** Previsão de hoje pela cidade aproximada (IP), sem passar pela fala. null se a internet falhar. */
+    fun climaHoje(ctx: Context): ClimaHoje? {
+        val ip = getJson(ctx, "https://ipwho.is/") ?: return null
+        if (!ip.optBoolean("success", false)) return null
+        val lat = ip.optDouble("latitude"); val lon = ip.optDouble("longitude")
+        val m = getJson(
+            ctx,
+            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+                "&current=temperature_2m,weather_code" +
+                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                "&timezone=auto&forecast_days=1"
+        ) ?: return null
+        val atual = m.optJSONObject("current") ?: return null
+        val d = m.optJSONObject("daily")
+        return ClimaHoje(
+            ip.optString("city"),
+            Math.round(atual.optDouble("temperature_2m")).toInt(),
+            d?.optJSONArray("temperature_2m_min")?.optDouble(0)?.let { Math.round(it).toInt() },
+            d?.optJSONArray("temperature_2m_max")?.optDouble(0)?.let { Math.round(it).toInt() },
+            d?.optJSONArray("precipitation_probability_max")?.optInt(0),
+            atual.optInt("weather_code")
+        )
+    }
+
     /** A previsão de hoje direto do Open-Meteo, pela cidade aproximada (IP). Sem busca na web: serve para as rotinas ("bom dia"). */
     fun climaDeHoje(ctx: Context): String? = clima(ctx, "tempo")
 
