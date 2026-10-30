@@ -69,6 +69,7 @@ class InicioActivity : Activity() {
     private val relogio = Handler(Looper.getMainLooper())
 
     private lateinit var lembretes: LembreteControle
+    private lateinit var listas: ListaControle
 
     /** Chegou a hora de um lembrete: toca o aviso, mostra na tela e fala em voz alta. */
     private fun dispararLembrete(l: Lembrete) {
@@ -150,6 +151,7 @@ class InicioActivity : Activity() {
         telaLed.visibility = View.GONE
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
         lembretes = LembreteControle(this)
+        listas = ListaControle(this)
         telaAlarmes = TelaAlarmes(this, alarmes) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
@@ -515,6 +517,7 @@ class InicioActivity : Activity() {
                 val a = alarmes.novo(); a.hora = c.hora; a.minuto = c.minuto; a.ligado = true; alarmes.salvar()
                 "Alarme criado para %d:%02d".format(c.hora, c.minuto)
             }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Lista -> listas.executar(c)
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.ListarLembretes -> {
                 val todos = lembretes.todos
                 if (todos.isEmpty()) "Você não tem nenhum lembrete."

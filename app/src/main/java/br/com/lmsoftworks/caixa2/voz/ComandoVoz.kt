@@ -70,6 +70,9 @@ sealed class ComandoVoz {
     object ListarLembretes : ComandoVoz()
     object ApagarLembretes : ComandoVoz()
 
+    /** "adiciona leite e pão na lista de compras", "o que tem na lista", "tira o leite da lista", "limpa a lista". */
+    data class Lista(val acao: AcaoLista, val nome: String, val itens: List<String> = emptyList()) : ComandoVoz()
+
     /** "criar alarme as 7 e meia". */
     data class CriarAlarme(val hora: Int, val minuto: Int) : ComandoVoz()
 
@@ -80,6 +83,8 @@ sealed class ComandoVoz {
 }
 
 enum class AcaoVolume { AUMENTAR, DIMINUIR, MAXIMO, MINIMO, NIVEL, MUDO, DESMUTAR }
+
+enum class AcaoLista { ADICIONAR, REMOVER, LER, LIMPAR }
 
 enum class AcaoLuz { LIGAR, DESLIGAR, COR, MODO, BRILHO, MAIS_FRACA, MAIS_FORTE, QUENTE, LEITURA }
 
@@ -124,7 +129,38 @@ object InterpretadorVoz {
         return t.replace("meia hora", "30 minutos").split(" ").joinToString(" ") { m[it] ?: it }
     }
 
-    private val RE_TIMER = Regex("""(?:timer|temporizador|cronometro|cronômetro).*?(\d{1,4})\s*(segundo|minuto|hora)""")
+    // ---- listas ("lista de compras") ----
+    private val RE_LISTA_ADD = Regex("""(?:adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|anota|anote|anotar|põe|poe|inclui|inclua|incluir)\s+(.+?)\s+(?:na|no|à|em)\s+(?:minha\s+)?lista(?:\s+de\s+(\p{L}+))?""")
+    private val RE_LISTA_TIRA = Regex("""(?:tira|tire|tirar|remove|remova|remover|apaga|apague|apagar|risca|risque|riscar)\s+(.+?)\s+(?:da|do|de)\s+(?:minha\s+)?lista(?:\s+de\s+(\p{L}+))?""")
+    private val RE_LISTA_LIMPA = Regex("""(?:limpa|limpe|limpar|esvazia|esvazie|esvaziar|zera|zere|zerar|apaga|apague|apagar)\s+(?:toda\s+|minha\s+|a\s+)*lista(?:\s+de\s+(\p{L}+))?""")
+    private val RE_LISTA_LER = Regex("""(?:o\s+que\s+(?:tem|há|ha|falta|está|esta)\s+na|(?:le|lê|ler|leia|fala|fale|falar|mostra|mostre|mostrar|diz|diga)\s+(?:a\s+|minha\s+)*|minha\s+)\s*lista(?:\s+de\s+(\p{L}+))?""")
+    private val NAO_E_LISTA = setOf("reprodução", "reproducao", "músicas", "musicas", "música", "musica", "favoritos", "tocar", "videos", "vídeos")
+
+    private fun nomeLista(g: String): String? {
+        val n = g.trim().lowercase()
+        if (n in NAO_E_LISTA) return null
+        return when (n) {
+            "" , "compra", "mercado", "supermercado", "feira" -> "compras"
+            "tarefa", "afazeres", "pendências", "pendencias" -> "tarefas"
+            else -> n
+        }
+    }
+
+    private fun itensDe(frase: String): List<String> =
+        frase.split(Regex("""\s*[,;]\s*|\s+e\s+""")).map { it.trim().removePrefix("o ").removePrefix("a ").removePrefix("os ").removePrefix("as ").removePrefix("um ").removePrefix("uma ").trim() }
+            .filter { it.isNotEmpty() }
+
+    private fun interpretarLista(textoBruto: String): ComandoVoz.Lista? {
+        if (!textoBruto.lowercase().contains("lista")) return null
+        val b = textoBruto.lowercase().trim().trimEnd('.', '!', '?', ' ')
+        RE_LISTA_ADD.find(b)?.let { m -> nomeLista(m.groupValues[2])?.let { return ComandoVoz.Lista(AcaoLista.ADICIONAR, it, itensDe(m.groupValues[1])) } }
+        RE_LISTA_TIRA.find(b)?.let { m -> nomeLista(m.groupValues[2])?.let { return ComandoVoz.Lista(AcaoLista.REMOVER, it, itensDe(m.groupValues[1])) } }
+        RE_LISTA_LIMPA.find(b)?.let { m -> nomeLista(m.groupValues[1])?.let { return ComandoVoz.Lista(AcaoLista.LIMPAR, it) } }
+        RE_LISTA_LER.find(b)?.let { m -> nomeLista(m.groupValues[1])?.let { return ComandoVoz.Lista(AcaoLista.LER, it) } }
+        return null
+    }
+
+    private val RE_TIMER =Regex("""(?:timer|temporizador|cronometro|cronômetro).*?(\d{1,4})\s*(segundo|minuto|hora)""")
 
     private val RE_NIVEL = Regex("""volume\s+(?:no\s+|em\s+|para\s+|pra\s+|na\s+)?(\d{1,3})""")
     private val RE_TEMPO = Regex("""(\d{1,3})\s*(segundo|segundos|minuto|minutos)""")
@@ -181,6 +217,7 @@ object InterpretadorVoz {
             }
             return ComandoVoz.Lembrete(textoBruto)
         }
+        interpretarLista(textoBruto)?.let { return it }
         if (tem("embaralhar") || tem("aleatorio") || tem("aleatório")) return ComandoVoz.Embaralhar
 
         // ---------- luzes, navegação e alarme (antes de "desligar", que também apaga a luz) ----------
