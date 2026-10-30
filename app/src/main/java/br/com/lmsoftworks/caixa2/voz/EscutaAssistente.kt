@@ -147,8 +147,8 @@ class EscutaAssistente(
                     // modo chamada, só com voz: guarda 3 blocos de antes e segue 8 blocos (0,8 s) depois de a voz parar
                     if (pisoSala < 0f) pisoSala = max(3f, rmsBruto)
                     pisoSala = if (rmsBruto < pisoSala) max(3f, rmsBruto) else pisoSala * 0.9995f + rmsBruto * 0.0005f
-                    val voz = rmsBruto > max(70f, pisoSala * 2.2f)
-                    if (voz) restoVoz = 8 else if (restoVoz > 0) restoVoz--
+                    val voz = rmsBruto > max(45f, pisoSala * 1.8f)      // sensível: pega voz mais baixa ou mais longe
+                    if (voz) restoVoz = 10 else if (restoVoz > 0) restoVoz--
                     val copia = bloco.copyOf(n)
                     if (voz || restoVoz > 0) {
                         if (!enviandoChamada) { enviandoChamada = true; for (a in antes) fila.offer(Bloco(a, Bloco.CHAMADA)); antes.clear() }
@@ -156,7 +156,7 @@ class EscutaAssistente(
                         fila.offer(Bloco(copia, Bloco.CHAMADA))
                     } else {
                         enviandoChamada = false
-                        antes.addLast(copia); if (antes.size > 3) antes.removeFirst()
+                        antes.addLast(copia); if (antes.size > 5) antes.removeFirst()
                     }
                 }
             }

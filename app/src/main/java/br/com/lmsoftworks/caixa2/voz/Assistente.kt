@@ -93,7 +93,7 @@ interface AcoesAssistente {
 }
 
 /**
- * O assistente de voz ("LM"):
+ * O assistente de voz ("Alexa"):
  *  1) CHAMADA, offline (Vosk): fica escutando só a palavra de ativação, com pouca CPU e sem internet;
  *  2) PEDIDO: grava a fala até a pessoa parar e o Gemini (Google) transforma o áudio em texto;
  *  3) EXECUÇÃO: o interpretador entende o texto (tocar, volume, luzes...) ou, se for uma pergunta, pesquisa na internet;
@@ -107,23 +107,31 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         private const val TAXA = 16000f
         @Volatile private var modelo: Model? = null
 
-        // O nome da caixa é "LM", que se fala "ele eme" (duas palavras seguidas: sozinha, "ele" aparece em qualquer conversa).
-        // Só ele chama: "Alexa", "ok caixa" e parecidos já não ativam.
-        // "eme" sozinho também vale: quando o "ele" some, é o que o reconhecimento ouve (o "eme" quase nunca aparece em fala normal)
-        private val VARIANTES_NOME = listOf("ele eme", "eme")
+        // O nome da caixa é "Alexa", como o brasileiro fala. O modelo não conhece "alexa" escrito assim: o que ele ouve é "alexia" ou "alexi";
+        // as outras formas ficam na lista para pegar o que ele escrever diferente. Só o nome chama: "ok caixa", "LM" e parecidos não.
+        private val VARIANTES_ALEXA = listOf(
+            "alexia", "alexi", "a lexia", "alexa", "alexsa", "alexis", "alequisa", "alequiza", "alequissa", "ale quisa", "ale quiza",
+            "quiza", "quisa", "quissa", "a quiza", "a quisa", "ale kisa", "ale quissa", "a lequisa", "a lequiza", "alecha", "alexi a", "alexis a", "alé quisa", "alé quiza"
+        )
         private val PREFIXOS = listOf("ei ", "oi ", "ok ", "olá ")
-        private val FRASES_CHAMADA = VARIANTES_NOME + PREFIXOS.flatMap { p -> VARIANTES_NOME.map { p + it } }
+        private val FRASES_CHAMADA = VARIANTES_ALEXA + PREFIXOS.flatMap { p -> VARIANTES_ALEXA.map { p + it } }
         private fun alt(l: List<String>) = l.joinToString("|") { Regex.escape(it) }
-        private val REGEX_CHAMADA_FALANDO = Regex("""^(ei|oi|ok|olá) (${alt(VARIANTES_NOME)})$""")
-        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(VARIANTES_NOME)})|(?:${alt(VARIANTES_NOME)}))$""")
-        private const val CONFIANCA_MINIMA = 0.4
+        private val REGEX_CHAMADA_FALANDO = Regex("""^(ei|oi|ok|olá) (${alt(VARIANTES_ALEXA.filter { it.length >= 6 })})$""")
+        // Fragmentos curtos ("quiza", "quisa"...) ficam só na gramática como "isca"; sozinhos NÃO chamam (disparavam à toa).
+        private val FRAGMENTOS = setOf("quiza", "quisa", "quissa", "a quiza", "a quisa", "a lequisa", "a lequiza")
+        private val NOMES_FORTES = VARIANTES_ALEXA.filter { it !in FRAGMENTOS }
+        private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(NOMES_FORTES)})|(?:${alt(NOMES_FORTES)}))$""")
+        // Sensível: vale com confiança baixa e já na PRIMEIRA vez que a palavra aparece no texto parcial (antes eram 2 vezes seguidas).
+        private const val CONFIANCA_MINIMA = 0.3
+        private const val PARCIAIS_PARA_VALER = 1
         private val REGEX_PLAYLIST = Regex("""\b(playlist|mais tocad[ao]s?|as melhores|top \d+|sucessos)\b""")
         private fun semAcento(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
-        private const val ESPERA_ENTRE_CHAMADAS_MS = 2500L
-        private val SO_NOME = setOf("ele eme")
+        private const val ESPERA_ENTRE_CHAMADAS_MS = 1800L
+        private val SO_NOME = setOf("alexia", "alexi", "alexa", "a lexia", "alexsa", "alexis", "alexi a", "alexis a")
+        // Palavras parecidas que o reconhecimento pode confundir com o nome: ficam na gramática para absorvê-las (não chamam).
         private val ISCAS = listOf(
-            "alice", "caixa", "a caixa", "de som", "caixa de som", "som", "ele", "eme", "ei", "oi", "ok", "olá", "alexa", "alexia", "ela", "elo", "ele e", "eles",
-            "e", "a", "o", "que", "de", "um", "uma", "não", "sim", "tá", "né", "é", "ah", "eh", "então", "ale", "leite"
+            "alice", "alexandre", "alessandra", "aline", "alô", "elias", "ela", "caixa", "a caixa", "de som", "caixa de som", "som", "ele", "eme",
+            "ei", "oi", "ok", "olá", "e", "a", "o", "que", "de", "um", "uma", "não", "sim", "tá", "né", "é", "ah", "eh", "então", "ale", "leite"
         )
     }
 
@@ -197,7 +205,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
             estado = EstadoVoz.ESPERANDO_CHAMADA
-            Log.d(TAG, "esperando a chamada (LM)")
+            Log.d(TAG, "esperando a chamada (Alexa)")
         } catch (e: Throwable) {
             Log.w(TAG, "falha ao iniciar a escuta", e)
             estado = EstadoVoz.ERRO
@@ -225,7 +233,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         // Frase terminada: vale com confiança. Parcial (mais rápido, ~0,3 s): só se a MESMA palavra estável aparecer 3 vezes seguidas.
         if (campo == "partial") {
             if (texto == ultimoParcial) parciaisIguais++ else { ultimoParcial = texto; parciaisIguais = 1 }
-            if (parciaisIguais < 2 || !REGEX_CHAMADA.matches(texto)) return
+            if (parciaisIguais < PARCIAIS_PARA_VALER || !REGEX_CHAMADA.matches(texto)) return
         }
         val conf = if (campo == "partial") 1.0 else confianca(json)
         parciaisIguais = 0; ultimoParcial = ""

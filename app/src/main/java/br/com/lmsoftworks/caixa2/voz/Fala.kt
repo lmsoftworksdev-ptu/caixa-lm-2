@@ -135,7 +135,7 @@ object Fala {
         }
     }
 
-    /** Para de falar agora (ex.: a pessoa disse "LM" de novo no meio da resposta). */
+    /** Para de falar agora (ex.: a pessoa disse "Alexa" de novo no meio da resposta). */
     fun parar() {
         falando = false
         geracaoOnline++
