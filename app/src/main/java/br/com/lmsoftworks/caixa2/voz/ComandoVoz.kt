@@ -65,6 +65,11 @@ sealed class ComandoVoz {
     /** "abrir o wi-fi": [destino] = inicio, wifi, bluetooth, alarmes, led, midia. */
     data class Ir(val destino: String) : ComandoVoz()
 
+    /** "me lembra de ligar para o João às 15h": [texto] é a frase inteira; o Gemini separa o quê e o quando. */
+    data class Lembrete(val texto: String) : ComandoVoz()
+    object ListarLembretes : ComandoVoz()
+    object ApagarLembretes : ComandoVoz()
+
     /** "criar alarme as 7 e meia". */
     data class CriarAlarme(val hora: Int, val minuto: Int) : ComandoVoz()
 
@@ -167,6 +172,14 @@ object InterpretadorVoz {
                 val s = when (m.groupValues[2]) { "hora" -> n * 3600; "minuto" -> n * 60; else -> n }
                 if (s in 1..86400) return ComandoVoz.Timer(s)
             }
+        }
+        // lembretes: "me lembra de...", "meus lembretes", "apagar os lembretes", "me avisa daqui a 10 minutos"
+        if (temPalavra("lembrete", "lembretes", "lembra", "lembre", "lembrar") || tem("me avisa") || tem("me avise")) {
+            if (temPalavra("lembrete", "lembretes")) {
+                if (temPalavra("apagar", "apaga", "limpar", "limpa", "cancelar", "cancela", "excluir", "exclui", "remover", "remove")) return ComandoVoz.ApagarLembretes
+                if (tem("meus") || tem("quais") || tem("tenho") || temPalavra("listar", "lista", "mostra", "mostrar", "fala", "falar")) return ComandoVoz.ListarLembretes
+            }
+            return ComandoVoz.Lembrete(textoBruto)
         }
         if (tem("embaralhar") || tem("aleatorio") || tem("aleatório")) return ComandoVoz.Embaralhar
 

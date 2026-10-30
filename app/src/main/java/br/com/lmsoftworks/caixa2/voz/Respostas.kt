@@ -596,6 +596,53 @@ object Respostas {
         }
     }
 
+    /** O que lembrar ([texto], curto, no infinitivo) e quando ([quandoMs], instante no futuro). */
+    class PedidoLembrete(val texto: String, val quandoMs: Long)
+
+    /**
+     * Pede ao Gemini para separar "o quê" e "quando" de um pedido de lembrete falado ("me lembra de ligar para o João amanhã às 3 da tarde").
+     * O Gemini recebe a data e a hora de agora para resolver "daqui a 20 minutos", "sexta", "às 15h"... Devolve null se não achou o quando.
+     */
+    fun interpretarLembrete(ctx: Context, dito: String): PedidoLembrete? {
+        val (chave, _) = lerConfig(ctx, "gemini.txt", "", MODELO_GEMINI_PADRAO) ?: return null
+        val agora = java.util.Date()
+        val dia = java.text.SimpleDateFormat("EEEE, dd/MM/yyyy", java.util.Locale("pt", "BR")).format(agora)
+        val hora = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(agora)
+        val instrucao = "Hoje é $dia e agora são $hora (horário de Brasília). Uma pessoa pediu a uma caixa de som um lembrete (transcrição de voz, " +
+            "pode ter erros): \"$dito\".\n" +
+            "Responda o que deve ser lembrado e QUANDO. \"texto\": curto, no infinitivo, sem \"me lembra de\" (ex.: \"ligar para o João\"). " +
+            "\"quando\": data e hora no formato yyyy-MM-dd HH:mm, sempre NO FUTURO. Regras: \"daqui a X minutos/horas\" soma ao horário de agora; " +
+            "só a hora (\"às 3\") vale para a próxima vez que ela chegar (se disse \"da tarde\" ou \"da noite\", some 12 horas); \"amanhã\", dias da " +
+            "semana e \"dia 5\" valem para a próxima data; sem hora mas com período: manhã = 08:00, tarde = 15:00, noite = 20:00; só o dia sem hora = 09:00. " +
+            "Se não der para saber QUANDO, deixe \"quando\" vazio. Responda SÓ o JSON: {\"texto\":\"...\",\"quando\":\"...\"}"
+        val corpo = JSONObject()
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", instrucao)))))
+            .put("generationConfig", JSONObject().put("temperature", 0.0).put("maxOutputTokens", 200).put("responseMimeType", "application/json"))
+        val req = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$MODELO_GEMINI_PADRAO:generateContent")
+            .header("x-goog-api-key", chave)
+            .header("content-type", "application/json")
+            .post(corpo.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return try {
+            val (codigo, texto) = Rede.cliente(ctx, leituraSeg = 12).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
+            if (codigo != 200) { Log.d(TAG, "interpretarLembrete HTTP $codigo"); return null }
+            val partes = JSONObject(texto).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+            val sb = StringBuilder()
+            if (partes != null) for (i in 0 until partes.length()) sb.append(partes.optJSONObject(i)?.optString("text").orEmpty())
+            val j = JSONObject(sb.toString().trim().removePrefix("```json").removeSuffix("```").trim())
+            val oQue = j.optString("texto", "").trim()
+            val quando = j.optString("quando", "").trim()
+            Log.d(TAG, "lembrete: \"$oQue\" em \"$quando\"")
+            if (oQue.isEmpty() || quando.isEmpty()) return null
+            val ms = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).parse(quando)?.time ?: return null
+            if (ms < System.currentTimeMillis() - 30_000L) null else PedidoLembrete(oQue, ms)
+        } catch (e: Exception) {
+            Log.d(TAG, "interpretarLembrete falhou: $e")
+            null
+        }
+    }
+
     /** Resultado de [entenderPedido]: o que foi dito e, se for mídia, qual (já interpretado). */
     class Entendimento(val texto: String, val pedido: PedidoMidia?)
 

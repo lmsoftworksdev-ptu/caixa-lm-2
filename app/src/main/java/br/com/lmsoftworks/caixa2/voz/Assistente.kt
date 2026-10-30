@@ -86,6 +86,8 @@ interface AcoesAssistente {
     fun abafar(sim: Boolean)
     /** Alguém chamou a caixa: tira a tela do modo ocioso. */
     fun acordarTela()
+    /** Guarda o lembrete e devolve a frase de confirmação ("Pronto, vou te lembrar de ligar para o João hoje às 15:00"). */
+    fun agendarLembrete(texto: String, quandoMs: Long): String
 }
 
 /**
@@ -402,6 +404,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         Log.d(TAG, "pedido: \"$texto\" -> $comando")
         when (comando) {
             is ComandoVoz.Desconhecido -> resposta("Não consegui entender.", texto, erro = true)
+            is ComandoVoz.Lembrete -> criarLembrete(texto, minha)
             // sem verbo de tocar: o Gemini decide se é um pedido de música/vídeo (pelo título, artista...) ou uma pergunta
             is ComandoVoz.Pergunta -> resolverMidia(texto, comando.texto, null, minha)
             // "tocar X": o Gemini já descobriu qual música é (corrige artista errado, nome mal ouvido)
@@ -463,6 +466,24 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 val gerundio = tocar?.gerundio ?: if (soAudio) "Tocando" else "Reproduzindo"
                 estado = EstadoVoz.RESPONDENDO
                 Fala.falar(ctx, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}") { fim(0) }
+            }
+        }.start()
+    }
+
+    /** "Me lembra de X às 15h": o Gemini separa o quê e o quando; a caixa guarda e confirma em voz alta. */
+    private fun criarLembrete(dito: String, minha: Int) {
+        estado = EstadoVoz.PENSANDO
+        faixa.pensando(dito)
+        Thread {
+            val l = try { Respostas.interpretarLembrete(ctx, dito) } catch (e: Throwable) { null }
+            main.post {
+                if (minha != geracao) return@post
+                if (l == null) {
+                    resposta("Não entendi quando lembrar. Diga, por exemplo: me lembra de ligar para o João às 3 da tarde.", dito, erro = true)
+                } else {
+                    val frase = acoes.agendarLembrete(l.texto, l.quandoMs)
+                    resposta(frase, dito, falar = frase)
+                }
             }
         }.start()
     }

@@ -68,12 +68,28 @@ class InicioActivity : Activity() {
     private var apareceu = false
     private val relogio = Handler(Looper.getMainLooper())
 
+    private lateinit var lembretes: LembreteControle
+
+    /** Chegou a hora de um lembrete: toca o aviso, mostra na tela e fala em voz alta. */
+    private fun dispararLembrete(l: Lembrete) {
+        sairOcioso()
+        val atraso = System.currentTimeMillis() - l.quandoMs > 10 * 60_000L      // a caixa estava desligada na hora
+        val frase = (if (atraso) "Lembrete atrasado: " else "Lembrete: ") + l.texto
+        br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao()
+        relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.confirmacao() }, 900)
+        faixaAssistente.respondendo(frase)
+        faixaAssistente.fecharEm(9000)
+        acoesAssistente.abafar(true)
+        relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.Fala.falar(this, frase) { acoesAssistente.abafar(false) } }, 1500)
+    }
+
     private val tique = object : Runnable {
         override fun run() {
             inicio.atualizar()
             if (atual == "musica") telaMusica.atualizar()
             barra.atualizarHora()
             alarmes.verificar()?.let { tocarAlarme(it) }
+            if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto())
             if (!ocioso) {
@@ -133,6 +149,7 @@ class InicioActivity : Activity() {
         telaLed = TelaLed(this, led)
         telaLed.visibility = View.GONE
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
+        lembretes = LembreteControle(this)
         telaAlarmes = TelaAlarmes(this, alarmes) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
@@ -442,6 +459,11 @@ class InicioActivity : Activity() {
     private val acoesAssistente = object : br.com.lmsoftworks.caixa2.voz.AcoesAssistente {
         override fun acordarTela() { sairOcioso() }
 
+        override fun agendarLembrete(texto: String, quandoMs: Long): String {
+            lembretes.novo(texto, quandoMs)
+            return "Pronto, vou te lembrar de $texto ${LembreteControle.quando(quandoMs)}"
+        }
+
         override fun abafar(sim: Boolean) { playerMidia.volume(if (sim) 0.2f else 1f) }
 
         override fun videoAberto() = telaVideo.aberto
@@ -492,6 +514,16 @@ class InicioActivity : Activity() {
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.CriarAlarme -> {
                 val a = alarmes.novo(); a.hora = c.hora; a.minuto = c.minuto; a.ligado = true; alarmes.salvar()
                 "Alarme criado para %d:%02d".format(c.hora, c.minuto)
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.ListarLembretes -> {
+                val todos = lembretes.todos
+                if (todos.isEmpty()) "Você não tem nenhum lembrete."
+                else (if (todos.size == 1) "Você tem 1 lembrete: " else "Você tem ${todos.size} lembretes: ") +
+                    todos.take(5).joinToString(". ") { "${it.texto}, ${LembreteControle.quando(it.quandoMs)}" }
+            }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.ApagarLembretes -> {
+                val n = lembretes.apagarTodos()
+                if (n == 0) "Você não tem nenhum lembrete." else if (n == 1) "Apaguei o lembrete." else "Apaguei os $n lembretes."
             }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Desligar -> "Para desligar a caixa, use o botão de energia."
             else -> null
