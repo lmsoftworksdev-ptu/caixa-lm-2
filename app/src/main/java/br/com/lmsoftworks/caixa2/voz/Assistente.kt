@@ -86,6 +86,8 @@ interface AcoesAssistente {
     fun abafar(sim: Boolean)
     /** Alguém chamou a caixa: tira a tela do modo ocioso. */
     fun acordarTela()
+    /** O que a caixa fala no fim das rotinas: lembretes de hoje (só de manhã) e o próximo alarme. Vazio se não há nada a dizer. */
+    fun resumoRotina(manha: Boolean): String
     /** Guarda o lembrete e devolve a frase de confirmação ("Pronto, vou te lembrar de ligar para o João hoje às 15:00"). */
     fun agendarLembrete(texto: String, quandoMs: Long): String
 }
@@ -353,6 +355,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         }
         when (c) {
             is ComandoVoz.Cancelar, is ComandoVoz.Nao, is ComandoVoz.Sim -> { fechar(); return }
+            is ComandoVoz.Rotina -> { rodarRotina(c, geracao); return }
             is ComandoVoz.DesligarCaixa -> {
                 pendente = c
                 val frase = if (c.reiniciar) "Quer reiniciar a caixa? Diga sim ou não." else "Quer desligar a caixa? Diga sim ou não."
@@ -405,6 +408,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         when (comando) {
             is ComandoVoz.Desconhecido -> resposta("Não consegui entender.", texto, erro = true)
             is ComandoVoz.Lembrete -> criarLembrete(texto, minha)
+            is ComandoVoz.Rotina -> rodarRotina(comando, minha)
             // sem verbo de tocar: o Gemini decide se é um pedido de música/vídeo (pelo título, artista...) ou uma pergunta
             is ComandoVoz.Pergunta -> resolverMidia(texto, comando.texto, null, minha)
             // "tocar X": o Gemini já descobriu qual música é (corrige artista errado, nome mal ouvido)
@@ -468,6 +472,36 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 Fala.falar(ctx, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}") { fim(0) }
             }
         }.start()
+    }
+
+    /**
+     * "Bom dia": acende a luz quente, fala a data, o clima de hoje, os lembretes do dia e o próximo alarme.
+     * "Boa noite": apaga a luz, pausa a música e fala o próximo alarme.
+     */
+    private fun rodarRotina(c: ComandoVoz.Rotina, minha: Int) {
+        estado = EstadoVoz.PENSANDO
+        faixa.pensando("")
+        if (c.manha) {
+            acoes.executar(ComandoVoz.Luz(AcaoLuz.QUENTE), "")
+            Thread {
+                val clima = try { Respostas.climaDeHoje(ctx) } catch (e: Throwable) { null }
+                main.post {
+                    if (minha != geracao) return@post
+                    val dia = java.text.SimpleDateFormat("EEEE, d 'de' MMMM", java.util.Locale("pt", "BR")).format(java.util.Date())
+                    val frase = buildString {
+                        append("Bom dia! Hoje é $dia. ")
+                        if (clima != null) append(clima).append(' ')
+                        append(acoes.resumoRotina(true))
+                    }.trim()
+                    resposta(frase, "", falar = frase)
+                }
+            }.start()
+        } else {
+            acoes.executar(ComandoVoz.Luz(AcaoLuz.DESLIGAR), "")
+            acoes.executar(ComandoVoz.Pausar, "")
+            val frase = "Boa noite! Apaguei as luzes e pausei a música. ${acoes.resumoRotina(false)} Durma bem.".replace("  ", " ")
+            resposta(frase, "", falar = frase)
+        }
     }
 
     /** "Me lembra de X às 15h": o Gemini separa o quê e o quando; a caixa guarda e confirma em voz alta. */

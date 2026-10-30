@@ -376,6 +376,9 @@ object Respostas {
         "tempo", "clima", "previsão", "previsao", "temperatura", "chover", "chuva", "graus", "frio", "calor"
     )
 
+    /** A previsão de hoje direto do Open-Meteo, pela cidade aproximada (IP). Sem busca na web: serve para as rotinas ("bom dia"). */
+    fun climaDeHoje(ctx: Context): String? = clima(ctx, "tempo")
+
     private fun clima(ctx: Context, q: String): String? {
         val nome: String
         val lat: Double

@@ -461,6 +461,18 @@ class InicioActivity : Activity() {
     private val acoesAssistente = object : br.com.lmsoftworks.caixa2.voz.AcoesAssistente {
         override fun acordarTela() { sairOcioso() }
 
+        override fun resumoRotina(manha: Boolean): String {
+            val partes = ArrayList<String>()
+            if (manha) {
+                val fimDoDia = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 23); set(java.util.Calendar.MINUTE, 59) }.timeInMillis
+                val hoje = lembretes.todos.filter { it.quandoMs <= fimDoDia }
+                if (hoje.isNotEmpty()) partes.add("Você tem ${hoje.size} ${if (hoje.size == 1) "lembrete" else "lembretes"} hoje: " +
+                    hoje.take(4).joinToString(", ") { "${it.texto}, ${LembreteControle.quando(it.quandoMs)}" } + ".")
+            }
+            alarmes.proximoTexto()?.let { partes.add("Seu próximo alarme é ${it.replaceFirstChar { c -> c.lowercase() }}.") }
+            return partes.joinToString(" ")
+        }
+
         override fun agendarLembrete(texto: String, quandoMs: Long): String {
             lembretes.novo(texto, quandoMs)
             return "Pronto, vou te lembrar de $texto ${LembreteControle.quando(quandoMs)}"

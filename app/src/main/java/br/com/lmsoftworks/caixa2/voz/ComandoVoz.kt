@@ -73,6 +73,9 @@ sealed class ComandoVoz {
     /** "adiciona leite e pão na lista de compras", "o que tem na lista", "tira o leite da lista", "limpa a lista". */
     data class Lista(val acao: AcaoLista, val nome: String, val itens: List<String> = emptyList()) : ComandoVoz()
 
+    /** "bom dia" ([manha] = true) ou "boa noite": a caixa faz uma sequência (luz, clima, lembretes, alarme...). */
+    data class Rotina(val manha: Boolean) : ComandoVoz()
+
     /** "criar alarme as 7 e meia". */
     data class CriarAlarme(val hora: Int, val minuto: Int) : ComandoVoz()
 
@@ -250,6 +253,10 @@ object InterpretadorVoz {
                 tem("mais baixo") || tem("menos volume") || tem("mais fraco")
             ) return ComandoVoz.Volume(AcaoVolume.DIMINUIR)
         }
+
+        // Rotinas: "bom dia" e "boa noite" (e não só cumprimentar de volta)
+        if (texto == "bom dia" || texto == "bom dia pra você" || texto == "bom dia para você") return ComandoVoz.Rotina(true)
+        if (texto == "boa noite" || texto == "boa noite pra você" || texto == "boa noite para você") return ComandoVoz.Rotina(false)
 
         // Conversa curta
         CONVERSA.entries.firstOrNull { texto == it.key }?.let { return ComandoVoz.Falar(it.value) }
