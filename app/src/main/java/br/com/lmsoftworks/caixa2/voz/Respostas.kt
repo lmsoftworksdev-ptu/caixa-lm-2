@@ -564,12 +564,14 @@ object Respostas {
             "de voz, pode ter erros de reconhecimento): \"$dito\".\n" +
             "Decida a intenção:\n" +
             "- \"musica\": quer ouvir uma música, artista, álbum ou playlist (inclui só dizer o nome da música ou do artista);\n" +
+            "- \"playlist\": quer uma PLAYLIST ou um gênero/estilo inteiro, sem música específica (disse playlist, sertanejo, forró, rock, " +
+            "mais tocadas, as melhores, sucessos...); em busca ponha como procurar a playlist (ex.: 'as melhores do sertanejo', 'forró mais tocadas');\n" +
             "- \"video\": quer ASSISTIR um vídeo, clipe ou show (disse vídeo, clipe, assistir, ver, ao vivo);\n" +
             "- \"pergunta\": quer uma informação ou resposta (clima, notícias, quem é, quanto custa, quantos graus...).\n" +
             "Se for música ou vídeo, descubra QUAL é, corrigindo erros de reconhecimento e mesmo que o artista dito esteja errado " +
             "ou faltando (ex.: 'não quero me amarrar Solange Almeida' -> 'Não Quero Me Amarrar Aviões do Forró'). Em \"busca\" ponha o " +
             "melhor texto para procurar no YouTube, no formato 'Título Artista'. Se pedir só um artista, busca é o artista. " +
-            "Se for pergunta, busca vazia. Responda SÓ o JSON: {\"intencao\":\"musica|video|pergunta\",\"busca\":\"...\"}"
+            "Se for pergunta, busca vazia. Responda SÓ o JSON: {\"intencao\":\"musica|video|playlist|pergunta\",\"busca\":\"...\"}"
         val corpo = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", instrucao)))))
             .put("generationConfig", JSONObject().put("temperature", 0.1).put("maxOutputTokens", 200).put("responseMimeType", "application/json"))
@@ -587,7 +589,7 @@ object Respostas {
             if (partes != null) for (i in 0 until partes.length()) sb.append(partes.optJSONObject(i)?.optString("text").orEmpty())
             val j = JSONObject(sb.toString().trim().removePrefix("```json").removeSuffix("```").trim())
             val intencao = j.optString("intencao", "").lowercase()
-            if (intencao !in setOf("musica", "video", "pergunta")) null else PedidoMidia(intencao, j.optString("busca", "").trim())
+            if (intencao !in setOf("musica", "video", "playlist", "pergunta")) null else PedidoMidia(intencao, j.optString("busca", "").trim())
         } catch (e: Exception) {
             Log.d(TAG, "interpretarMidia falhou: $e")
             null
@@ -610,14 +612,16 @@ object Respostas {
             "1) \"texto\": transcreva exatamente o que a pessoa disse (vazio se não houver fala clara).\n" +
             "2) Decida a \"intencao\": \"musica\" (quer ouvir música, artista, álbum ou playlist; inclui só dizer o nome da música ou do " +
             "artista), \"video\" (quer ASSISTIR vídeo, clipe ou show: disse vídeo, clipe, assistir, ver, ao vivo), \"pergunta\" (quer uma " +
-            "informação: clima, notícias, quem é, quanto custa, quantos graus...) ou \"comando\" (controlar a caixa: volume, pausar, " +
+            "informação: clima, notícias, quem é, quanto custa, quantos graus...), \"playlist\" (quer uma PLAYLIST ou um gênero/estilo " +
+            "inteiro, sem música específica: playlist, sertanejo, forró, rock, mais tocadas, as melhores, sucessos; em busca ponha como " +
+            "procurar a playlist, ex.: 'as melhores do sertanejo') ou \"comando\" (controlar a caixa: volume, pausar, " +
             "próxima, luzes, alarme, que horas são, abrir uma tela...).\n" +
             "Se for música ou vídeo, descubra QUAL é, corrigindo erros de reconhecimento e mesmo que o artista dito esteja errado ou " +
             "faltando (ex.: 'não quero me amarrar Solange Almeida' -> 'Não Quero Me Amarrar Aviões do Forró'); em \"busca\" ponha o melhor " +
             "texto para procurar no YouTube ('Título Artista'; se pedir só um artista, o artista). Nos outros casos, busca vazia.\n" +
             "IMPORTANTE: se o áudio tiver só ruído, silêncio, música ao fundo ou voz que você não consegue entender com certeza, responda texto vazio " +
             "(\"texto\":\"\") e intencao \"comando\". NUNCA invente um pedido que não foi dito.\n" +
-            "Responda SÓ o JSON: {\"texto\":\"...\",\"intencao\":\"musica|video|pergunta|comando\",\"busca\":\"...\"}"
+            "Responda SÓ o JSON: {\"texto\":\"...\",\"intencao\":\"musica|video|playlist|pergunta|comando\",\"busca\":\"...\"}"
         for (modelo in listOf(MODELO_GEMINI_PADRAO, modeloConfig).distinct()) {
             var tentativas = 0
             while (tentativas++ < 2) {
@@ -642,7 +646,7 @@ object Respostas {
                         val dito = j.optString("texto", "").trim()
                         val intencao = j.optString("intencao", "").lowercase()
                         val busca = j.optString("busca", "").trim()
-                        return Entendimento(dito, if (intencao in setOf("musica", "video", "pergunta", "comando")) PedidoMidia(intencao, busca) else null)
+                        return Entendimento(dito, if (intencao in setOf("musica", "video", "playlist", "pergunta", "comando")) PedidoMidia(intencao, busca) else null)
                     } catch (e: Exception) { Log.d(TAG, "entenderPedido: resposta ilegivel: $e"); break }
                 }
                 Log.d(TAG, "entenderPedido $modelo: HTTP $codigo ${texto.replace(Regex("""\s+"""), " ").take(200)}")

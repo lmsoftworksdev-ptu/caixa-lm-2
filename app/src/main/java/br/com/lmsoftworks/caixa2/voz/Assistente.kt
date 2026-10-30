@@ -108,7 +108,8 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             "alexia", "alexi", "a lexia", "alexa", "alexsa", "alequisa", "alequiza", "alequissa", "ale quisa", "ale quiza",
             "quiza", "quisa", "quissa", "a quiza", "a quisa", "ale kisa", "ale quissa", "a lequisa", "a lequiza", "alecha", "alexi a", "alexis a", "alé quisa", "alé quiza"
         )
-        private val VARIANTES_CAIXA = listOf("caixa", "caixa de som", "ele eme")
+        // Só "Alexa" chama: "ok caixa", "oi caixa de som" e parecidos já não ativam (a palavra "caixa" fica só como isca na gramática).
+        private val VARIANTES_CAIXA = emptyList<String>()
         private val PREFIXOS = listOf("ei ", "oi ", "ok ", "olá ")
         private val FRASES_CHAMADA = VARIANTES_ALEXA + PREFIXOS.flatMap { p -> (VARIANTES_ALEXA + VARIANTES_CAIXA).map { p + it } }
         private fun alt(l: List<String>) = l.joinToString("|") { Regex.escape(it) }
@@ -118,6 +119,8 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         private val NOMES_FORTES = VARIANTES_ALEXA.filter { it !in FRAGMENTOS }
         private val REGEX_CHAMADA = Regex("""^(?:(?:ei|oi|ok|olá) (?:${alt(NOMES_FORTES + VARIANTES_CAIXA)})|(?:${alt(NOMES_FORTES)}))$""")
         private const val CONFIANCA_MINIMA = 0.4
+        private val REGEX_PLAYLIST = Regex("""\b(playlist|mais tocad[ao]s?|as melhores|top \d+|sucessos)\b""")
+        private fun semAcento(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
         private const val ESPERA_ENTRE_CHAMADAS_MS = 2500L
         private val SO_NOME = setOf("alexia", "alexi", "alexa", "a lexia", "alexsa", "alexi a", "alexis a")
         private val ISCAS = listOf(
@@ -424,12 +427,30 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             if (minha != geracao) return@Thread
             val ehPergunta = tocar == null && (pedido == null || pedido.intencao == "pergunta" || pedido.intencao == "comando")
             if (ehPergunta) { main.post { if (minha == geracao) responderPergunta(consulta, dito, minha) }; return@Thread }
+            val busca = pedido?.busca?.takeIf { it.isNotBlank() } ?: consulta
+            // playlist, gênero ou "mais tocadas": toca a playlist inteira (a lista vira a fila); sem playlist boa, cai na busca normal
+            val querPlaylist = pedido?.intencao == "playlist" || REGEX_PLAYLIST.containsMatchIn(semAcento(dito))
+            if (querPlaylist && (tocar == null || tocar.soAudio || tocar.modoIndefinido)) {
+                val pl = try { YouTube.playlist(busca) } catch (e: Exception) { Log.w(TAG, "playlist falhou", e); null }
+                Log.d(TAG, "playlist: \"$busca\" -> ${pl?.first} (${pl?.second?.size ?: 0} faixas)")
+                if (minha != geracao) return@Thread
+                if (pl != null) {
+                    main.post {
+                        if (minha != geracao) return@post
+                        TonsVoz.pararPensando()
+                        faixa.esconder()
+                        acoes.tocar(pl.second, true)
+                        estado = EstadoVoz.RESPONDENDO
+                        Fala.falar(ctx, "Tocando a playlist ${TextosVoz.tituloFalado(pl.first)}") { fim(0) }
+                    }
+                    return@Thread
+                }
+            }
             val soAudio = when {
                 tocar != null && !tocar.modoIndefinido -> tocar.soAudio
-                pedido != null -> pedido.intencao == "musica"
+                pedido != null -> pedido.intencao == "musica" || pedido.intencao == "playlist"
                 else -> !acoes.videoAberto()
             }
-            val busca = pedido?.busca?.takeIf { it.isNotBlank() } ?: consulta
             val lista = try { YouTube.buscar(busca, soAudio) } catch (e: Exception) { Log.w(TAG, "busca falhou", e); null }
             main.post {
                 if (minha != geracao) return@post

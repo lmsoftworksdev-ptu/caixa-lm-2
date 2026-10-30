@@ -36,6 +36,7 @@ class EscutaAssistente(
         const val NIVEL_ALVO = 7000f
         const val NIVEL_SILENCIO = 25f
         const val SILENCIO_FINAL_MS = 1200L     // quanto silêncio depois da fala encerra o pedido
+        const val SILENCIO_COMANDO_MS = 700L    // idem, quando o reconhecimento offline já fechou um comando fixo completo
         const val ESPERA_FALA_MS = 9000L        // quanto espera a pessoa começar a falar
         const val PEDIDO_MAXIMO_MS = 16000L
         const val BLOCOS_FALA_MINIMOS = 4       // menos que isso (0,4 s de voz) é ruído, não pedido: nada vai ao Gemini
@@ -63,6 +64,8 @@ class EscutaAssistente(
     private var blocosVistos = 0
     private var blocosFala = 0
     @Volatile private var pedidoNovo = false
+    @Volatile private var comandoFechado = false     // o Vosk já fechou uma frase que é comando fixo (pode encerrar com menos silêncio)
+    private var jsonComando: String? = null          // resultado dessa frase (o finalResult vem vazio depois que o Vosk fecha)
 
     // Porta de voz da CHAMADA: o reconhecimento só roda quando há som de fala (com uns blocos de antes e de depois). Na sala quieta o
     // Vosk fica parado, em vez de gastar um núcleo inteiro do processador o tempo todo.
@@ -186,9 +189,10 @@ class EscutaAssistente(
         val bytes = ByteArray(n * 2)
         for (i in 0 until n) { bytes[2 * i] = (bloco[i].toInt() and 0xff).toByte(); bytes[2 * i + 1] = (bloco[i].toInt() shr 8).toByte() }
         gravacao.write(bytes)
-        if (falando) { falou = true; silencioDesde = 0L } else if (silencioDesde == 0L) silencioDesde = agora
+        if (falando) { falou = true; silencioDesde = 0L; comandoFechado = false } else if (silencioDesde == 0L) silencioDesde = agora
         val total = agora - inicioPedido
-        val terminou = (falou && silencioDesde != 0L && agora - silencioDesde >= SILENCIO_FINAL_MS) ||
+        val silencioNecessario = if (comandoFechado) SILENCIO_COMANDO_MS else SILENCIO_FINAL_MS
+        val terminou = (falou && silencioDesde != 0L && agora - silencioDesde >= silencioNecessario) ||
             (!falou && total >= ESPERA_FALA_MS) || total >= PEDIDO_MAXIMO_MS
         if (!terminou) return
         pedindo = false
@@ -220,7 +224,17 @@ class EscutaAssistente(
                     }
                     Bloco.PEDIDO -> {
                         val d = b.dados!!
-                        comandos?.acceptWaveForm(d, d.size)
+                        if (comandos != null && comandos.acceptWaveForm(d, d.size)) {
+                            val j = comandos.result
+                            val t = lerJson(j, "text").trim()
+                            if (t.isNotBlank() && !t.contains("[unk]")) {
+                                val c = InterpretadorVoz.interpretar(t)
+                                if (!(c is ComandoVoz.Pergunta || c is ComandoVoz.Desconhecido || c is ComandoVoz.Tocar || c is ComandoVoz.Pesquisar)) {
+                                    jsonComando = j; comandoFechado = true
+                                    Log.d(TAG, "comando fechado pelo Vosk: \"$t\"")
+                                }
+                            }
+                        }
                         // texto ao vivo; se o reconhecimento já está atrasado, pula esta parte (os comandos e o áudio completo continuam)
                         if (livre != null && fila.size < 12) {
                             val fechou = livre.acceptWaveForm(d, d.size)
@@ -232,12 +246,15 @@ class EscutaAssistente(
                     }
                     Bloco.ZERAR -> {
                         reconhecedor.reset(); comandos?.reset(); livre?.reset(); textoLivre = ""; ultimoParcial = ""
+                        jsonComando = null; comandoFechado = false
                     }
                     Bloco.FIM -> {
                         val cb = b.rapido ?: continue
-                        val json = try { comandos?.finalResult } catch (_: Throwable) { null }
+                        var json = try { comandos?.finalResult } catch (_: Throwable) { null }
+                        if (lerJson(json, "text").isBlank() && jsonComando != null) json = jsonComando
                         Log.d(TAG, "reconhecimento offline: comandos=\"${lerJson(json, "text")}\"")
                         reconhecedor.reset(); comandos?.reset(); livre?.reset(); textoLivre = ""; ultimoParcial = ""
+                        jsonComando = null; comandoFechado = false
                         cb(json)
                     }
                 }

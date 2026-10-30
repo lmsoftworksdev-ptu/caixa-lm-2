@@ -49,6 +49,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
     private val handler = Handler(Looper.getMainLooper())
     private val cartao = LinearLayout(c)
     private var contagem: Runnable? = null
+    private var executandoJa = false
     private val vermelho = Color.parseColor("#FF5A6A")
     private val azul = Color.parseColor("#6AA8FF")
 
@@ -56,6 +57,8 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
         visibility = View.GONE
         setBackgroundColor(Color.parseColor("#E602060F"))
         isClickable = true      // engole os toques para não passarem para a tela de baixo
+        setOnClickListener { if (!executandoJa) fechar() }      // tocar fora do cartão cancela e volta ao menu
+        cartao.isClickable = true                               // toques dentro do cartão (fora dos botões) não fecham
         cartao.apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -71,6 +74,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     fun abrir() {
         if (aberto) return
+        executandoJa = false
         if (cartao.parent == null) addView(cartao, LayoutParams(620.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         setBackgroundColor(Color.parseColor("#E602060F"))
         visibility = View.VISIBLE
@@ -86,9 +90,6 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     private fun mostrarEscolha() {
         cartao.removeAllViews()
-        cartao.addView(texto(c, "Energia", 32, Color.WHITE, true))
-        cartao.addView(texto(c, "O que você quer fazer com a caixa?", 20, Color.parseColor("#B8C7EA")),
-            LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d(); bottomMargin = 26.d() })
         val linha = LinearLayout(c)
         linha.addView(botaoGrande(R.drawable.ic_power, "Desligar", "#FF5A6A", "#B3142A") { contar(true) },
             LinearLayout.LayoutParams(0, 170.d(), 1f).apply { rightMargin = 9.d() })
@@ -144,6 +145,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     /** Tela preta com "Desligando…" / "Reiniciando…"; um instante depois, chama de fato o desligar ou o reiniciar. */
     private fun executando(desligar: Boolean) {
+        executandoJa = true
         removeAllViews()
         setBackgroundColor(Color.BLACK)
         val col = LinearLayout(c).apply {
@@ -159,6 +161,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     /** Se o aparelho recusou (falta de permissão), volta ao normal e mostra o motivo. */
     fun falhou(motivo: String) {
+        executandoJa = false
         removeAllViews()
         if (cartao.parent == null) addView(cartao, LayoutParams(620.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         setBackgroundColor(Color.parseColor("#E602060F"))

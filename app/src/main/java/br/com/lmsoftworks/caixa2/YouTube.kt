@@ -5,6 +5,8 @@ import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.StreamInfo
@@ -165,16 +167,34 @@ object YouTube {
         val info = SearchInfo.getInfo(service, handler)
         return info.relatedItems
             .filterIsInstance<StreamInfoItem>()
-            .map {
-                Resultado(
-                    titulo = it.name ?: "(sem titulo)",
-                    canal = it.uploaderName ?: "",
-                    duracaoSeg = it.duration,
-                    url = it.url,
-                    miniaturas = melhoresMiniaturas(it.thumbnails.map { t -> t.url }, it.url),
-                    visualizacoes = it.viewCount
-                )
-            }
+            .map { paraResultado(it) }
+    }
+
+    private fun paraResultado(it: StreamInfoItem) = Resultado(
+        titulo = it.name ?: "(sem titulo)",
+        canal = it.uploaderName ?: "",
+        duracaoSeg = it.duration,
+        url = it.url,
+        miniaturas = melhoresMiniaturas(it.thumbnails.map { t -> t.url }, it.url),
+        visualizacoes = it.viewCount
+    )
+
+    /**
+     * Bloqueante: procura uma playlist ("as melhores do sertanejo", "forró mais tocadas"...) e devolve o nome dela com as
+     * músicas (até 50, só as que têm duração: sem transmissões ao vivo). Tenta as 3 primeiras; null se nenhuma servir.
+     */
+    fun playlist(consulta: String): Pair<String, List<Resultado>>? {
+        garantirInicio()
+        val handler = service.searchQHFactory.fromQuery(consulta, listOf(YoutubeSearchQueryHandlerFactory.PLAYLISTS), "")
+        val achadas = SearchInfo.getInfo(service, handler).relatedItems.filterIsInstance<PlaylistInfoItem>()
+        for (p in achadas.take(3)) {
+            try {
+                val itens = PlaylistInfo.getInfo(service, p.url).relatedItems
+                    .filter { it.duration > 0 }.take(50).map { paraResultado(it) }
+                if (itens.size >= 3) return (p.name ?: consulta) to itens
+            } catch (e: Exception) { Log.w("Midia", "playlist ${p.url} falhou: $e") }
+        }
+        return null
     }
 
     /**
