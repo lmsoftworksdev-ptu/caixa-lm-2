@@ -40,6 +40,9 @@ class InicioActivity : Activity() {
     private lateinit var alarmes: AlarmeControle
     private lateinit var telaAlarmes: TelaAlarmes
     private lateinit var telaConfig: TelaConfig
+    private lateinit var telaPrevisao: TelaPrevisao
+    private var previsao: br.com.lmsoftworks.caixa2.voz.Respostas.PrevisaoCompleta? = null
+    private var previsaoEm = 0L
     /** Wi-Fi, Bluetooth e Alarmes abertos pela tela Configurações: o "voltar" deles leva de volta para ela. */
     private var origemConfig = false
     private lateinit var telaAlarmeTocando: TelaAlarmeTocando
@@ -207,6 +210,8 @@ class InicioActivity : Activity() {
         telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
+        telaPrevisao = TelaPrevisao(this) { buscarPrevisao() }
+        telaPrevisao.visibility = View.GONE
         telaConfig.visibility = View.GONE
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
         telaOciosa = TelaOciosa(this)
@@ -224,6 +229,7 @@ class InicioActivity : Activity() {
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1))
+            addView(telaPrevisao, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
             addView(barra, FrameLayout.LayoutParams(-1, 104.d()))
             addView(gesto, FrameLayout.LayoutParams(-1, -1))
@@ -395,6 +401,7 @@ class InicioActivity : Activity() {
         "led" -> telaLed
         "alarmes" -> telaAlarmes
         "config" -> telaConfig
+        "clima" -> telaPrevisao
         else -> inicio
     }
 
@@ -402,7 +409,7 @@ class InicioActivity : Activity() {
         if (id == "lembretes") { telaAlarmes.abrirAba("lembretes", lembretes.todos.firstOrNull()?.id); ir("alarmes") }
         else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
         else if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
-        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config") ir(id)
+        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima") ir(id)
         else Toast.makeText(this, "Em breve", Toast.LENGTH_SHORT).show()
     }
 
@@ -445,6 +452,12 @@ class InicioActivity : Activity() {
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
             "alarmes" -> Triple("#8B5CFF", "#3A1FA8", "#8B5CFF")
             "config" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
+            // previsão do tempo: o fundo segue o tempo de hoje (sol, nublado ou chuva)
+            "clima" -> when (telaPrevisao.tipoHoje) {
+                "sol" -> Triple("#FFB547", "#1F5BFF", "#3D8BFF")
+                "chuva" -> Triple("#3D7BFF", "#1A2E6E", "#3D8BFF")
+                else -> Triple("#7C8FB8", "#2B3A66", "#3D8BFF")
+            }
             else -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
         }
         fundo.tema(Color.parseColor(a), Color.parseColor(b))
@@ -487,6 +500,28 @@ class InicioActivity : Activity() {
         if (destino == "alarmes") telaAlarmes.atualizar()
         if (destino == "config") atualizarConfig()
         if (destino == "midia") telaMidia.aoMostrar()
+        if (destino == "clima") {
+            // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
+            if (previsao != null && android.os.SystemClock.uptimeMillis() - previsaoEm < 15 * 60_000L) telaPrevisao.definir(previsao) else buscarPrevisao()
+        }
+    }
+
+    private var buscandoPrevisao = false
+
+    /** Busca a previsão completa (agora, 7 horas, 15 dias) em segundo plano e entrega à tela. */
+    private fun buscarPrevisao() {
+        if (buscandoPrevisao) return
+        buscandoPrevisao = true
+        telaPrevisao.mostrarCarregando()
+        Thread {
+            val p = try { br.com.lmsoftworks.caixa2.voz.Respostas.previsaoCompleta(this) } catch (e: Throwable) { null }
+            relogio.post {
+                buscandoPrevisao = false
+                if (p != null) { previsao = p; previsaoEm = android.os.SystemClock.uptimeMillis() }
+                telaPrevisao.definir(p ?: previsao)
+                if (atual == "clima") aplicarTema("clima")      // o fundo segue o tempo de hoje
+            }
+        }.start()
     }
 
     private fun metade(): Float = conteudo.width / 2f
@@ -1273,6 +1308,7 @@ class InicioActivity : Activity() {
             "musica" -> ir(destinoVoltar())
             "led" -> ir("inicio")
             "alarmes" -> if (!telaAlarmes.voltar()) ir("inicio")
+            "clima" -> ir("inicio")
         }
     }
 }

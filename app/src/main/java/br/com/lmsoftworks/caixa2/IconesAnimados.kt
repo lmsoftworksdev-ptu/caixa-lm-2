@@ -23,7 +23,7 @@ object Animacao {
     @Volatile var pausada = false
 }
 
-class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, private val tam: Int = 30) : View(c) {
+class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, private val tam: Int = 30, private val animado: Boolean = true) : View(c) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val pf = Paint(Paint.ANTI_ALIAS_FLAG)
     private val nuvem = Path().apply {
@@ -48,12 +48,12 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
 
     override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(tam.d(), tam.d())
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); postInvalidateOnAnimation() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (animado) postInvalidateOnAnimation() }
 
     private fun suave(x: Float) = .5f - .5f * cos(x * 2f * PI.toFloat())     // 0 -> 1 -> 0 em um ciclo (ease in-out)
 
     override fun onDraw(canvas: Canvas) {
-        val t = SystemClock.uptimeMillis()
+        val t = if (animado) SystemClock.uptimeMillis() else 0L          // parado (listas longas): desenha uma vez só
         val e = width / 24f
         p.color = cor
         p.strokeWidth = 2f * e
@@ -109,10 +109,10 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
             }
         }
         canvas.restore()
-        if (ativo()) postInvalidateOnAnimation()
+        if (animado && ativo()) postInvalidateOnAnimation()
     }
 
-    override fun onVisibilityAggregated(v: Boolean) { super.onVisibilityAggregated(v); if (v) postInvalidateOnAnimation() }
+    override fun onVisibilityAggregated(v: Boolean) { super.onVisibilityAggregated(v); if (v && animado) postInvalidateOnAnimation() }
 }
 
 /** Ícone "Mídia" da v3: retângulo arredondado com o triângulo de play vazado (só contorno, cantos retos). */
