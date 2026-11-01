@@ -658,9 +658,8 @@ class InicioActivity : Activity() {
         }
 
         override fun abafar(sim: Boolean) {
-            // música do celular (Bluetooth): baixa o volume do aparelho; vídeo/música do app: baixa o player
-            if (sim && !playerMidia.ativo && bluetooth.celularTocando) painelVolume.abafarSistema(true)
-            else if (!sim) painelVolume.abafarSistema(false)
+            // o volume do aparelho vai ao nível da voz enquanto o assistente está aberto (voz, toquinhos e som de pesquisa) e depois volta
+            if (sim) br.com.lmsoftworks.caixa2.voz.Fala.prenderVolume() else br.com.lmsoftworks.caixa2.voz.Fala.soltarVolume()
             playerMidia.volume(if (sim) 0.2f else 1f)
         }
 

@@ -49,9 +49,16 @@ object Fala {
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }
 
+    /** Enquanto o assistente está aberto (ouvindo, pensando, falando) o volume fica no nível da voz: cobre também os toquinhos e o som de pesquisa. */
+    @Volatile private var mantido = false
+
+    fun prenderVolume() { mantido = true; fixarVolume() }
+
+    fun soltarVolume() { mantido = false; devolverVolume() }
+
     private fun devolverVolume() {
         val ctx = contexto ?: return
-        if (volumeAntes < 0) return
+        if (mantido || volumeAntes < 0) return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             // só devolve se ninguém mexeu no volume enquanto ela falava
