@@ -428,6 +428,9 @@ class TelaMidia(
 
     private var engolirToque = false
 
+    /** O teclado está aberto (a Activity fecha ao tocar no cabeçalho ou ao puxar a borda para sair). */
+    val tecladoVisivel: Boolean get() = tecladoAberto
+
     /** Com o teclado aberto, tocar fora dele (e fora da barra) só fecha o teclado: o toque não aciona o que está embaixo. */
     override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
         if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
@@ -457,10 +460,8 @@ class TelaMidia(
      */
     fun areaProtegida(x: Float, y: Float): Boolean {
         val p = IntArray(2)
-        if (tecladoAberto) {
-            teclado.getLocationOnScreen(p)
-            if (y >= p[1]) return true
-        }
+        // o teclado não protege a borda: o gesto de voltar começa em x < 36, onde não há teclas
+        if (tecladoAberto) return false      // com o teclado aberto, as fileiras ficam escondidas atrás dele
         for (f in fileiras) {
             f.getLocationOnScreen(p)
             if (y >= p[1] && y <= p[1] + f.height && f.scrollX > 0) return true

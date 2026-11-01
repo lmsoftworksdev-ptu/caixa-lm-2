@@ -513,7 +513,9 @@ class InicioActivity : Activity() {
         telaConfig.definirEstado("alarmes", alarmes.proximoTexto()?.let { "Próximo: $it" } ?: "Nenhum alarme ligado")
     }
 
-    private fun emDetalheAtual() = (atual == "wifi" && telaWifi.emDetalhe) || (atual == "bluetooth" && telaBluetooth.emDetalhe)
+    /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
+    private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
+        (atual == "midia" && telaMidia.tecladoVisivel)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -896,6 +898,8 @@ class InicioActivity : Activity() {
             if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) engolindo = false
             return true
         }
+        // teclado da Mídia aberto: tocar no cabeçalho fecha o teclado (o toque segue para o botão tocado)
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "midia" && telaMidia.tecladoVisivel && e.rawY < 104.d()) telaMidia.fecharTeclado()
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
         if ((atual != "inicio" || telaVideo.aberto) && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
