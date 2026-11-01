@@ -66,10 +66,10 @@ fun View.efeitoToque() {
     }
 }
 
-fun botao(c: Context, rotulo: String, cor: Int, aoClicar: () -> Unit): TextView =
+fun botao(c: Context, rotulo: String, cor: Int, corTexto: Int = Color.WHITE, aoClicar: () -> Unit): TextView =
     TextView(c).apply {
         text = rotulo
-        setTextColor(Color.WHITE)
+        setTextColor(corTexto)
         setTextSize(TypedValue.COMPLEX_UNIT_PX, 22.d().toFloat())
         typeface = FONTE_MEDIA
         gravity = Gravity.CENTER
@@ -152,7 +152,7 @@ class BarrasSinal(c: Context) : View(c) {
 
     override fun onDraw(canvas: Canvas) {
         for (i in 0 until 4) {
-            p.color = if (i < nivel) Cfg.AZUL_CLARO else Color.parseColor("#33FFFFFF")
+            p.color = if (i < nivel) Cfg.AZUL else Color.parseColor("#33FFFFFF")
             val x = (i * 8).d().toFloat()
             val topo = (height - alturas[i].d()).toFloat()
             canvas.drawRoundRect(x, topo, x + 5.d(), height.toFloat(), 2.d().toFloat(), 2.d().toFloat(), p)
