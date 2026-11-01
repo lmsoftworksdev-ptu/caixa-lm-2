@@ -35,7 +35,7 @@ object TonsVoz {
                     }
                 }
                 val dados = amostras.toShortArray()
-                val t = AudioTrack(AudioManager.STREAM_MUSIC, taxa, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, dados.size * 2, AudioTrack.MODE_STATIC)
+                val t = AudioTrack(Fala.CANAL, taxa, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, dados.size * 2, AudioTrack.MODE_STATIC)
                 t.write(dados, 0, dados.size)
                 t.play()
                 Thread.sleep(notas.sumOf { it.second }.toLong() + 120)
@@ -55,7 +55,7 @@ object TonsVoz {
             mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             afd.close()
             @Suppress("DEPRECATION")
-            mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
+            mp.setAudioStreamType(Fala.CANAL)
             mp.isLooping = true
             mp.setVolume(0.22f, 0.22f)
             mp.setOnPreparedListener { if (pensando === it) it.start() }

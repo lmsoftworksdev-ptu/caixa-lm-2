@@ -169,16 +169,32 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
         player = p
     }
 
-    /** Foto bem pequena da tela, esticada: fica desfocada. */
+    /** Foto da tela em 1/4 do tamanho, desfocada de verdade (RenderScript, 2 passadas): sem blocos nem serrilhado. */
     private fun desfocar() {
         try {
             val v = alvo()
             if (v.width <= 0 || v.height <= 0) return
-            val pequena = Bitmap.createBitmap(v.width / 24, v.height / 24, Bitmap.Config.RGB_565)
-            val cv = Canvas(pequena)
-            cv.scale(1f / 24f, 1f / 24f)
+            val f = 4
+            val foto = Bitmap.createBitmap(v.width / f, v.height / f, Bitmap.Config.ARGB_8888)
+            val cv = Canvas(foto)
+            cv.scale(1f / f, 1f / f)
             v.draw(cv)
-            fundo.setImageBitmap(Bitmap.createScaledBitmap(pequena, v.width / 6, v.height / 6, true))
+            val saida = try {
+                val rs = android.renderscript.RenderScript.create(c)
+                val blur = android.renderscript.ScriptIntrinsicBlur.create(rs, android.renderscript.Element.U8_4(rs))
+                blur.setRadius(25f)
+                val ent = android.renderscript.Allocation.createFromBitmap(rs, foto)
+                val sai = android.renderscript.Allocation.createTyped(rs, ent.type)
+                repeat(3) { blur.setInput(ent); blur.forEach(sai); sai.copyTo(foto); ent.copyFrom(foto) }
+                ent.destroy(); sai.destroy(); blur.destroy(); rs.destroy()
+                foto
+            } catch (e: Throwable) {
+                // sem RenderScript: reduz em etapas e estica com filtro (borra sem formar blocos)
+                var b = foto
+                repeat(3) { b = Bitmap.createScaledBitmap(b, maxOf(2, b.width / 2), maxOf(2, b.height / 2), true) }
+                Bitmap.createScaledBitmap(b, foto.width, foto.height, true)
+            }
+            fundo.setImageBitmap(saida)
         } catch (e: Throwable) { fundo.setImageDrawable(null) }
     }
 

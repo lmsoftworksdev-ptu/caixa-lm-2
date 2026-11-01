@@ -201,6 +201,10 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
             "assistente" -> {
                 opcoes.addView(linha("Mostrar resposta na tela", "A resposta escrita no alto da tela do assistente",
                     interruptor(Ajustes.mostrarResposta) { Ajustes.definirMostrarResposta(it) }))
+                opcoes.addView(linha("Volume da voz", "Da resposta e dos toquinhos; não muda o volume da música",
+                    deslizador((Ajustes.volumeVoz - 1) / 9f, { "${1 + Math.round(it * 9)}" }) { f ->
+                        Ajustes.definirVolumeVoz(1 + Math.round(f * 9)); br.com.lmsoftworks.caixa2.voz.Fala.aplicarVolume(c)
+                    }))
                 opcoes.addView(linha("Sensibilidade do microfone", "Quanto mais alto, de mais longe ele ouve a palavra de ativação",
                     deslizador((Ajustes.sensMic - 1) / 9f, { "${1 + Math.round(it * 9)}" }) { f -> Ajustes.definirSensMic(1 + Math.round(f * 9)) }))
             }

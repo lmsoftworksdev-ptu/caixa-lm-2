@@ -7,6 +7,7 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import br.com.lmsoftworks.caixa2.Ajustes
 import java.io.File
 import java.util.Locale
 
@@ -26,39 +27,27 @@ object Fala {
     private var contador = 0
     private val aoTerminar = HashMap<String, () -> Unit>()
 
-    // ---- a voz da caixa sempre sai no volume 6 (de 0 a 10), qualquer que seja o volume da música; depois o volume volta ----
-    private const val NIVEL_VOZ = 6
+    // ---- a voz da caixa sai num canal próprio (o do alarme), no volume escolhido em Configurações: o volume da música não muda ----
     private var contexto: Context? = null
-    private var volumeAntes = -1
-    private var volumeFixado = -1
+    const val CANAL = android.media.AudioManager.STREAM_ALARM
 
-    private fun fixarVolume() {
-        val ctx = contexto ?: return
+    /** Põe o canal da voz no nível de Configurações (de 1 a 10). */
+    fun aplicarVolume(ctx: Context? = contexto) {
+        ctx ?: return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            val canal = android.media.AudioManager.STREAM_MUSIC
-            val alvo = Math.round(audio.getStreamMaxVolume(canal) * NIVEL_VOZ / 10f)
-            if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(canal)
-            if (audio.getStreamVolume(canal) != alvo) audio.setStreamVolume(canal, alvo, 0)
-            volumeFixado = alvo
+            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            if (audio.getStreamVolume(CANAL) != alvo) audio.setStreamVolume(CANAL, alvo, 0)
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }
 
-    private fun devolverVolume() {
-        val ctx = contexto ?: return
-        if (volumeAntes < 0) return
-        try {
-            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            val canal = android.media.AudioManager.STREAM_MUSIC
-            // só devolve se ninguém mexeu no volume enquanto ela falava
-            if (audio.getStreamVolume(canal) == volumeFixado) audio.setStreamVolume(canal, volumeAntes, 0)
-        } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
-        volumeAntes = -1; volumeFixado = -1
-    }
+    private fun fixarVolume() = aplicarVolume()
+    private fun devolverVolume() {}
 
     /** Chame cedo (ex.: ao ligar a voz) para o motor ja estar pronto na primeira resposta. */
     fun preparar(ctx: Context) {
         contexto = ctx.applicationContext
+        aplicarVolume()
         if (tts != null) return
         tts = TextToSpeech(ctx.applicationContext) { status ->
             val t = tts
@@ -96,7 +85,7 @@ object Fala {
         aoTerminar[id] = fim
         // Seguranca: nunca trava o fluxo, mas deixa tempo para respostas longas.
         main.postDelayed({ terminou(id) }, TEMPO_MAXIMO_MS + texto.length * 90L)
-        val r = t.speak(texto, TextToSpeech.QUEUE_FLUSH, Bundle(), id)
+        val r = t.speak(texto, TextToSpeech.QUEUE_FLUSH, Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, CANAL) }, id)
         if (r != TextToSpeech.SUCCESS) terminou(id)
     }
 
@@ -156,6 +145,7 @@ object Fala {
         try {
             val mp = android.media.MediaPlayer()
             tocador = mp
+            @Suppress("DEPRECATION") mp.setAudioStreamType(CANAL)
             mp.setDataSource(arquivos[i].path)
             mp.setOnCompletionListener { m -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, i + 1, minha, fim) }
             mp.setOnErrorListener { m, _, _ -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, arquivos.size, minha, fim); true }

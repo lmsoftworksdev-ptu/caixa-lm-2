@@ -44,6 +44,30 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private var ultimoPorcento = -1
     private var animador: ValueAnimator? = null
     private var abrindo = false
+    private var abafado = -1
+    private var abafadoAlvo = -1
+    private var ignorarAte = 0L
+
+    /**
+     * Baixa o volume do aparelho (a música do celular) enquanto o assistente ouve e fala, e devolve depois. Não abre a pílula
+     * nem mexe na barra: é só um abaixar temporário. Só devolve se ninguém mexeu no volume nesse meio-tempo.
+     */
+    fun abafarSistema(sim: Boolean) {
+        if (sim) {
+            if (abafado >= 0) return
+            val atual = audio.getStreamVolume(canal)
+            if (atual <= 1) return
+            abafado = atual
+            abafadoAlvo = Math.max(1, Math.round(atual * 0.3f))
+            ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+            audio.setStreamVolume(canal, abafadoAlvo, 0)
+        } else if (abafado >= 0) {
+            ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+            if (audio.getStreamVolume(canal) == abafadoAlvo) audio.setStreamVolume(canal, abafado, 0)
+            abafado = -1
+            handler.postDelayed({ atualizar() }, 200)
+        }
+    }
     /** Quem apertou "+" (ou a tecla) já no volume máximo: o app toca o aviso. */
     var aoNoLimite: (() -> Unit)? = null
     /** O controle abriu (por toque ou por mudança de fora): a tela sai do modo ocioso. */
@@ -55,6 +79,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private val receptor = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, i: Intent) {
             if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", canal) != canal) return
+            if (abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) { atualizar(); return }
             val antes = ultimoPorcento
             atualizar()
             // mudou por fora (celular que toca, tecla): mostra o nosso controle no lugar do indicador do Android

@@ -295,24 +295,9 @@ class InicioActivity : Activity() {
                     // espera a animação de giro do Android terminar antes de mostrar a interface
                     conteudo.animate().alpha(1f)
                         .setStartDelay(Cfg.ATRASO_ENTRADA_MS).setDuration(Cfg.FADE_ENTRADA_MS).start()
-                    // a tela de carregamento some em fade enquanto a interface aparece; o som começa junto, do início
-                    val carregando = carregando
-                    if (carregando != null) {
-                        carregando.animate().alpha(0f)
-                            .setStartDelay(Cfg.ATRASO_ENTRADA_MS).setDuration(Cfg.FADE_ENTRADA_MS)
-                            .withEndAction { (carregando.parent as? android.view.ViewGroup)?.removeView(carregando) }.start()
-                    }
+                    // o fundo fica preto (sem imagem) até a interface aparecer em fade; o som começa junto, do início
                     if (bootNovo) relogio.postDelayed({ tocarSomDeInicio() }, Cfg.ATRASO_ENTRADA_MS)
                 }
-            }
-            // só quando o aparelho acabou de ligar: tela de carregamento (a mesma imagem da abertura) por cima de tudo
-            if (bootNovo) {
-                carregando = android.widget.ImageView(this@InicioActivity).apply {
-                    setImageResource(R.drawable.tela_carregando)
-                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(Color.BLACK)
-                }
-                addView(carregando, FrameLayout.LayoutParams(-1, -1))
             }
         }
         setContentView(raiz)
@@ -671,7 +656,12 @@ class InicioActivity : Activity() {
             return "Pronto, vou te lembrar de $texto ${LembreteControle.quando(quandoMs)}"
         }
 
-        override fun abafar(sim: Boolean) { playerMidia.volume(if (sim) 0.2f else 1f) }
+        override fun abafar(sim: Boolean) {
+            // música do celular (Bluetooth): baixa o volume do aparelho; vídeo/música do app: baixa o player
+            if (sim && !playerMidia.ativo && bluetooth.celularTocando) painelVolume.abafarSistema(true)
+            else if (!sim) painelVolume.abafarSistema(false)
+            playerMidia.volume(if (sim) 0.2f else 1f)
+        }
 
         override fun videoAberto() = telaVideo.aberto
 
@@ -1319,7 +1309,6 @@ class InicioActivity : Activity() {
     }
 
     private var bootNovo = false
-    private var carregando: android.widget.ImageView? = null
     private var aquecimento: android.media.AudioTrack? = null
 
     /**
