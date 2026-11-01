@@ -377,7 +377,7 @@ object Respostas {
     )
 
     /** A previsão de hoje em números, para a tela inicial. */
-    class ClimaHoje(val cidade: String, val temp: Int, val min: Int?, val max: Int?, val chuva: Int?, val codigo: Int) {
+    class ClimaHoje(val cidade: String, val temp: Int, val min: Int?, val max: Int?, val chuva: Int?, val codigo: Int, val noite: Boolean = false) {
         /** "⛅  24°  ·  mín 18° / máx 29°  ·  chuva 10%  ·  Cidade" */
         fun texto(): String = buildString {
             append(emoji(codigo)).append("  ").append(temp).append("°")
@@ -400,7 +400,7 @@ object Respostas {
         val m = getJson(
             ctx,
             "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&current=temperature_2m,weather_code" +
+                "&current=temperature_2m,weather_code,is_day" +
                 "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&timezone=auto&forecast_days=1"
         ) ?: return null
@@ -412,18 +412,19 @@ object Respostas {
             d?.optJSONArray("temperature_2m_min")?.optDouble(0)?.let { Math.round(it).toInt() },
             d?.optJSONArray("temperature_2m_max")?.optDouble(0)?.let { Math.round(it).toInt() },
             d?.optJSONArray("precipitation_probability_max")?.optInt(0),
-            atual.optInt("weather_code")
+            atual.optInt("weather_code"),
+            atual.optInt("is_day", 1) == 0
         )
     }
 
     /** Uma hora da previsão (próximas horas). */
-    class HoraPrevisao(val hora: Int, val temp: Int, val codigo: Int)
+    class HoraPrevisao(val hora: Int, val temp: Int, val codigo: Int, val dia: Boolean = true)
     /** Um dia da previsão: [indice] 0 = hoje, 1 = amanhã...; [dia] é a data no formato yyyy-MM-dd. */
     class DiaPrevisao(val indice: Int, val dia: String, val min: Int, val max: Int, val chuva: Int, val codigo: Int)
     /** A tela de Previsão do tempo: agora, próximas horas e 15 dias. [vento] em km/h. */
     class PrevisaoCompleta(
         val cidade: String, val temp: Int, val codigo: Int, val vento: Int,
-        val min: Int, val max: Int, val chuva: Int, val horas: List<HoraPrevisao>, val dias: List<DiaPrevisao>
+        val min: Int, val max: Int, val chuva: Int, val horas: List<HoraPrevisao>, val dias: List<DiaPrevisao>, val dia: Boolean = true
     )
 
     /** Previsão completa (agora, 36 horas, 15 dias) pela cidade aproximada (IP). null se a internet falhar. */
@@ -434,8 +435,8 @@ object Respostas {
         val m = getJson(
             ctx,
             "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&current=temperature_2m,weather_code,wind_speed_10m" +
-                "&hourly=temperature_2m,weather_code" +
+                "&current=temperature_2m,weather_code,wind_speed_10m,is_day" +
+                "&hourly=temperature_2m,weather_code,is_day" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&wind_speed_unit=kmh&timezone=auto&forecast_days=15"
         ) ?: return null
@@ -450,7 +451,7 @@ object Respostas {
             dias.add(DiaPrevisao(i, datas.getString(i), Math.round(dMin?.optDouble(i) ?: 0.0).toInt(), Math.round(dMax?.optDouble(i) ?: 0.0).toInt(), dChuva?.optInt(i) ?: 0, dCod?.optInt(i) ?: 0))
         }
         // próximas horas: a partir da hora atual (a primeira é "agora", com a temperatura de agora)
-        val tempos = h.optJSONArray("time"); val hT = h.optJSONArray("temperature_2m"); val hC = h.optJSONArray("weather_code")
+        val tempos = h.optJSONArray("time"); val hT = h.optJSONArray("temperature_2m"); val hC = h.optJSONArray("weather_code"); val hD = h.optJSONArray("is_day")
         val agoraTxt = atual.optString("time").take(13)        // yyyy-MM-ddTHH
         var inicio = 0
         if (tempos != null) for (i in 0 until tempos.length()) if (tempos.getString(i).startsWith(agoraTxt)) { inicio = i; break }
@@ -461,12 +462,14 @@ object Respostas {
             val hora = tempos.getString(i).substring(11, 13).toInt()
             val temp = if (k == 0) Math.round(atual.optDouble("temperature_2m")).toInt() else Math.round(hT?.optDouble(i) ?: 0.0).toInt()
             val cod = if (k == 0) atual.optInt("weather_code") else (hC?.optInt(i) ?: 0)
-            horas.add(HoraPrevisao(hora, temp, cod))
+            val ehDia = if (k == 0) atual.optInt("is_day", 1) == 1 else (hD?.optInt(i, 1) ?: 1) == 1
+            horas.add(HoraPrevisao(hora, temp, cod, ehDia))
         }
         val hoje = dias.firstOrNull()
         return PrevisaoCompleta(
             ip.optString("city"), Math.round(atual.optDouble("temperature_2m")).toInt(), atual.optInt("weather_code"),
-            Math.round(atual.optDouble("wind_speed_10m")).toInt(), hoje?.min ?: 0, hoje?.max ?: 0, hoje?.chuva ?: 0, horas, dias
+            Math.round(atual.optDouble("wind_speed_10m")).toInt(), hoje?.min ?: 0, hoje?.max ?: 0, hoje?.chuva ?: 0, horas, dias,
+            atual.optInt("is_day", 1) == 1
         )
     }
 

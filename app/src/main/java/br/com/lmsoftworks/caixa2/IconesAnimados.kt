@@ -39,6 +39,12 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
         lineTo(17.5f, 8f)
         arcTo(RectF(13f, 8f, 22f, 17f), 270f, 146f)
     }
+    private val lua = Path().apply {
+        moveTo(12f, 3f)
+        arcTo(RectF(16.5f - 6.364f, 7.5f - 6.364f, 16.5f + 6.364f, 7.5f + 6.364f), 225f, -180f)
+        arcTo(RectF(3f, 3f, 21f, 21f), 0f, 270f)
+        close()
+    }
     private val raios = floatArrayOf(
         12f, 2f, 12f, 4f, 12f, 20f, 12f, 22f, 4.93f, 4.93f, 6.34f, 6.34f, 17.66f, 17.66f, 19.07f, 19.07f,
         2f, 12f, 4f, 12f, 20f, 12f, 22f, 12f, 6.34f, 17.66f, 4.93f, 19.07f, 19.07f, 4.93f, 17.66f, 6.34f
@@ -62,17 +68,18 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
         p.strokeWidth = 2f
         when (tipo) {
             "sol" -> {
-                val pulso = 3f + 6f * suave((t % 3000) / 3000f)
-                for (i in 0 until 3) {
-                    pf.color = Color.argb(60 - i * 18, Color.red(cor), Color.green(cor), Color.blue(cor))
-                    canvas.drawCircle(12f, 12f, 4f + pulso * (1f - i * .3f), pf)
-                }
                 canvas.save()
                 canvas.rotate((t % 14000) / 14000f * 360f, 12f, 12f)
                 var i = 0
                 while (i < raios.size) { canvas.drawLine(raios[i], raios[i + 1], raios[i + 2], raios[i + 3], p); i += 4 }
                 canvas.restore()
                 canvas.drawCircle(12f, 12f, 4f, p)
+            }
+            "lua" -> {      // noite: lua crescente que balança de leve
+                canvas.save()
+                canvas.rotate(-6f + 12f * suave((t % 5000) / 5000f), 12f, 12f)
+                canvas.drawPath(lua, p)
+                canvas.restore()
             }
             "nublado" -> {
                 val dx = -1.2f + 2.4f * suave((t % 4000) / 4000f)

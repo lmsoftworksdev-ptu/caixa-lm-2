@@ -456,6 +456,7 @@ class InicioActivity : Activity() {
             "clima" -> when (telaPrevisao.tipoHoje) {
                 "sol" -> Triple("#FFB547", "#1F5BFF", "#3D8BFF")
                 "chuva" -> Triple("#3D7BFF", "#1A2E6E", "#3D8BFF")
+                "lua" -> Triple("#5A3CE0", "#232A9A", "#3D8BFF")
                 else -> Triple("#7C8FB8", "#2B3A66", "#3D8BFF")
             }
             else -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")

@@ -17,14 +17,14 @@ import java.util.Date
 import java.util.Locale
 
 /** "sol", "nublado" ou "chuva" para o código do tempo do Open-Meteo. */
-fun tipoDoCodigo(codigo: Int): String = when (codigo) {
-    0, 1 -> "sol"
+fun tipoDoCodigo(codigo: Int, noite: Boolean = false): String = when (codigo) {
+    0, 1 -> if (noite) "lua" else "sol"
     in 51..67, in 80..82, in 95..99 -> "chuva"
     else -> "nublado"
 }
 
-fun descricaoDoCodigo(codigo: Int): String = when (codigo) {
-    0, 1 -> "Ensolarado"
+fun descricaoDoCodigo(codigo: Int, noite: Boolean = false): String = when (codigo) {
+    0, 1 -> if (noite) "Céu limpo" else "Ensolarado"
     2 -> "Parcialmente nublado"
     3 -> "Nublado"
     45, 48 -> "Neblina"
@@ -40,6 +40,7 @@ fun descricaoDoCodigo(codigo: Int): String = when (codigo) {
 fun coresDoTipo(tipo: String): Pair<Int, Int> = when (tipo) {
     "sol" -> Color.parseColor("#FFC94D") to Color.parseColor("#29FFBE3C")
     "chuva" -> Color.parseColor("#9CC8FF") to Color.parseColor("#294FAAFF")
+    "lua" -> Color.parseColor("#C8D4FF") to Color.parseColor("#2A7C8CFF")
     else -> Color.parseColor("#C9D4EE") to Color.parseColor("#24C8D4EE")
 }
 
@@ -118,7 +119,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
         montarDias(p)
     }
 
-    val tipoHoje: String? get() = previsao?.let { tipoDoCodigo(it.codigo) }
+    val tipoHoje: String? get() = previsao?.let { tipoDoCodigo(it.codigo, !it.dia) }
 
     private fun bloco(icone: Int, rotulo: String, valor: String): View = LinearLayout(c).apply {
         gravity = Gravity.CENTER_VERTICAL
@@ -134,7 +135,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
 
     private fun montarHoje(p: Respostas.PrevisaoCompleta) {
         esquerda.removeAllViews()
-        val tipo = tipoDoCodigo(p.codigo)
+        val tipo = tipoDoCodigo(p.codigo, !p.dia)
         val (cor, fundo) = coresDoTipo(tipo)
         val topo = LinearLayout(c).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -145,7 +146,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
             addView(LinearLayout(c).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(texto(c, "${p.temp}°", 96, Tema.TEXTO).apply { typeface = Tema.OUTFIT; letterSpacing = -3f / 96f })
-                addView(texto(c, descricaoDoCodigo(p.codigo), 26, Tema.TEXTO).apply { maxLines = 1 }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = -6.d() })
+                addView(texto(c, descricaoDoCodigo(p.codigo, !p.dia), 26, Tema.TEXTO).apply { maxLines = 1 }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = -6.d() })
             }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 22.d() })
         }
         esquerda.addView(topo, LinearLayout.LayoutParams(-1, -2))
@@ -164,13 +165,14 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
         // próximas horas: uma linha que rola para o lado (hora, ícone e temperatura lado a lado), até a manhã do dia seguinte e além
         val horas = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
         p.horas.forEachIndexed { i, h ->
-            val (corH, _) = coresDoTipo(tipoDoCodigo(h.codigo))
+            val tipoH = tipoDoCodigo(h.codigo, !h.dia)
+            val (corH, _) = coresDoTipo(tipoH)
             horas.addView(LinearLayout(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 background = fundoArredondado(Color.parseColor("#0FFFFFFF"), 18.d())
                 setPadding(14.d(), 10.d(), 14.d(), 10.d())
                 addView(texto(c, if (i == 0) "Agora" else "${h.hora}h", 17, Tema.TEXTO3))
-                addView(IconeAnimado(c, tipoDoCodigo(h.codigo), corH, 24), LinearLayout.LayoutParams(24.d(), 24.d()).apply { leftMargin = 10.d(); rightMargin = 10.d() })
+                addView(IconeAnimado(c, tipoH, corH, 24), LinearLayout.LayoutParams(24.d(), 24.d()).apply { leftMargin = 10.d(); rightMargin = 10.d() })
                 addView(texto(c, "${h.temp}°", 20, Tema.TEXTO, true))
             }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 8.d() })
         }
@@ -194,9 +196,10 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
                 addView(texto(c, nome, 22, Tema.TEXTO, d.indice == 0), LinearLayout.LayoutParams(118.d(), -2))
                 addView(IconeAnimado(c, tipoDoCodigo(d.codigo), cor, 28), LinearLayout.LayoutParams(28.d(), 28.d()))
                 addView(texto(c, if (d.chuva >= 20) "${d.chuva}%" else "", 17, Color.parseColor("#8FC2FF")).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(64.d(), -2).apply { leftMargin = 16.d() })
-                addView(texto(c, "${d.min}°", 21, Tema.TEXTO2).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(50.d(), -2).apply { leftMargin = 8.d() })
-                addView(FaixaTemp(c, d.min, d.max, gmin, gmax), LinearLayout.LayoutParams(0, 6.d(), 1f).apply { leftMargin = 14.d(); rightMargin = 14.d() })
-                addView(texto(c, "${d.max}°", 21, Tema.TEXTO, true), LinearLayout.LayoutParams(50.d(), -2))
+                // mínima e máxima do dia, escritas (sem barra)
+                addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(texto(c, "Mín ${d.min}°", 20, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 22.d() })
+                addView(texto(c, "Máx ${d.max}°", 21, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2))
                 setPadding(0, 0, 8.d(), 0)
             }, LinearLayout.LayoutParams(-1, 62.d()))
             dias.addView(View(c).apply { setBackgroundColor(Cfg.DIVISOR) }, LinearLayout.LayoutParams(-1, 1.d().coerceAtLeast(1)))

@@ -110,10 +110,10 @@ class CapaMini(c: Context) : View(c) {
 }
 
 /** Tipo de ícone animado do clima ("sol", "nublado" ou "chuva") para o código do tempo do Open-Meteo. */
-fun Respostas.ClimaHoje.tipo(): String = tipoDoCodigo(codigo)
+fun Respostas.ClimaHoje.tipo(): String = tipoDoCodigo(codigo, noite)
 
 fun Respostas.ClimaHoje.descricao(): String = when (codigo) {
-    0, 1 -> "Ensolarado"
+    0, 1 -> if (noite) "Céu limpo" else "Ensolarado"
     2 -> "Parcialmente nublado"
     3 -> "Nublado"
     45, 48 -> "Neblina"
