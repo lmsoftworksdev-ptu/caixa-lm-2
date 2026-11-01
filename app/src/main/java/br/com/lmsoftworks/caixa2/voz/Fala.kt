@@ -36,7 +36,9 @@ object Fala {
         ctx ?: return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            // o canal do alarme é mais forte que o da música: o nível 10 vai a 70% dele e o 6 a 42% (3 de 7)
+            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * 0.7f * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            Log.d(TAG, "volume da voz: nivel ${Ajustes.volumeVoz} -> canal $alvo (era ${audio.getStreamVolume(CANAL)})")
             if (audio.getStreamVolume(CANAL) != alvo) audio.setStreamVolume(CANAL, alvo, 0)
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }

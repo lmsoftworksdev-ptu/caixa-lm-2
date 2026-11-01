@@ -169,7 +169,9 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
         player = p
     }
 
-    /** Foto da tela em 1/4 do tamanho, desfocada de verdade (RenderScript, 2 passadas): sem blocos nem serrilhado. */
+    private var rs: android.renderscript.RenderScript? = null
+
+    /** Foto da tela em 1/4 do tamanho (rápido, na thread principal); o desfoque de verdade (RenderScript) é feito fora dela. */
     private fun desfocar() {
         try {
             val v = alvo()
@@ -179,22 +181,25 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
             val cv = Canvas(foto)
             cv.scale(1f / f, 1f / f)
             v.draw(cv)
-            val saida = try {
-                val rs = android.renderscript.RenderScript.create(c)
-                val blur = android.renderscript.ScriptIntrinsicBlur.create(rs, android.renderscript.Element.U8_4(rs))
-                blur.setRadius(25f)
-                val ent = android.renderscript.Allocation.createFromBitmap(rs, foto)
-                val sai = android.renderscript.Allocation.createTyped(rs, ent.type)
-                repeat(3) { blur.setInput(ent); blur.forEach(sai); sai.copyTo(foto); ent.copyFrom(foto) }
-                ent.destroy(); sai.destroy(); blur.destroy(); rs.destroy()
-                foto
-            } catch (e: Throwable) {
-                // sem RenderScript: reduz em etapas e estica com filtro (borra sem formar blocos)
-                var b = foto
-                repeat(3) { b = Bitmap.createScaledBitmap(b, maxOf(2, b.width / 2), maxOf(2, b.height / 2), true) }
-                Bitmap.createScaledBitmap(b, foto.width, foto.height, true)
-            }
-            fundo.setImageBitmap(saida)
+            // enquanto o desfoque não fica pronto, mostra a foto já esticada e suavizada (não trava a abertura)
+            fundo.setImageBitmap(foto)
+            Thread {
+                val saida = try {
+                    val ctx = rs ?: android.renderscript.RenderScript.create(c.applicationContext).also { rs = it }
+                    val blur = android.renderscript.ScriptIntrinsicBlur.create(ctx, android.renderscript.Element.U8_4(ctx))
+                    blur.setRadius(25f)
+                    val ent = android.renderscript.Allocation.createFromBitmap(ctx, foto)
+                    val sai = android.renderscript.Allocation.createTyped(ctx, ent.type)
+                    repeat(3) { blur.setInput(ent); blur.forEach(sai); sai.copyTo(foto); ent.copyFrom(foto) }
+                    ent.destroy(); sai.destroy(); blur.destroy()
+                    foto
+                } catch (e: Throwable) {
+                    var b = foto
+                    repeat(3) { b = Bitmap.createScaledBitmap(b, maxOf(2, b.width / 2), maxOf(2, b.height / 2), true) }
+                    b
+                }
+                post { if (aberta || abertoFlag) fundo.setImageBitmap(saida) }
+            }.start()
         } catch (e: Throwable) { fundo.setImageDrawable(null) }
     }
 
