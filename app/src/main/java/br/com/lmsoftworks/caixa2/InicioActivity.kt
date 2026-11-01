@@ -130,7 +130,16 @@ class InicioActivity : Activity() {
             // a faixa fechada com o gesto só fica escondida enquanto parada: tocou de novo, o cartão volta e o pause não o esconde mais
             if (musica.tocando && android.os.SystemClock.uptimeMillis() >= musicaDispensadaAte) musicaDispensada = ""
             val dispensada = android.os.SystemClock.uptimeMillis() < musicaDispensadaAte || (musicaDispensada == musica.titulo + musica.artista && !musica.tocando)
-            if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando) else inicio.definirMusica(null, null)
+            // Celular conectado e som saindo, mas o celular não mandou título nem capa (AVRCP vazio): mostra um cartão simples para
+            // a pessoa saber que a caixa está tocando e poder pausar.
+            val agoraMs = android.os.SystemClock.uptimeMillis()
+            val semDados = !musica.temMusica && bluetooth.algumConectado && !playerMidia.ativo && !telaVideo.aberto &&
+                (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isMusicActive
+            if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
+            val genericoVisivel = semDadosDesde != 0L && agoraMs - semDadosDesde > 2500L && !dispensada
+            if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
+            else if (genericoVisivel) inicio.definirMusica("Tocando do celular", bluetooth.nomeConectado() ?: "Bluetooth", null, true)
+            else inicio.definirMusica(null, null)
             val proximoLembrete = lembretes.todos.firstOrNull()
             inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
@@ -407,6 +416,7 @@ class InicioActivity : Activity() {
 
     /** Até esse instante a música que começar a tocar NÃO abre sozinha a tela Tocando agora (foi o play do cartão do Início). */
     private var semAbrirMusicaAte = 0L
+    private var semDadosDesde = 0L          // desde quando o som sai pelo Bluetooth sem o celular mandar os dados da música
     private var musicaDispensada = ""          // faixa fechada com o gesto no cartão do Início: o cartão só volta quando ela tocar de novo
     private var musicaDispensadaAte = 0L
 
