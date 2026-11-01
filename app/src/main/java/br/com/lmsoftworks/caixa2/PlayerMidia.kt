@@ -197,7 +197,13 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     private val audioMgr = contexto.applicationContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-    private val foco = android.media.AudioManager.OnAudioFocusChangeListener { }
+    // Perdeu o foco para outro app (o Bluetooth da caixa pega o foco quando o celular começa a tocar): pausa, para não saírem dois sons juntos.
+    private val foco = android.media.AudioManager.OnAudioFocusChangeListener { mudanca ->
+        if (mudanca == android.media.AudioManager.AUDIOFOCUS_LOSS) handler.post {
+            Log.d(TAG, "perdeu o foco de áudio (outro aplicativo tocando): pausando")
+            if (player?.isPlaying == true) pausarSuave()
+        }
+    }
 
     private fun tocarFonte(fonte: Fonte) {
         // pede o foco de áudio: o A2DP da caixa perde o dele e manda "pausar" ao celular

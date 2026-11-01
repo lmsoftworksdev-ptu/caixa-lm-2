@@ -94,6 +94,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (d != null) conectados.remove(d.address)
                 ACAO_TOCANDO -> {
                     val tocando = i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == A2DP_TOCANDO
+                    Log.d(TAG, "áudio do celular: ${if (tocando) "tocando" else "parado"}")
                     if (tocando != celularTocando) { celularTocando = tocando; if (tocando) aoCelularTocando?.invoke() }
                 }
                 ACAO_SINK -> if (d != null) {
