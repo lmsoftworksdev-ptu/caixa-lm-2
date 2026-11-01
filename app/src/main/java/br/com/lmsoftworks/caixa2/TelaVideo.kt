@@ -48,6 +48,8 @@ class TelaVideo(
     /** Volume do aparelho em porcentagem (0 a 100): o mesmo da pílula de volume da barra de cima. */
     private val lerVolume: () -> Int,
     private val definirVolume: (Int) -> Unit,
+    /** Toque na nota do seletor (vídeo que veio de uma música): volta para Tocando agora no mesmo segundo. */
+    private val aoVoltarMusica: () -> Unit,
     private val aoFechar: () -> Unit
 ) : FrameLayout(c) {
 
@@ -55,8 +57,9 @@ class TelaVideo(
     private val cortina = View(c).apply { setBackgroundColor(Color.BLACK) }
     private var cortinaForcada = false
     private val controles = FrameLayout(c)
-    private val titulo = texto(c, "", 30, Color.WHITE, true)
-    private val canal = texto(c, "", 19, Color.parseColor("#D6E0F7"))
+    private val titulo = texto(c, "", 32, Color.WHITE, true)
+    private val canal = texto(c, "", 20, Color.parseColor("#D6E0F7"))
+    private val seletor = SeletorMidia(c, { aoVoltarMusica() }, {}).apply { ativo = "video"; visibility = View.GONE }
     private val botaoPlay = FrameLayout(c)
     private val iconePlay = ImageView(c)
     private val barra = BarraProgresso(c)
@@ -93,7 +96,9 @@ class TelaVideo(
         titulo.maxLines = 1; titulo.ellipsize = TextUtils.TruncateAt.END
         canal.maxLines = 1; canal.ellipsize = TextUtils.TruncateAt.END
         val textos = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; addView(titulo); addView(canal, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 4.d() }) }
-        controles.addView(textos, LayoutParams(-1, -2, Gravity.TOP).apply { leftMargin = 40.d(); rightMargin = 40.d(); topMargin = 22.d() })
+        controles.addView(textos, LayoutParams(-1, -2, Gravity.TOP).apply { leftMargin = 40.d(); rightMargin = 300.d(); topMargin = 22.d() })
+        controles.addView(seletor, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = 48.d(); topMargin = 30.d() })
+        barra.corPreenchida = Tema.ERRO      // o trecho já assistido é vermelho; a bolinha, branca
 
         fun redondo(recurso: Int, lado: Int, icone: Int, fundo: Int, aoClicar: () -> Unit): FrameLayout = FrameLayout(c).apply {
             background = fundoArredondado(fundo, (lado / 2).d(), if (fundo == Color.WHITE) 0 else Cfg.LINHA)
@@ -161,7 +166,26 @@ class TelaVideo(
         return true
     }
 
+    /** Só aparece quando o vídeo veio de uma música (Tocando agora). */
+    fun mostrarSeletor(v: Boolean) { seletor.visibility = if (v) View.VISIBLE else View.GONE }
+
+    private var esperando = false
+
+    /** Abre já na tela de carregamento (rodinha e título), enquanto o clipe ainda está sendo achado. */
+    fun esperar(tituloEspera: String, canalEspera: String) {
+        esperando = true
+        visibility = View.VISIBLE
+        cortina.visibility = View.VISIBLE
+        titulo.text = tituloEspera; canal.text = canalEspera
+        iconePlay.setImageResource(R.drawable.ic_tocar)
+        rodinha.visibility = View.VISIBLE
+        mensagem.visibility = View.GONE
+        mostrarControles(true)
+        controles.alpha = 1f
+    }
+
     fun abrir() {
+        esperando = false
         visibility = View.VISIBLE
         player.ligarImagem(imagem)
         mostrarControles(true)
@@ -207,6 +231,7 @@ class TelaVideo(
     }
 
     fun fechar() {
+        esperando = false
         cortinaForcada = false
         handler.removeCallbacks(tique); handler.removeCallbacks(esconder)
         player.ligarImagem(null)
@@ -241,7 +266,7 @@ class TelaVideo(
 
     /** Chamada quando o player muda de estado. */
     fun atualizar() {
-        if (!aberto) return
+        if (!aberto || esperando) return
         cortina.visibility = if (cortinaForcada || !player.primeiroQuadro) View.VISIBLE else View.GONE
         val r = player.item
         titulo.text = r?.titulo ?: ""
@@ -253,6 +278,8 @@ class TelaVideo(
         textoErro.text = erro ?: ""
         botaoAnterior?.alpha = if (player.temAnterior || player.posicaoMs > 4000) 1f else .4f
         botaoProxima?.alpha = if (player.temProxima) 1f else .4f
+        // vídeo muito longo (mais de 10 min) não é uma música: o botão da nota fica indisponível
+        seletor.musicaDisponivel = player.duracaoMs <= 0 || player.duracaoMs <= 600_000L
         botaoPlay.visibility = View.VISIBLE      // sempre aparece: pausa/play enquanto toca; play no meio quando parado ou carregando
         if (erro != null || player.carregando) { mostrarControles(true); controles.alpha = 1f }
         else if (player.tocando) agendarEsconder()

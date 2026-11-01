@@ -166,13 +166,13 @@ class InicioActivity : Activity() {
         telaWifi.visibility = View.GONE
         telaBluetooth = TelaBluetooth(this, bluetooth)
         telaBluetooth.visibility = View.GONE
-        telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") })
+        telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") }) { videoDaMusica() }
         telaMusica.visibility = View.GONE
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
         musica.local = playerMidia
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.visibility = View.GONE
-        telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }) { fecharVideoAnimado() }
+        telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { fecharVideoAnimado() }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
@@ -389,7 +389,14 @@ class InicioActivity : Activity() {
             capaAnalisada = capa
             corCapa = capa?.let { try { CorCapa.analisar(it) } catch (e: Exception) { null } }
         }
-        // sem capa (música trocando) ou capa sem cor: fundo cinza, e a fita apaga enquanto isso
+        // sem música: as cores do Bluetooth; música sem capa ainda: o mesmo matiz do degradê da capa
+        if (!musica.temMusica) return Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
+        if (capa == null && corCapa == null) {
+            val h = CapaView.matiz(musica.titulo + musica.artista)
+            fun cor(i: Int) = String.format("#%06X", 0xFFFFFF and i)
+            return Triple(cor(CorCapa.hsl(h, .82f, .48f)), cor(CorCapa.hsl(h + 35f, .72f, .32f)), cor(CorCapa.hsl(h, .8f, .56f)))
+        }
+        // capa sem cor: fundo cinza, e a fita apaga enquanto isso
         val c = corCapa ?: return Triple("#5B6270", "#232733", "#8A93A5")
         fun hex(i: Int) = String.format("#%06X", 0xFFFFFF and i)
         return Triple(hex(c.first), hex(c.second), hex(c.first))
@@ -545,7 +552,7 @@ class InicioActivity : Activity() {
         override fun videoAberto() = telaVideo.aberto
 
         override fun tocar(lista: List<Resultado>, soAudio: Boolean) {
-            if (soAudio) { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
+            if (soAudio) { videoDeMusica = false; if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
         }
 
         override fun executar(comando: br.com.lmsoftworks.caixa2.voz.ComandoVoz, textoOuvido: String): String? =
@@ -801,25 +808,120 @@ class InicioActivity : Activity() {
     private fun aoMudarPlayer() {
         if (playerMidia.ehVideo && led.modo == "ambilight" && !playerMidia.primeiroQuadro) led.definirCorAmbiente(Color.BLACK)
         led.sessaoExterna = if (playerMidia.tocando) playerMidia.sessaoAudio else -1
-        if (playerMidia.ehVideo) telaVideo.atualizar() else musica.sincronizarLocal()
+        if (playerMidia.ehVideo) telaVideo.atualizar() else { musica.sincronizarLocal(); adiantarClipe() }
     }
 
     /** A tela que estava por baixo quando o vídeo abriu (a busca, ou o início quando o pedido veio por voz): é para onde o vídeo volta. */
     private var origemVideo = "midia"
 
-    private fun abrirVideo(lista: List<Resultado>, i: Int) {
+    /** O vídeo aberto veio de uma música (seletor música <-> vídeo): ao sair, a música volta no mesmo segundo. */
+    private var videoDeMusica = false
+    private var filaDaMusica: List<Resultado> = emptyList()
+    private var indiceDaMusica = 0
+    private var buscandoClipe = false
+    private var faixaDaMusica: Resultado? = null
+    private var clipeAbertoUrl = ""
+    private var capaDaMusica: android.graphics.Bitmap? = null
+    private var musicaTocavaAntes = false
+    private var pedidoClipe = 0
+    private val clipesProntos = HashMap<String, Resultado>()
+    private var ultimoPrefetch = ""
+
+    /** Acha o clipe oficial de uma faixa (o primeiro vídeo de 30 s a 15 min, de preferência sem "ao vivo"). */
+    private fun acharClipe(titulo: String, artista: String): Resultado? = try {
+        YouTube.buscar("$titulo $artista clipe oficial", false)
+            .let { l -> l.firstOrNull { it.duracaoSeg in 30..900 && !it.titulo.contains("ao vivo", true) } ?: l.firstOrNull { it.duracaoSeg in 30..900 } }
+    } catch (e: Exception) { null }
+
+    /** Música do app tocando: já deixa o clipe achado e o endereço dele resolvido, para o seletor abrir sem demora. */
+    private fun adiantarClipe() {
+        val faixa = playerMidia.item ?: return
+        if (playerMidia.ehVideo || !playerMidia.tocando || faixa.url == ultimoPrefetch) return
+        ultimoPrefetch = faixa.url
+        val tit = faixa.titulo; val art = faixa.canal.removeSuffix(" - Topic")
+        Thread {
+            try { Thread.sleep(4000) } catch (e: Exception) { }
+            val achado = acharClipe(tit, art) ?: return@Thread
+            relogio.post { clipesProntos[faixa.url] = achado; playerMidia.prefetchVideo(achado) }
+        }.start()
+    }
+
+    private fun abrirVideo(lista: List<Resultado>, i: Int, inicioMs: Long = 0L) {
+        videoDeMusica = false
+        telaVideo.mostrarSeletor(false)
         if (!telaVideo.aberto) origemVideo = atual
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
-        playerMidia.tocarVideo(lista, i)
+        playerMidia.tocarVideo(lista, i, inicioMs)
         telaVideo.abrir()
         relogio.removeCallbacks(amostradorVideo); relogio.post(amostradorVideo)
     }
 
     private fun fecharVideo() {
+        val voltarMusica = videoDeMusica
+        val pos = playerMidia.posicaoMs
+        val estavaTocando = playerMidia.tocando
+        videoDeMusica = false
+        telaVideo.mostrarSeletor(false)
         telaVideo.fechar()
-        playerMidia.parar()
+        pedidoClipe++        // um clipe que ainda estava sendo procurado não abre mais
+        val faixa = faixaDaMusica
+        when {
+            // o clipe já estava tocando: o mesmo áudio continua (só a imagem sai), sem carregar nada e no mesmo segundo
+            voltarMusica && faixa != null && playerMidia.ehVideo && playerMidia.erro == null -> {
+                val atualItem = playerMidia.item
+                if (atualItem != null && atualItem.url != clipeAbertoUrl)
+                    // trocou de vídeo dentro do player: a música que volta é a do vídeo que estava passando, com a fila dele
+                    playerMidia.virarMusica(atualItem, playerMidia.fila, playerMidia.indice, playerMidia.capa)
+                else playerMidia.virarMusica(faixa, filaDaMusica, indiceDaMusica, capaDaMusica)
+            }
+            // o clipe ainda nem tinha começado: a música segue de onde parou
+            voltarMusica && faixa != null && !playerMidia.ehVideo -> if (musicaTocavaAntes) musica.tocar()
+            voltarMusica && filaDaMusica.isNotEmpty() -> musica.tocarDoYoutube(filaDaMusica, indiceDaMusica, pos, estavaTocando)
+            else -> playerMidia.parar()
+        }
     }
+
+    /** Seletor da tela Tocando agora: abre o clipe da mesma faixa no mesmo segundo; a música para. */
+    private fun videoDaMusica() {
+        if (!musica.emLocal || buscandoClipe || telaVideo.aberto) return
+        val faixa = playerMidia.item ?: return
+        val pos = playerMidia.posicaoMs
+        filaDaMusica = playerMidia.fila; indiceDaMusica = playerMidia.indice
+        faixaDaMusica = faixa; capaDaMusica = playerMidia.capa
+        musicaTocavaAntes = playerMidia.tocando
+        val titulo = musica.titulo; val artista = musica.artista
+        val meuPedido = ++pedidoClipe
+        // já abre na tela de carregamento do vídeo (a música pausa), sem aviso escrito
+        origemVideo = atual
+        musica.pausar()
+        videoDeMusica = true
+        telaVideo.mostrarSeletor(true)
+        telaVideo.esperar(faixa.titulo, "$artista · Clipe oficial")
+        fun abrirClipe(achado: Resultado) {
+            if (meuPedido != pedidoClipe || !telaVideo.aberto) return
+            clipeAbertoUrl = achado.url
+            abrirVideo(listOf(achado.copy(titulo = titulo, canal = "$artista · Clipe oficial")), 0, pos)
+            videoDeMusica = true
+            telaVideo.mostrarSeletor(true)
+        }
+        val pronto = clipesProntos[faixa.url]
+        if (pronto != null) { abrirClipe(pronto); return }
+        buscandoClipe = true
+        Thread {
+            val achado = acharClipe(titulo, artista)
+            relogio.post {
+                buscandoClipe = false
+                if (meuPedido != pedidoClipe) return@post
+                if (achado == null) {
+                    Toast.makeText(this, "Não achei o clipe desta música", Toast.LENGTH_SHORT).show()
+                    telaVideo.fechar(); videoDeMusica = false; telaVideo.mostrarSeletor(false)
+                    if (musicaTocavaAntes) musica.tocar()
+                } else { clipesProntos[faixa.url] = achado; abrirClipe(achado) }
+            }
+        }.start()
+    }
+
 
     /** Fecha o vídeo girando o cubo de volta para a busca (botão X e tecla voltar). */
     private fun fecharVideoAnimado() {

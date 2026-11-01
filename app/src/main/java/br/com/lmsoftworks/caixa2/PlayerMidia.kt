@@ -79,7 +79,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 else if (state == Player.STATE_READY) { carregando = false; if (p.currentPosition > 20_000) recuperacoes = 0 }
                 if (state == Player.STATE_ENDED) {
                     if (proximoPlayer != null && preparada != null) { concluirFade(); return }      // a próxima já estava carregada: segue nela
-                    if (temProxima) proxima() else { tocando = false; aoMudar() }
+                    if (temProxima) avancar() else { tocando = false; aoMudar() }
                     return
                 }
                 aoMudar()
@@ -105,20 +105,55 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     // ---------------------------------------------------------------- pedidos
 
-    fun tocarMusica(lista: List<Resultado>, i: Int) {
+    /** [inicioMs] começa já nesse ponto; [tocar] = false deixa pausado (usado na troca música <-> vídeo do mesmo clipe). */
+    fun tocarMusica(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
         fila = lista; indice = i
+        comecarTocando = tocar
         iniciarItem(lista[i], false)
+        retomarEm = inicioMs
     }
 
-    fun tocarVideo(lista: List<Resultado>, i: Int) {
+    fun tocarVideo(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
         fila = lista; indice = i
+        comecarTocando = tocar
         iniciarItem(lista[i], true)
+        retomarEm = inicioMs
+    }
+
+    private var comecarTocando = true
+
+    // ---------------------------------------------------------------- troca música <-> clipe sem esperar
+
+    private val videoPre = LinkedHashMap<String, Fonte>()
+
+    /** Resolve o endereço do vídeo antes de ele ser pedido, para o clipe abrir mais rápido. */
+    fun prefetchVideo(r: Resultado) {
+        if (videoPre.containsKey(r.url)) return
+        Thread {
+            try {
+                val f = YouTube.resolver(r.url, soAudio = false)
+                handler.post { videoPre[r.url] = f; while (videoPre.size > 3) videoPre.remove(videoPre.keys.first()) }
+            } catch (e: Exception) { }
+        }.start()
+    }
+
+    /**
+     * Do clipe de volta para a música sem carregar nada: o mesmo áudio do vídeo continua tocando (só a imagem é desligada) e a
+     * tela passa a mostrar a faixa original e a fila dela.
+     */
+    fun virarMusica(original: Resultado, filaOriginal: List<Resultado>, i: Int, capaOriginal: Bitmap?) {
+        cancelarFade()
+        fila = filaOriginal; indice = i; item = original; ehVideo = false; capa = capaOriginal; relacionados = emptyList(); primeiroQuadro = false
+        player?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build() }
+        aoMudar()
     }
 
     private fun iniciarItem(r: Resultado, video: Boolean, recuperando: Boolean = false) {
         if (!recuperando) { recuperacoes = 0; retomarEm = 0L }
         val minha = ++geracao
+        cancelarRampa(); fracaoVolume = 1f
         val pronta = preparada?.takeIf { it.item.url == r.url && !video }
+        val videoPronto = if (video) videoPre.remove(r.url) else null
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false; capa = null; relacionados = emptyList(); primeiroQuadro = false
         player?.stop(); player?.clearMediaItems()
@@ -126,7 +161,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         carregarCapa(r, minha)
         Thread {
             try {
-                val fonte = pronta?.fonte ?: YouTube.resolver(r.url, soAudio = !video)
+                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
@@ -157,11 +192,14 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val p = criar()
         val origem = origemDe(fonte)
         p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !ehVideo).build()
         p.setMediaSource(origem, retomarEm)
         retomarEm = 0L
+        cancelarRampa(); fracaoVolume = 1f
         p.volume = volumeBase
         p.prepare()
-        p.playWhenReady = true
+        p.playWhenReady = comecarTocando
+        comecarTocando = true
     }
 
     private fun origemDe(fonte: Fonte): MediaSource {
@@ -209,28 +247,76 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val p = player ?: return
         if (emFade) cancelarFade()
         if (erro != null) { item?.let { iniciarItem(it, ehVideo) }; return }
-        if (p.isPlaying) p.pause() else { if (p.playbackState == Player.STATE_ENDED) p.seekTo(0); p.play() }
+        if (saindo) { cancelarRampa(); p.pause(); restaurarVolume(); return }      // segundo toque durante o fade: para na hora
+        if (p.isPlaying) pausarSuave()
+        else {
+            if (p.playbackState == Player.STATE_ENDED) p.seekTo(0)
+            p.volume = 0f; p.play()
+            rampa(0f, 1f, 250L) { }          // volta com um fade-in curto
+        }
+    }
+
+    // ---------------------------------------------------------------- fade ao pausar e ao trocar de música
+
+    private var rampaAtual: Runnable? = null
+    private var fracaoVolume = 1f
+    private var saindo = false
+
+    private fun cancelarRampa() { rampaAtual?.let { handler.removeCallbacks(it) }; rampaAtual = null; saindo = false }
+
+    private fun restaurarVolume() { fracaoVolume = 1f; player?.volume = volumeBase }
+
+    /** Muda o volume do player de [de] a [para] (fração do volume base) em [ms]; no fim chama [fim]. */
+    private fun rampa(de: Float, para: Float, ms: Long, fim: () -> Unit) {
+        cancelarRampa()
+        saindo = para < de
+        val t0 = SystemClock.uptimeMillis()
+        val r = object : Runnable {
+            override fun run() {
+                val f = ((SystemClock.uptimeMillis() - t0).toFloat() / ms).coerceIn(0f, 1f)
+                fracaoVolume = de + (para - de) * f
+                player?.volume = fracaoVolume * volumeBase
+                if (f >= 1f) { rampaAtual = null; saindo = false; fim() } else handler.postDelayed(this, 25)
+            }
+        }
+        rampaAtual = r
+        r.run()
+    }
+
+    /** Pausa com o som descendo em 300 ms, em vez do corte seco. */
+    private fun pausarSuave() {
+        val p = player ?: return
+        rampa(fracaoVolume, 0f, 300L) { p.pause(); restaurarVolume() }
+    }
+
+    /** Troca de faixa pedida pela pessoa: o som atual desce em 250 ms e só então a nova começa. */
+    private fun trocarSuave(acao: () -> Unit) {
+        val p = player
+        if (p == null || !p.isPlaying) { acao(); return }
+        rampa(fracaoVolume, 0f, 250L) { acao() }
     }
 
     val temProxima: Boolean get() = indice + 1 < fila.size || relacionados.isNotEmpty()
     val temAnterior: Boolean get() = indice > 0
 
     /** Próximo da lista; no fim dela, segue pelas sugestões do YouTube (como o autoplay de lá). */
-    fun proxima() {
+    fun proxima() { trocarSuave { avancar() } }
+
+    private fun avancar() {
         if (indice + 1 >= fila.size && relacionados.isNotEmpty()) { fila = fila + relacionados; relacionados = emptyList() }
         if (indice + 1 < fila.size) { indice++; iniciarItem(fila[indice], ehVideo) }
     }
 
     fun anterior() {
         if (posicaoMs > 4000 || indice == 0) player?.seekTo(0)
-        else { indice--; iniciarItem(fila[indice], ehVideo) }
+        else trocarSuave { indice--; iniciarItem(fila[indice], ehVideo) }
     }
 
     fun pular(ms: Long) { player?.let { it.seekTo((it.currentPosition + ms).coerceIn(0, duracaoMs.takeIf { d -> d > 0 } ?: Long.MAX_VALUE)) }; aoMudar() }
 
     fun buscar(ms: Long) { if (emFade) cancelarFade(); player?.seekTo(ms.coerceAtLeast(0)); aoMudar() }
 
-    fun pausar() { if (emFade) cancelarFade(); player?.pause() }
+    fun pausar() { if (emFade) cancelarFade(); if (player?.isPlaying == true) pausarSuave() else player?.pause() }
 
     var repetindo = false; private set
 
@@ -248,7 +334,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
-    fun volume(v: Float) { volumeBase = v; if (!emFade) player?.volume = v }
+    fun volume(v: Float) { volumeBase = v; if (!emFade) player?.volume = v * fracaoVolume }
 
     // ---------------------------------------------------------------- emenda entre músicas (crossfade)
     //

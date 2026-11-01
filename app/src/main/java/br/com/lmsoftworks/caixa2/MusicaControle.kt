@@ -264,9 +264,9 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     // ---- música do YouTube (menu Mídia) ----
 
     /** Toca uma música do YouTube; a do celular, se estiver tocando, é pausada. */
-    fun tocarDoYoutube(lista: List<Resultado>, i: Int) {
+    fun tocarDoYoutube(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
         controle?.transportControls?.pause()
-        local?.tocarMusica(lista, i)
+        local?.tocarMusica(lista, i, inicioMs, tocar)
     }
 
     /** O player do YouTube mudou: copia o que ele toca para os mesmos campos que a tela de música já lê. */
