@@ -38,14 +38,41 @@ object Fala {
     /** Compatibilidade com a tela de Configurações: o nível novo vale na próxima fala. */
     fun aplicarVolume(ctx: Context? = contexto) {}
 
+    private var ultimoPorApp = -1
+    private var rampa: Runnable? = null
+
+    /** Leva o volume do aparelho até [para] de um em um nível, em ~[ms] (fade); [aoFim] roda ao chegar. */
+    private fun ir(audio: android.media.AudioManager, para: Int, ms: Long, aoFim: () -> Unit = {}) {
+        rampa?.let { main.removeCallbacks(it) }
+        val passos = Math.abs(para - audio.getStreamVolume(CANAL))
+        if (passos == 0) { ultimoPorApp = para; rampa = null; aoFim(); return }
+        val intervalo = (ms / passos).coerceAtLeast(30L)
+        val r = object : Runnable {
+            override fun run() {
+                try {
+                    val atual = audio.getStreamVolume(CANAL)
+                    if (atual == para) { ultimoPorApp = para; rampa = null; aoFim(); return }
+                    val prox = if (para > atual) atual + 1 else atual - 1
+                    aoMexerNoVolume?.invoke()
+                    audio.setStreamVolume(CANAL, prox, 0)
+                    ultimoPorApp = prox
+                    if (prox == para) { rampa = null; aoFim() } else main.postDelayed(this, intervalo)
+                } catch (e: Throwable) { rampa = null }
+            }
+        }
+        rampa = r
+        main.post(r)
+    }
+
     private fun fixarVolume() {
         val ctx = contexto ?: return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
             if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(CANAL)
-            if (audio.getStreamVolume(CANAL) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, alvo, 0) }
             volumeFixado = alvo
+            // com o assistente aberto a música abaixa em fade; numa fala avulsa o volume muda na hora
+            if (mantido) ir(audio, alvo, 450) else if (audio.getStreamVolume(CANAL) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, alvo, 0); ultimoPorApp = alvo }
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }
 
@@ -61,8 +88,9 @@ object Fala {
         if (mantido || volumeAntes < 0) return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            // só devolve se ninguém mexeu no volume enquanto ela falava
-            if (audio.getStreamVolume(CANAL) == volumeFixado) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, volumeAntes, 0) }
+            val antes = volumeAntes
+            // só devolve se ninguém mexeu no volume enquanto o assistente estava aberto; a música volta em fade
+            if (audio.getStreamVolume(CANAL) == ultimoPorApp) ir(audio, antes, 900)
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
         volumeAntes = -1; volumeFixado = -1
     }
