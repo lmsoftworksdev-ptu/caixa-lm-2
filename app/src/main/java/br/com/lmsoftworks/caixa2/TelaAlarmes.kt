@@ -1,76 +1,92 @@
 package br.com.lmsoftworks.caixa2
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
 /**
- * Tela cheia por cima de tudo quando o alarme toca: sino balançando, hora grande, nome e dois botões.
+ * Tela cheia por cima de tudo quando o alarme toca (v3): fundo radial roxo-escuro, sino balançando, hora grande, nome, o botão
+ * "Soneca 5 min" e o X vermelho para parar.
  */
 class TelaAlarmeTocando(private val c: Context, private val aoSoneca: () -> Unit, private val aoParar: () -> Unit) : FrameLayout(c) {
 
-    private val sino = icone(c, R.drawable.ic_sino, 110, Color.WHITE)
-    private val hora = texto(c, "", 150, Color.WHITE, true)
-    private val nome = texto(c, "", 36, Color.parseColor("#FFD2EA"))
+    private val sino = icone(c, R.drawable.ic_sino, 110, Color.parseColor("#D9C8FF"))
+    private val hora = texto(c, "", 150, Color.WHITE).apply { typeface = FONTE_LEVE; fontFeatureSettings = "tnum" }
+    private val nome = texto(c, "", 36, Color.parseColor("#D9C8FF"))
+    private var balanco: ValueAnimator? = null
 
     init {
         visibility = View.GONE
         isClickable = true
-        background = android.graphics.drawable.GradientDrawable(
-            android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-            intArrayOf(Color.parseColor("#FF4FA3"), Color.parseColor("#4A1F9E"))
-        )
+        background = GradientDrawable().apply {
+            gradientType = GradientDrawable.RADIAL_GRADIENT
+            colors = intArrayOf(Color.parseColor("#3E2390"), Color.parseColor("#1C1150"), Color.parseColor("#070516"))
+            gradientRadius = 760.d().toFloat()
+            setGradientCenter(.5f, .45f)
+        }
         val col = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             addView(sino)
             addView(hora, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d() })
-            addView(nome, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = 40.d() })
+            addView(nome, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = 44.d() })
             val bs = LinearLayout(c).apply {
-                gravity = Gravity.CENTER
-                // largura fixa nos dois: sem isso o primeiro botão ocupa a linha toda e o Parar fica espremido
-                addView(botaoComIcone(R.drawable.ic_lua, "Soneca 5 min", Color.parseColor("#33FFFFFF")) { aoSoneca() },
-                    LinearLayout.LayoutParams(360.d(), 84.d()).apply { rightMargin = 24.d() })
-                addView(botaoComIcone(R.drawable.ic_parar, "Parar", Cfg.VERMELHO, comTexto = false) { aoParar() }, LinearLayout.LayoutParams(120.d(), 84.d()))      // só o X; "Parar" fica na descrição para leitores de tela
+                gravity = Gravity.CENTER_VERTICAL
+                // "Soneca 5 min": pílula translúcida de 380 x 88; o X vermelho redondo de 88 pára o alarme
+                addView(botaoSoneca(), LinearLayout.LayoutParams(380.d(), 88.d()).apply { rightMargin = 24.d() })
+                addView(botaoParar(), LinearLayout.LayoutParams(88.d(), 88.d()))
             }
-            addView(bs, LinearLayout.LayoutParams(-2, -2))      // largura própria (sem isso herdava a do relógio e cortava os botões)
+            addView(bs, LinearLayout.LayoutParams(-2, -2))
         }
         addView(col, LayoutParams(-2, -2, Gravity.CENTER))
-        sino.pivotX = 55.d().toFloat(); sino.pivotY = 8.d().toFloat()
+        sino.pivotX = 55.d().toFloat(); sino.pivotY = 9.d().toFloat()      // gira em torno de 8% do topo
     }
 
-    /** Botão grande com ícone à esquerda do texto. */
-    private fun botaoComIcone(recurso: Int, rotulo: String, cor: Int, comTexto: Boolean = true, aoClicar: () -> Unit): View =
-        LinearLayout(c).apply {
-            gravity = Gravity.CENTER
-            setPadding(24.d(), 0, 24.d(), 0)
-            background = fundoArredondado(cor, 22.d(), if (cor == Cfg.LINHA) Cfg.LINHA else 0)
-            isClickable = true
-            setOnClickListener { aoClicar() }
-            efeitoToque()
-            contentDescription = rotulo
-            addView(icone(c, recurso, if (comTexto) 38 else 48, Color.WHITE))
-            if (comTexto) addView(texto(c, rotulo, 28, Color.WHITE, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d() })
-        }
+    private fun botaoSoneca(): View = LinearLayout(c).apply {
+        gravity = Gravity.CENTER
+        background = fundoArredondado(Color.parseColor("#24FFFFFF"), 44.d(), Color.parseColor("#2EFFFFFF"))
+        isClickable = true
+        contentDescription = "Soneca de 5 minutos"
+        setOnClickListener { aoSoneca() }
+        efeitoToque()
+        addView(icone(c, R.drawable.ic_lua, 36, Color.WHITE), LinearLayout.LayoutParams(36.d(), 36.d()))
+        addView(texto(c, "Soneca 5 min", 28, Color.WHITE, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d() })
+    }
+
+    private fun botaoParar(): View = FrameLayout(c).apply {
+        background = fundoArredondado(Tema.ERRO, 44.d())
+        isClickable = true
+        contentDescription = "Parar o alarme"
+        setOnClickListener { aoParar() }
+        efeitoToque()
+        addView(icone(c, R.drawable.ic_fechar, 40, Color.WHITE), LayoutParams(40.d(), 40.d(), Gravity.CENTER))
+    }
 
     fun mostrar(a: Alarme) {
         hora.text = "%02d:%02d".format(a.hora, a.minuto)
         nome.text = a.nome.ifBlank { "Alarme" }
         visibility = View.VISIBLE
-        sino.animate().cancel()
-        balancar(true)
+        balanco?.cancel()
+        // balança de -14° a +14° (um vaivém por segundo)
+        balanco = ValueAnimator.ofFloat(-14f, 14f).apply {
+            duration = 500
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { sino.rotation = it.animatedValue as Float }
+            start()
+        }
     }
 
     fun esconder() {
-        sino.animate().cancel()
+        balanco?.cancel(); balanco = null
+        sino.rotation = 0f
         visibility = View.GONE
-    }
-
-    private fun balancar(para: Boolean) {
-        if (visibility != View.VISIBLE) return
-        sino.animate().rotation(if (para) 18f else -18f).setDuration(260).withEndAction { balancar(!para) }.start()
     }
 }

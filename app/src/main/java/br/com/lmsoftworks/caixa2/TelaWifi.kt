@@ -189,7 +189,7 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         wifi.limparErro()
         val salva = wifi.salva(r.ssid)
         when {
-            !r.suportada -> Toast.makeText(c, "Redes corporativas ainda não são suportadas", Toast.LENGTH_SHORT).show()
+            !r.suportada -> Aviso.mostrar(c, "Redes corporativas ainda não são suportadas")
             r.ssid == wifi.conectando -> { }
             r.ssid == wifi.conectadoSsid || salva -> mostrarDetalhe(r)
             r.protegida -> abrirSenha(r)

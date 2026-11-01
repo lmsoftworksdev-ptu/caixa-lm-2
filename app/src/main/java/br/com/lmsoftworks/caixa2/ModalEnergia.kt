@@ -23,7 +23,7 @@ private class AnelContagem(c: Context, private val cor: Int) : View(c) {
     var total = 5000L
     var numero = 5
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 8.d().toFloat(); strokeCap = Paint.Cap.ROUND }
-    private val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER; typeface = FONTE_MEDIA; textSize = 62.d().toFloat() }
+    private val t = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER; typeface = FONTE_LEVE; textSize = 56.d().toFloat() }
     private val r = RectF()
 
     override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(170.d(), 170.d())
@@ -55,7 +55,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     init {
         visibility = View.GONE
-        setBackgroundColor(Color.parseColor("#E602060F"))
+        setBackgroundColor(Tema.SCRIM)
         isClickable = true      // engole os toques para não passarem para a tela de baixo
         setOnClickListener { if (!executandoJa) fechar() }      // tocar fora do cartão cancela e volta ao menu
         cartao.isClickable = true                               // toques dentro do cartão (fora dos botões) não fecham
@@ -63,11 +63,9 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(34.d(), 34.d(), 34.d(), 28.d())
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.parseColor("#13306F"), Color.parseColor("#08153A"))).apply {
-                cornerRadius = 32.d().toFloat(); setStroke(1.d().coerceAtLeast(1), Color.parseColor("#26FFFFFF"))
-            }
+            background = fundoArredondado(Tema.MODAL, Tema.RAIO_MODAL.d(), Tema.MODAL_BORDA)
         }
-        addView(cartao, LayoutParams(620.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        addView(cartao, LayoutParams(640.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
     }
 
     val aberto: Boolean get() = visibility == View.VISIBLE
@@ -75,10 +73,12 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
     fun abrir() {
         if (aberto) return
         executandoJa = false
-        if (cartao.parent == null) addView(cartao, LayoutParams(620.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        setBackgroundColor(Color.parseColor("#E602060F"))
+        if (cartao.parent == null) addView(cartao, LayoutParams(640.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        setBackgroundColor(Tema.SCRIM)
         visibility = View.VISIBLE
-        alpha = 0f; animate().alpha(1f).setDuration(220).start()
+        alpha = 0f; cartao.scaleX = .96f; cartao.scaleY = .96f
+        animate().alpha(1f).setDuration(Tema.MODAL_MS).setInterpolator(Tema.CURVA).start()
+        cartao.animate().scaleX(1f).scaleY(1f).setDuration(Tema.MODAL_MS).setInterpolator(Tema.CURVA).start()
         mostrarEscolha()
     }
 
@@ -91,12 +91,13 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
     private fun mostrarEscolha() {
         cartao.removeAllViews()
         val linha = LinearLayout(c)
-        linha.addView(botaoGrande(R.drawable.ic_power, "Desligar", "#FF5A6A", "#B3142A") { contar(true) },
-            LinearLayout.LayoutParams(0, 170.d(), 1f).apply { rightMargin = 9.d() })
-        linha.addView(botaoGrande(R.drawable.ic_reiniciar, "Reiniciar", "#4F93FF", "#1747B0") { contar(false) },
-            LinearLayout.LayoutParams(0, 170.d(), 1f).apply { leftMargin = 9.d() })
+        linha.addView(botaoGrande(R.drawable.ic_power, "Desligar", "#FF5A6A", "#D9273B") { contar(true) },
+            LinearLayout.LayoutParams(0, 176.d(), 1f).apply { rightMargin = 8.d() })
+        linha.addView(botaoGrande(R.drawable.ic_reiniciar, "Reiniciar", "#4C96FF", "#2357D8") { contar(false) },
+            LinearLayout.LayoutParams(0, 176.d(), 1f).apply { leftMargin = 8.d() })
         cartao.addView(linha, LinearLayout.LayoutParams(-1, -2))
-        cartao.addView(link("Cancelar") { fechar() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 18.d() })
+        // sem título nem frase: só os dois botões e um "Cancelar" largo
+        cartao.addView(botao(c, "Cancelar", Tema.BOTAO) { fechar() }, LinearLayout.LayoutParams(-1, 64.d()).apply { topMargin = 16.d() })
     }
 
     private fun botaoGrande(icone: Int, rotulo: String, c1: String, c2: String, aoClicar: () -> Unit): View =
@@ -122,12 +123,11 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
     private fun contar(desligar: Boolean) {
         cartao.removeAllViews()
         val verbo = if (desligar) "Desligando" else "Reiniciando"
-        cartao.addView(texto(c, if (desligar) "Desligar" else "Reiniciar", 32, Color.WHITE, true))
-        val aviso = texto(c, "$verbo em 5 segundos", 20, Color.parseColor("#B8C7EA"))
-        cartao.addView(aviso, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d(); bottomMargin = 20.d() })
         val anel = AnelContagem(c, if (desligar) vermelho else azul).apply { inicio = SystemClock.uptimeMillis() }
         cartao.addView(anel, LinearLayout.LayoutParams(170.d(), 170.d()))
-        cartao.addView(link("Cancelar") { fechar() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 16.d() })
+        val aviso = texto(c, "$verbo em 5 s", 24, Tema.TEXTO2)
+        cartao.addView(aviso, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 18.d(); bottomMargin = 18.d() })
+        cartao.addView(botao(c, "Cancelar", Tema.BOTAO) { fechar() }, LinearLayout.LayoutParams(-1, 64.d()))
 
         var n = 5
         val passo = object : Runnable {
@@ -135,7 +135,7 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
                 n--
                 if (n <= 0) { contagem = null; executando(desligar); return }
                 anel.numero = n
-                aviso.text = "$verbo em $n ${if (n == 1) "segundo" else "segundos"}"
+                aviso.text = "$verbo em $n s"
                 handler.postDelayed(this, 1000)
             }
         }
@@ -163,8 +163,8 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
     fun falhou(motivo: String) {
         executandoJa = false
         removeAllViews()
-        if (cartao.parent == null) addView(cartao, LayoutParams(620.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        setBackgroundColor(Color.parseColor("#E602060F"))
+        if (cartao.parent == null) addView(cartao, LayoutParams(640.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        setBackgroundColor(Tema.SCRIM)
         cartao.removeAllViews()
         cartao.addView(texto(c, "Não foi possível", 30, Color.WHITE, true))
         cartao.addView(texto(c, motivo, 20, Color.parseColor("#B8C7EA")).apply { gravity = Gravity.CENTER },

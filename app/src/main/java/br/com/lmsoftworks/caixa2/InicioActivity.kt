@@ -228,7 +228,7 @@ class InicioActivity : Activity() {
         telaConfig.lerVolume = { Math.round(painelVolume.porcento / 10f) }
         telaConfig.definirVolume = { n -> painelVolume.definirSilencioso(n * 10) }
         telaConfig.aoMudarBrilho = { aplicarBrilho() }
-        telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
+        telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Aviso.mostrar(this, msg) } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
         // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
         bluetooth.aoCelularTocando = { if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() } }
@@ -268,6 +268,7 @@ class InicioActivity : Activity() {
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(AvisoView(this@InicioActivity).also { Aviso.tela = it; it.translationZ = 40f }, FrameLayout.LayoutParams(-1, -1))
             addView(telaPrevisao, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
             addView(barra, FrameLayout.LayoutParams(-1, 104.d()))
@@ -450,7 +451,7 @@ class InicioActivity : Activity() {
         else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
         else if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
         else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima") ir(id)
-        else Toast.makeText(this, "Em breve", Toast.LENGTH_SHORT).show()
+        else Aviso.mostrar(this, "Em breve")
     }
 
     /** Tela de música: o fundo e o destaque seguem a cor predominante da capa; sem capa (ou capa cinza), o azul padrão. */
@@ -1062,7 +1063,7 @@ class InicioActivity : Activity() {
                 buscandoClipe = false
                 if (meuPedido != pedidoClipe) return@post
                 if (achado == null) {
-                    Toast.makeText(this, "Não achei o clipe desta música", Toast.LENGTH_SHORT).show()
+                    Aviso.mostrar(this, "Não achei o clipe desta música")
                     telaVideo.fechar(); videoDeMusica = false; telaVideo.mostrarSeletor(false)
                     if (musicaTocavaAntes) musica.tocar()
                 } else { clipesProntos[faixa.url] = achado; abrirClipe(achado) }

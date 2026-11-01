@@ -86,3 +86,44 @@ fun linhaDetalhe(c: Context, rotulo: String, valor: String): LinearLayout = Line
 class RolagemFina(c: Context) : ScrollView(c) {
     init { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
 }
+
+/**
+ * Aviso (toast) da v3: pílula no centro de baixo (44 da borda) com o texto em 24 medium; sobe 20 px com fade em 250 ms, fica 1,6 s
+ * (mais um pouco se o texto for longo) e some. Fica por cima de tudo.
+ */
+class AvisoView(c: Context) : FrameLayout(c) {
+    private val texto = texto(c, "", 24, Tema.TEXTO, true).apply { maxLines = 2; gravity = Gravity.CENTER }
+    private val ocultar = Runnable { animate().alpha(0f).translationY(20.d().toFloat()).setDuration(250).withEndAction { visibility = View.GONE }.start() }
+
+    init {
+        visibility = View.GONE
+        isClickable = false
+        val pilula = LinearLayout(c).apply {
+            gravity = Gravity.CENTER
+            setPadding(32.d(), 18.d(), 32.d(), 18.d())
+            background = fundoArredondado(Color.parseColor("#F00E1733"), 34.d(), Tema.MODAL_BORDA)
+            addView(texto)
+        }
+        addView(pilula, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = 44.d(); leftMargin = 60.d(); rightMargin = 60.d() })
+    }
+
+    fun mostrar(msg: String) {
+        texto.text = msg
+        removeCallbacks(ocultar)
+        animate().cancel()
+        visibility = View.VISIBLE
+        alpha = 0f; translationY = 20.d().toFloat()
+        animate().alpha(1f).translationY(0f).setDuration(250).setInterpolator(Tema.CURVA).start()
+        postDelayed(ocultar, 1600L + (msg.length * 25L).coerceAtMost(1800L))
+    }
+}
+
+/** Ponto único para avisar: usa o aviso da v3 e, se a tela ainda não existe, cai no Toast do Android. */
+object Aviso {
+    @Volatile var tela: AvisoView? = null
+
+    fun mostrar(ctx: Context, msg: String) {
+        val t = tela
+        if (t != null) t.post { t.mostrar(msg) } else android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+}

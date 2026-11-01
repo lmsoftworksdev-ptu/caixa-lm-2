@@ -180,7 +180,7 @@ class AtualizadoReceiver : BroadcastReceiver() {
 
 /** Janela "Atualização necessária": cobre a tela, com o botão Atualizar e o andamento do download. */
 class ModalAtualizacao(private val c: Context) : FrameLayout(c) {
-    private val titulo = texto(c, "Atualização necessária", 38, Color.WHITE, true)
+    private val titulo = texto(c, "Nova versão disponível", 38, Color.WHITE, true)
     private val detalhe = texto(c, "", 22, Color.parseColor("#D6E0F7"))
     private val andamento = FrameLayout(c)
     private val preenchido = View(c)
@@ -193,12 +193,12 @@ class ModalAtualizacao(private val c: Context) : FrameLayout(c) {
 
     init {
         visibility = View.GONE
-        setBackgroundColor(Color.parseColor("#E602060F"))
+        setBackgroundColor(Tema.SCRIM)
         isClickable = true
         val cartao = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = fundoArredondado(Color.parseColor("#F00D2048"), 28.d(), Cfg.LINHA)
+            background = fundoArredondado(Tema.MODAL, Tema.RAIO_MODAL.d(), Tema.MODAL_BORDA)
             setPadding(48.d(), 40.d(), 48.d(), 36.d())
         }
         cartao.addView(icone(c, R.drawable.ic_reiniciar, 72, Color.WHITE), LinearLayout.LayoutParams(72.d(), 72.d()))
@@ -210,18 +210,19 @@ class ModalAtualizacao(private val c: Context) : FrameLayout(c) {
         andamento.addView(preenchido, LayoutParams(0, -1))
         cartao.addView(andamento, LinearLayout.LayoutParams(-1, 14.d()).apply { topMargin = 26.d() })
         botaoAtualizar = botao(c, "Atualizar", Cfg.COR_FIXA) { iniciar() }
-        botaoDepois = botao(c, "Agora não", Cfg.LINHA) { fechar() }
+        botaoDepois = botao(c, "Agora não", Tema.BOTAO) { fechar() }
         val botoes = LinearLayout(c).apply { gravity = Gravity.CENTER }
         botoes.addView(botaoDepois, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 16.d() })
         botoes.addView(botaoAtualizar)
         cartao.addView(botoes, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 30.d() })
-        addView(cartao, LayoutParams(720.d(), -2, Gravity.CENTER))
+        addView(cartao, LayoutParams(680.d(), -2, Gravity.CENTER))
     }
 
     fun mostrar(v: VersaoNova) {
         versao = v
         baixando = false
-        detalhe.text = "Saiu uma versão nova do mecanismo de vídeos e músicas.\nAtualize para a busca continuar funcionando."
+        val mb = if (v.tamanho > 0) " · " + String.format("%.1f MB", v.tamanho / 1_048_576.0) else ""
+        detalhe.text = "${v.nome}$mb\nSaiu uma versão nova do mecanismo de vídeos e músicas.\nAtualize para a busca continuar funcionando."
         andamento.visibility = View.GONE
         botaoAtualizar.text = "Atualizar"; botaoAtualizar.alpha = 1f
         botaoDepois.visibility = View.VISIBLE

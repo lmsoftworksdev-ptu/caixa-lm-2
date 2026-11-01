@@ -244,9 +244,9 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     }
 
     private fun pedirCidade() = pedirTexto(R.drawable.ic_cloud, "Nome da cidade (ex.: Paracatu)", "Buscar", "", "Escreva o nome da cidade.", 60) { nome ->
-        Toast.makeText(c, "Procurando…", Toast.LENGTH_SHORT).show()
+        Aviso.mostrar(c, "Procurando…")
         buscarCidade(nome) { r ->
-            if (r == null) Toast.makeText(c, "Não achei essa cidade. Confira o nome.", Toast.LENGTH_LONG).show()
+            if (r == null) Aviso.mostrar(c, "Não achei essa cidade. Confira o nome.")
             else { Ajustes.definirCidade(r.first, r.second, r.third); aoMudarCidade(); montar() }
         }
     }
@@ -276,7 +276,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
         var registro = ""
         bt.addView(botao(c, "Salvar arquivo", Tema.BOTAO) {
             val onde = salvarRegistro(registro)
-            Toast.makeText(c, if (onde.isEmpty()) "Não consegui salvar." else "Salvo em $onde", Toast.LENGTH_LONG).show()
+            Aviso.mostrar(c, if (onde.isEmpty()) "Não consegui salvar." else "Salvo em $onde")
         })
         bt.addView(botao(c, "Fechar", Cfg.AZUL) { modal.fechar() }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
         conteudo.addView(bt, LinearLayout.LayoutParams(-1, -2))

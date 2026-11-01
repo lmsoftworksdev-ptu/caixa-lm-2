@@ -23,6 +23,7 @@ import kotlin.math.sin
 class TelaOciosa(c: Context) : FrameLayout(c) {
     private val hora = texto(c, "", 210, Color.parseColor("#6F7A93")).apply {
         typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
+        fontFeatureSettings = "tnum"
     }
 
     init {
