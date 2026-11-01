@@ -83,7 +83,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                         }
                     }
                 }
-                BluetoothDevice.ACTION_ACL_CONNECTED -> if (d != null && d.bondState == BluetoothDevice.BOND_BONDED) conectados.add(d.address)
+                BluetoothDevice.ACTION_ACL_CONNECTED -> if (d != null && d.bondState == BluetoothDevice.BOND_BONDED) { conectados.add(d.address); garantirPerfil(d) }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (d != null) conectados.remove(d.address)
                 ACAO_SINK -> if (d != null) {
                     when (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)) {
@@ -148,6 +148,27 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         perfilSink = null
     }
 
+    /**
+     * O celular conectou (ACL) e já pode estar tocando, mas a ligação do perfil de ÁUDIO/CONTROLE (A2DP + AVRCP) com a caixa às vezes
+     * não sobe junto: o som toca, porém título e capa nunca chegam e o aparelho aparece só como "pareado". Se, uns segundos depois, o
+     * perfil não estiver conectado nem conectando, a própria caixa pede a conexão (o mesmo que tocar no aparelho na tela Bluetooth).
+     */
+    private fun garantirPerfil(d: BluetoothDevice, tentativa: Int = 0) {
+        handler.postDelayed({
+            try {
+                val p = perfilSink
+                if (p != null && d.bondState == BluetoothDevice.BOND_BONDED && estaConectado(d)) {
+                    val estado = p.javaClass.getMethod("getConnectionState", BluetoothDevice::class.java).invoke(p, d) as Int
+                    if (estado != BluetoothProfile.STATE_CONNECTED && estado != BluetoothProfile.STATE_CONNECTING) {
+                        Log.d(TAG, "perfil de áudio ausente (estado $estado): conectando ${nomeDe(d)}")
+                        p.javaClass.getMethod("connect", BluetoothDevice::class.java).invoke(p, d)
+                    }
+                }
+            } catch (e: Exception) { Log.w(TAG, "garantirPerfil falhou", e) }
+            if (tentativa < 2) garantirPerfil(d, tentativa + 1)
+        }, if (tentativa == 0) 2500L else 6000L)
+    }
+
     /** O nome da caixa mudou em Configurações: aplica no Bluetooth (se estiver ligado). */
     fun aplicarNome() {
         val a = adaptador ?: return
@@ -158,7 +179,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         val a = adaptador ?: return
         if (a.name != Ajustes.nomeAparelho) a.name = Ajustes.nomeAparelho
         // aparelhos já ligados e pareados
-        a.bondedDevices?.forEach { if (estaConectado(it)) conectados.add(it.address) }
+        a.bondedDevices?.forEach { if (estaConectado(it)) { conectados.add(it.address); garantirPerfil(it) } }
         if (perfilSink == null) {
             a.getProfileProxy(ctx, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
