@@ -25,8 +25,6 @@ object Ajustes {
     @Volatile var mostrarResposta = true; private set
     /** Sensibilidade do microfone para ouvir a palavra de ativação, de 1 a 10. */
     @Volatile var sensMic = 5; private set
-    /** Volume da voz da caixa, de 10 a 100% (em relação ao volume do aparelho). */
-    @Volatile var volumeVoz = 100; private set
     /** O "plim" de volume máximo ao apertar + (a música abaixa enquanto ele toca). */
     @Volatile var avisoVolumeMax = true; private set
     /** Nome da caixa (aparece no Bluetooth). */
@@ -52,7 +50,6 @@ object Ajustes {
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
         mostrarResposta = p.getBoolean("mostrarResposta", true)
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
-        volumeVoz = p.getInt("volumeVoz", 100).coerceIn(10, 100)
         avisoVolumeMax = p.getBoolean("avisoVolumeMax", true)
         nomeAparelho = p.getString("nomeAparelho", "LM Sound") ?: "LM Sound"
         cidadeNome = p.getString("cidadeNome", "") ?: ""
@@ -69,7 +66,6 @@ object Ajustes {
     fun definirVolumeAlarme(v: Int) { volumeAlarme = v.coerceIn(0, 2); guardar { putInt("volumeAlarme", volumeAlarme) } }
     fun definirMostrarResposta(v: Boolean) { mostrarResposta = v; guardar { putBoolean("mostrarResposta", v) } }
     fun definirSensMic(v: Int) { sensMic = v.coerceIn(1, 10); guardar { putInt("sensMic", sensMic) } }
-    fun definirVolumeVoz(v: Int) { volumeVoz = v.coerceIn(10, 100); guardar { putInt("volumeVoz", volumeVoz) } }
     fun definirAvisoVolumeMax(v: Boolean) { avisoVolumeMax = v; guardar { putBoolean("avisoVolumeMax", v) } }
     fun definirNome(n: String) { nomeAparelho = n.trim().ifEmpty { "LM Sound" }; guardar { putString("nomeAparelho", nomeAparelho) } }
 

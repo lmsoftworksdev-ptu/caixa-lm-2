@@ -1,7 +1,6 @@
 package br.com.lmsoftworks.caixa2.voz
 
 import android.content.Context
-import br.com.lmsoftworks.caixa2.Ajustes
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -27,8 +26,39 @@ object Fala {
     private var contador = 0
     private val aoTerminar = HashMap<String, () -> Unit>()
 
+    // ---- a voz da caixa sempre sai no volume 6 (de 0 a 10), qualquer que seja o volume da música; depois o volume volta ----
+    private const val NIVEL_VOZ = 6
+    private var contexto: Context? = null
+    private var volumeAntes = -1
+    private var volumeFixado = -1
+
+    private fun fixarVolume() {
+        val ctx = contexto ?: return
+        try {
+            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val canal = android.media.AudioManager.STREAM_MUSIC
+            val alvo = Math.round(audio.getStreamMaxVolume(canal) * NIVEL_VOZ / 10f)
+            if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(canal)
+            if (audio.getStreamVolume(canal) != alvo) audio.setStreamVolume(canal, alvo, 0)
+            volumeFixado = alvo
+        } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
+    }
+
+    private fun devolverVolume() {
+        val ctx = contexto ?: return
+        if (volumeAntes < 0) return
+        try {
+            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val canal = android.media.AudioManager.STREAM_MUSIC
+            // só devolve se ninguém mexeu no volume enquanto ela falava
+            if (audio.getStreamVolume(canal) == volumeFixado) audio.setStreamVolume(canal, volumeAntes, 0)
+        } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
+        volumeAntes = -1; volumeFixado = -1
+    }
+
     /** Chame cedo (ex.: ao ligar a voz) para o motor ja estar pronto na primeira resposta. */
     fun preparar(ctx: Context) {
+        contexto = ctx.applicationContext
         if (tts != null) return
         tts = TextToSpeech(ctx.applicationContext) { status ->
             val t = tts
@@ -61,6 +91,7 @@ object Fala {
         geracaoOnline++
         val id = "fala-${contador++}"
         falando = true
+        fixarVolume()
         aoTerminar.clear() // QUEUE_FLUSH abaixo corta a fala anterior: ela nao deve avisar fim nenhum
         aoTerminar[id] = fim
         // Seguranca: nunca trava o fluxo, mas deixa tempo para respostas longas.
@@ -88,6 +119,7 @@ object Fala {
     private fun falarOnline(ctx: Context, texto: String, fim: () -> Unit) {
         val minha = ++geracaoOnline
         falando = true
+        fixarVolume()
         aoTerminar.clear()
         Thread {
             val arquivos = ArrayList<File>()
@@ -117,6 +149,7 @@ object Fala {
         if (i >= arquivos.size) {
             arquivos.forEach { it.delete() }
             falando = false
+            devolverVolume()
             fim()
             return
         }
@@ -127,8 +160,6 @@ object Fala {
             mp.setOnCompletionListener { m -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, i + 1, minha, fim) }
             mp.setOnErrorListener { m, _, _ -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, arquivos.size, minha, fim); true }
             mp.prepare()
-            val vv = Ajustes.volumeVoz / 100f
-            mp.setVolume(vv, vv)         // volume da voz da caixa (Configurações > Som)
             mp.start()
             // fala natural, de gente: mais rápida, sem ficar fina (a voz do Tradutor é lenta)
             try { mp.playbackParams = mp.playbackParams.setSpeed(1.55f).setPitch(1.0f) } catch (_: Throwable) {}
@@ -141,6 +172,7 @@ object Fala {
     /** Para de falar agora (ex.: a pessoa disse "Alexa" de novo no meio da resposta). */
     fun parar() {
         falando = false
+        devolverVolume()
         geracaoOnline++
         try { tocador?.stop(); tocador?.release() } catch (_: Throwable) {}
         tocador = null
@@ -155,7 +187,7 @@ object Fala {
         if (id == null) return
         main.post {
             aoTerminar.remove(id)?.invoke()
-            if (aoTerminar.isEmpty()) falando = false
+            if (aoTerminar.isEmpty()) { falando = false; devolverVolume() }
         }
     }
 }

@@ -57,7 +57,7 @@ object TonsVoz {
             @Suppress("DEPRECATION")
             mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
             mp.isLooping = true
-            mp.setVolume(0.12f, 0.12f)
+            mp.setVolume(0.22f, 0.22f)
             mp.setOnPreparedListener { if (pensando === it) it.start() }
             pensando = mp
             mp.prepareAsync()
