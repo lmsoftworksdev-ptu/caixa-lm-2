@@ -1,6 +1,7 @@
 package br.com.lmsoftworks.caixa2.voz
 
 import android.content.Context
+import br.com.lmsoftworks.caixa2.Ajustes
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -394,9 +395,8 @@ object Respostas {
 
     /** Previsão de hoje pela cidade aproximada (IP), sem passar pela fala. null se a internet falhar. */
     fun climaHoje(ctx: Context): ClimaHoje? {
-        val ip = getJson(ctx, "https://ipwho.is/") ?: return null
-        if (!ip.optBoolean("success", false)) return null
-        val lat = ip.optDouble("latitude"); val lon = ip.optDouble("longitude")
+        val loc = localizacao(ctx) ?: return null
+        val lat = loc.second; val lon = loc.third
         val m = getJson(
             ctx,
             "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
@@ -407,7 +407,7 @@ object Respostas {
         val atual = m.optJSONObject("current") ?: return null
         val d = m.optJSONObject("daily")
         return ClimaHoje(
-            ip.optString("city"),
+            loc.first,
             Math.round(atual.optDouble("temperature_2m")).toInt(),
             d?.optJSONArray("temperature_2m_min")?.optDouble(0)?.let { Math.round(it).toInt() },
             d?.optJSONArray("temperature_2m_max")?.optDouble(0)?.let { Math.round(it).toInt() },
@@ -415,6 +415,23 @@ object Respostas {
             atual.optInt("weather_code"),
             atual.optInt("is_day", 1) == 0
         )
+    }
+
+    /** Onde a caixa está para o clima: a cidade escolhida em Configurações ou, se não houver, a aproximada pelo IP. (nome, latitude, longitude) */
+    fun localizacao(ctx: Context): Triple<String, Double, Double>? {
+        if (Ajustes.cidadeFixa) return Triple(Ajustes.cidadeNome, Ajustes.cidadeLat, Ajustes.cidadeLon)
+        val ip = getJson(ctx, "https://ipwho.is/") ?: return null
+        if (!ip.optBoolean("success", false)) return null
+        return Triple(ip.optString("city"), ip.optDouble("latitude"), ip.optDouble("longitude"))
+    }
+
+    /** Procura uma cidade pelo nome (Open-Meteo): devolve (nome com o estado, latitude, longitude) ou null se não achar. Bloqueante. */
+    fun buscarCidade(ctx: Context, nome: String): Triple<String, Double, Double>? {
+        val g = getJson(ctx, "https://geocoding-api.open-meteo.com/v1/search?name=${enc(nome)}&count=1&language=pt&format=json") ?: return null
+        val r = g.optJSONArray("results")?.optJSONObject(0) ?: return null
+        val estado = r.optString("admin1")
+        val exibe = r.optString("name") + if (estado.isNotBlank() && !estado.equals(r.optString("name"), true)) " · $estado" else ""
+        return Triple(exibe, r.optDouble("latitude"), r.optDouble("longitude"))
     }
 
     /** Uma hora da previsão (próximas horas). */
@@ -429,9 +446,8 @@ object Respostas {
 
     /** Previsão completa (agora, 36 horas, 15 dias) pela cidade aproximada (IP). null se a internet falhar. */
     fun previsaoCompleta(ctx: Context): PrevisaoCompleta? {
-        val ip = getJson(ctx, "https://ipwho.is/") ?: return null
-        if (!ip.optBoolean("success", false)) return null
-        val lat = ip.optDouble("latitude"); val lon = ip.optDouble("longitude")
+        val loc = localizacao(ctx) ?: return null
+        val lat = loc.second; val lon = loc.third
         val m = getJson(
             ctx,
             "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
@@ -467,7 +483,7 @@ object Respostas {
         }
         val hoje = dias.firstOrNull()
         return PrevisaoCompleta(
-            ip.optString("city"), Math.round(atual.optDouble("temperature_2m")).toInt(), atual.optInt("weather_code"),
+            loc.first, Math.round(atual.optDouble("temperature_2m")).toInt(), atual.optInt("weather_code"),
             Math.round(atual.optDouble("wind_speed_10m")).toInt(), hoje?.min ?: 0, hoje?.max ?: 0, hoje?.chuva ?: 0, horas, dias,
             atual.optInt("is_day", 1) == 1
         )
@@ -491,11 +507,10 @@ object Respostas {
             lat = r.optDouble("latitude")
             lon = r.optDouble("longitude")
         } else {
-            val ip = getJson(ctx, "https://ipwho.is/") ?: return null
-            if (!ip.optBoolean("success", false)) return null
-            nome = ip.optString("city")
-            lat = ip.optDouble("latitude")
-            lon = ip.optDouble("longitude")
+            val loc = localizacao(ctx) ?: return null
+            nome = loc.first
+            lat = loc.second
+            lon = loc.third
         }
 
         val m = getJson(

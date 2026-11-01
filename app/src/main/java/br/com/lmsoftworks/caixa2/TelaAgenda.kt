@@ -81,9 +81,11 @@ class TelaAlarmes(
     private val alarmes: AlarmeControle,
     private val lembretes: LembreteControle,
     private val listas: ListaControle,
+    private val dormir: HoraDeDormir,
     private val aoTestar: (Alarme) -> Unit
 ) : FrameLayout(c) {
 
+    private val DORMIR = -2        // "alarme" especial da lista: a hora de dormir
     private val nomesAbas = listOf("Alarmes", "Lembretes", "Listas")
     private val ids = listOf("alarmes", "lembretes", "listas")
     private var aba = 0
@@ -150,7 +152,7 @@ class TelaAlarmes(
 
     /** Refaz tudo com o que está salvo. */
     fun atualizar() {
-        if (alarmes.porId(alarmeSel) == null) alarmeSel = alarmes.lista.firstOrNull()?.id ?: -1
+        if (alarmeSel != DORMIR && alarmes.porId(alarmeSel) == null) alarmeSel = alarmes.lista.firstOrNull()?.id ?: DORMIR
         val todosL = lembretes.todos + lembretes.concluidos
         if (todosL.none { it.id == lembreteSel }) lembreteSel = lembretes.todos.firstOrNull()?.id ?: lembretes.concluidos.firstOrNull()?.id ?: -1L
         if (listaSel !in listas.nomes) listaSel = listas.nomes.firstOrNull() ?: ""
@@ -174,6 +176,7 @@ class TelaAlarmes(
         lembretes.concluidos.forEach { append('|').append(it.id) }
         listas.nomes.forEach { n -> append('|').append(n).append(listas.itens(n).size) }
         alarmes.lista.forEach { append('|').append(it.id).append(it.ligado) }
+        append('|').append(dormir.ativa).append(dormir.hora).append(dormir.minuto)
     }
 
     private fun novo() {
@@ -288,7 +291,7 @@ class TelaAlarmes(
 
     private fun montarListaAlarmes() {
         lista.removeAllViews()
-        if (alarmes.lista.isEmpty()) { lista.addView(vazio("Nenhum alarme ainda.\nToque em \"+ Novo\"."), LinearLayout.LayoutParams(-1, 380.d())); return }
+        if (alarmes.lista.isEmpty()) lista.addView(vazio("Nenhum alarme ainda.\nToque em \"+ Novo\"."), LinearLayout.LayoutParams(-1, 240.d()))
         for (a in alarmes.lista.sortedWith(compareBy({ it.hora }, { it.minuto }))) {
             val sel = a.id == alarmeSel
             val interruptor = Interruptor(c).apply { ligado = a.ligado; aoMudar = { v -> a.ligado = v; alarmes.salvar(); atualizar() } }
@@ -310,10 +313,53 @@ class TelaAlarmes(
             }
             lista.addView(linha, LinearLayout.LayoutParams(-1, 86.d()))
         }
+        lista.addView(rotuloSecao(c, "Dormir"))
+        lista.addView(linhaDormir(), LinearLayout.LayoutParams(-1, 86.d()))
+    }
+
+    /** A linha especial "Hora de dormir" no fim da lista de alarmes. */
+    private fun linhaDormir(): View {
+        val sel = alarmeSel == DORMIR
+        val interruptor = Interruptor(c).apply {
+            ligado = dormir.ativa
+            aoMudar = { v -> if (v) dormir.definir(dormir.hora, dormir.minuto) else dormir.desligar(); atualizar() }
+        }
+        val info = LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(texto(c, "Hora de dormir", 22, Tema.TEXTO, true))
+            addView(texto(c, if (dormir.ativa) "Todo dia, a caixa avisa" else "Desativada", 17, Tema.TEXTO3), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 2.d() })
+        }
+        return LinearLayout(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(16.d(), 0, 16.d(), 0)
+            background = fundoArredondado(if (sel) Color.parseColor("#1AFFFFFF") else Color.TRANSPARENT, 20.d())
+            isClickable = true
+            setOnClickListener { alarmeSel = DORMIR; atualizar() }
+            alpha = if (dormir.ativa) 1f else .55f
+            addView(texto(c, "%02d:%02d".format(dormir.hora, dormir.minuto), 50, Tema.TEXTO).apply { typeface = FONTE_LEVE; fontFeatureSettings = "tnum" }, LinearLayout.LayoutParams(146.d(), -2))
+            addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(interruptor)
+        }
+    }
+
+    private fun montarEditorDormir() {
+        editor.addView(rotuloEditor("Hora de dormir", "Todo dia"))
+        editor.addView(relogio(dormir.hora, dormir.minuto, 84, 96, 52) { h, m -> dormir.definir(h, m); atualizar() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 14.d() })
+        editor.addView(texto(c, "Todo dia, nesse horário, a caixa toca um aviso, mostra na tela e fala \"Está na hora de dormir. Boa noite!\". Também dá para pedir pela voz.", 20, Tema.TEXTO2).apply {
+            gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f)
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 22.d() })
+        editor.addView(View(c), LinearLayout.LayoutParams(-1, 0, 1f))
+        editor.addView(botoesRodape(
+            botao(c, if (dormir.ativa) "Desativar" else "Ativar", if (dormir.ativa) Tema.BOTAO else Cfg.AZUL) {
+                if (dormir.ativa) dormir.desligar() else dormir.definir(dormir.hora, dormir.minuto); atualizar()
+            },
+            View(c)
+        ))
     }
 
     private fun montarEditorAlarme() {
         editor.removeAllViews()
+        if (alarmeSel == DORMIR) { montarEditorDormir(); return }
         val a = alarmes.porId(alarmeSel)
         if (a == null) { editor.addView(vazio("Crie um alarme para editar"), LinearLayout.LayoutParams(-1, -1)); return }
         editor.addView(rotuloEditor("Editar alarme", alarmes.descricaoDias(a)))

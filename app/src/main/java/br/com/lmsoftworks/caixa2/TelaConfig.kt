@@ -23,6 +23,15 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     var aoVerificarAtualizacao: () -> Unit = {}
     var aoEnergia: () -> Unit = {}
     var versao: String = ""
+    /** Procura a cidade (em segundo plano) e devolve (nome, latitude, longitude) ou null. */
+    var buscarCidade: (String, (Triple<String, Double, Double>?) -> Unit) -> Unit = { _, volta -> volta(null) }
+    var aoMudarCidade: () -> Unit = {}
+    var aoMudarNome: () -> Unit = {}
+    var aoRestaurar: () -> Unit = {}
+    /** Pede as últimas linhas do registro do app (em segundo plano) e entrega o texto. */
+    var lerRegistro: ((String) -> Unit) -> Unit = { it("") }
+    /** Salva o texto num arquivo e devolve onde ficou. */
+    var salvarRegistro: (String) -> String = { "" }
 
     private class Secao(val id: String, val nome: String, val descricao: String, val icone: Int)
 
@@ -37,6 +46,18 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private val estados = HashMap<String, String>()
     private val menu = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
     private val opcoes = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+    private val telaTexto = TelaTexto(c)
+    private val modal = ModalV3(c)
+    private lateinit var raizView: View
+
+    val emTexto: Boolean get() = telaTexto.aberto || modal.aberto
+
+    /** Voltar (borda ou tecla): fecha a janela ou a digitação, se houver. */
+    fun voltar(): Boolean {
+        if (modal.aberto) { modal.fechar(); return true }
+        if (telaTexto.aberto) { telaTexto.fechar(); return true }
+        return false
+    }
 
     init {
         val raiz = LinearLayout(c).apply {
@@ -53,7 +74,11 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
             addView(RolagemFina(c).apply { addView(opcoes) }, LayoutParams(-1, -1))
         }
         raiz.addView(direita, LinearLayout.LayoutParams(0, -1, 1f).apply { leftMargin = 24.d() })
+        raizView = raiz
         addView(raiz, LayoutParams(-1, -1))
+        telaTexto.aoFechar = { raizView.visibility = View.VISIBLE }
+        addView(telaTexto, LayoutParams(-1, -1))
+        addView(modal, LayoutParams(-1, -1))
         montar()
     }
 
@@ -158,11 +183,20 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     escolhas(tempos.map { it.first }, tempos.indexOfFirst { it.second == Ajustes.ociosoSeg }.let { if (it < 0) 1 else it }) { i -> Ajustes.definirOcioso(tempos[i].second); montar() }))
                 opcoes.addView(linha("Escurecer no modo ocioso", "Baixa o brilho da tela quando fica ociosa",
                     interruptor(Ajustes.escurecerOcioso) { Ajustes.definirEscurecer(it) }))
+                opcoes.addView(linha("Cidade do clima", if (Ajustes.cidadeFixa) "Fixa em ${Ajustes.cidadeNome}" else "Automática, pela internet", LinearLayout(c).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    if (Ajustes.cidadeFixa) addView(botao(c, "Automática", Tema.BOTAO) { Ajustes.usarCidadeAutomatica(); aoMudarCidade(); montar() })
+                    addView(botao(c, "Mudar", Cfg.AZUL) { pedirCidade() }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 10.d() })
+                }))
             }
             "som" -> {
                 opcoes.addView(linha("Volume", "O mesmo da barra de cima", deslizador(lerVolume() / 10f, { "${Math.round(it * 10)}" }) { f -> definirVolume(Math.round(f * 10)) }))
                 opcoes.addView(linha("Sons de resposta", "Toquinhos de quando a caixa começa e termina de ouvir",
                     interruptor(Ajustes.sonsResposta) { Ajustes.definirSons(it) }))
+                opcoes.addView(linha("Volume da voz da caixa", "Quando ela responde (a música não muda)",
+                    deslizador((Ajustes.volumeVoz - 10) / 90f, { "${(10 + it * 90).toInt()}%" }) { f -> Ajustes.definirVolumeVoz((10 + f * 90).toInt()) }))
+                opcoes.addView(linha("Aviso de volume máximo", "O \"plim\" ao apertar + no máximo (a música abaixa enquanto toca)",
+                    interruptor(Ajustes.avisoVolumeMax) { Ajustes.definirAvisoVolumeMax(it) }))
                 opcoes.addView(linha("Volume do alarme", "O mínimo que o alarme garante ao tocar",
                     escolhas(listOf("Suave", "Médio", "Alto"), Ajustes.volumeAlarme) { i -> Ajustes.definirVolumeAlarme(i); montar() }))
             }
@@ -190,11 +224,66 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 }) { aoAbrir("led") })
             }
             else -> {
-                opcoes.addView(linha("Nome do aparelho", "Como a caixa aparece no Bluetooth", estadoTexto("LM Sound", Tema.TEXTO)))
+                opcoes.addView(linha("Nome do aparelho", "Como a caixa aparece no Bluetooth", LinearLayout(c).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(estadoTexto(Ajustes.nomeAparelho, Tema.TEXTO), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 14.d() })
+                    addView(botao(c, "Mudar", Tema.BOTAO) { pedirNome() })
+                }))
                 opcoes.addView(linha("Versão", versao.ifBlank { "—" }, botao(c, "Verificar atualização", Tema.BOTAO) { aoVerificarAtualizacao() }))
+                opcoes.addView(linha("Registro do app", "As últimas linhas do diagnóstico, para achar problemas", botao(c, "Ver registro", Tema.BOTAO) { abrirRegistro() }))
+                opcoes.addView(linha("Restaurar ajustes", "Volta brilho, ocioso, sons, cidade e nome ao padrão", botao(c, "Restaurar", Tema.BOTAO, Tema.VERMELHO_SUAVE) { confirmarRestaurar() }))
                 opcoes.addView(linha("Energia", "Desligar ou reiniciar a caixa", botao(c, "Energia", Tema.BOTAO) { aoEnergia() }))
             }
         }
+    }
+
+    // ------------------------------------------------------------------ digitação e janelas
+
+    private fun pedirTexto(iconeRes: Int, dica: String, acao: String, inicial: String, aviso: String, maximo: Int, aoSalvar: (String) -> Unit) {
+        raizView.visibility = View.INVISIBLE
+        telaTexto.abrir(iconeRes = iconeRes, titulo = dica, dica = dica, acao = acao, inicial = inicial, maximo = maximo,
+            validar = { t -> if (t.isBlank()) aviso else null }) { t -> raizView.visibility = View.VISIBLE; aoSalvar(t.trim()) }
+    }
+
+    private fun pedirCidade() = pedirTexto(R.drawable.ic_cloud, "Nome da cidade (ex.: Paracatu)", "Buscar", "", "Escreva o nome da cidade.", 60) { nome ->
+        Toast.makeText(c, "Procurando…", Toast.LENGTH_SHORT).show()
+        buscarCidade(nome) { r ->
+            if (r == null) Toast.makeText(c, "Não achei essa cidade. Confira o nome.", Toast.LENGTH_LONG).show()
+            else { Ajustes.definirCidade(r.first, r.second, r.third); aoMudarCidade(); montar() }
+        }
+    }
+
+    private fun pedirNome() = pedirTexto(R.drawable.ic_caixa, "Nome da caixa", "Salvar", Ajustes.nomeAparelho, "Escreva um nome.", 24) { nome ->
+        Ajustes.definirNome(nome); aoMudarNome(); montar()
+    }
+
+    private fun confirmarRestaurar() {
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        conteudo.addView(texto(c, "Restaurar ajustes?", 30, Tema.TEXTO, true))
+        conteudo.addView(texto(c, "Brilho, modo ocioso, sons, voz, cidade do clima e nome da caixa voltam ao padrão. Alarmes, lembretes e listas não mudam.", 20, Tema.TEXTO2).apply { setLineSpacing(0f, 1.15f) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8.d(); bottomMargin = 24.d() })
+        val bt = LinearLayout(c).apply { gravity = Gravity.END }
+        bt.addView(botao(c, "Cancelar", Tema.BOTAO) { modal.fechar() })
+        bt.addView(botao(c, "Restaurar", Cfg.AZUL) { modal.fechar(); Ajustes.restaurar(); aoRestaurar(); montar() }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+        conteudo.addView(bt, LinearLayout.LayoutParams(-1, -2))
+        modal.mostrar(620, conteudo)
+    }
+
+    private fun abrirRegistro() {
+        val corpo = texto(c, "Lendo o registro…", 14, Tema.TEXTO2).apply { typeface = android.graphics.Typeface.MONOSPACE; setLineSpacing(0f, 1.1f) }
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        conteudo.addView(texto(c, "Registro do app", 28, Tema.TEXTO, true))
+        conteudo.addView(RolagemFina(c).apply { addView(corpo) }, LinearLayout.LayoutParams(-1, 380.d()).apply { topMargin = 12.d(); bottomMargin = 18.d() })
+        val bt = LinearLayout(c).apply { gravity = Gravity.END }
+        var registro = ""
+        bt.addView(botao(c, "Salvar arquivo", Tema.BOTAO) {
+            val onde = salvarRegistro(registro)
+            Toast.makeText(c, if (onde.isEmpty()) "Não consegui salvar." else "Salvo em $onde", Toast.LENGTH_LONG).show()
+        })
+        bt.addView(botao(c, "Fechar", Cfg.AZUL) { modal.fechar() }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+        conteudo.addView(bt, LinearLayout.LayoutParams(-1, -2))
+        modal.mostrar(1040, conteudo)
+        lerRegistro { t -> registro = t; corpo.text = if (t.isBlank()) "Nada no registro ainda." else t }
     }
 
     /** Estado de cada item de Conexões ("Conectado a ...", "Desligado"...). */

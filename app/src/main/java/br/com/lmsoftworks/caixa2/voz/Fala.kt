@@ -1,6 +1,7 @@
 package br.com.lmsoftworks.caixa2.voz
 
 import android.content.Context
+import br.com.lmsoftworks.caixa2.Ajustes
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -126,6 +127,8 @@ object Fala {
             mp.setOnCompletionListener { m -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, i + 1, minha, fim) }
             mp.setOnErrorListener { m, _, _ -> m.release(); if (tocador === m) tocador = null; tocarArquivos(arquivos, arquivos.size, minha, fim); true }
             mp.prepare()
+            val vv = Ajustes.volumeVoz / 100f
+            mp.setVolume(vv, vv)         // volume da voz da caixa (Configurações > Som)
             mp.start()
             // fala natural, de gente: mais rápida, sem ficar fina (a voz do Tradutor é lenta)
             try { mp.playbackParams = mp.playbackParams.setSpeed(1.55f).setPitch(1.0f) } catch (_: Throwable) {}

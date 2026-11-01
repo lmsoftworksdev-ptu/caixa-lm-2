@@ -21,24 +21,43 @@ object Ajustes {
     @Volatile var sonsResposta = true; private set
     /** Volume mínimo do alarme: 0 = suave, 1 = médio, 2 = alto. */
     @Volatile var volumeAlarme = 1; private set
-    /** Palavra de ativação escolhida. Por enquanto só "Alexa" funciona (as outras entram numa versão futura). */
-    @Volatile var palavra = "Alexa"; private set
     /** Mostra, no alto da tela do assistente, a resposta escrita. */
     @Volatile var mostrarResposta = true; private set
     /** Sensibilidade do microfone para ouvir a palavra de ativação, de 1 a 10. */
     @Volatile var sensMic = 5; private set
+    /** Volume da voz da caixa, de 10 a 100% (em relação ao volume do aparelho). */
+    @Volatile var volumeVoz = 100; private set
+    /** O "plim" de volume máximo ao apertar + (a música abaixa enquanto ele toca). */
+    @Volatile var avisoVolumeMax = true; private set
+    /** Nome da caixa (aparece no Bluetooth). */
+    @Volatile var nomeAparelho = "LM Sound"; private set
+    /** Cidade do clima escolhida pela pessoa; vazia = automática (pelo IP). */
+    @Volatile var cidadeNome = ""; private set
+    @Volatile var cidadeLat = 0.0; private set
+    @Volatile var cidadeLon = 0.0; private set
+
+    val cidadeFixa: Boolean get() = cidadeNome.isNotBlank()
 
     fun iniciar(c: Context) {
         val p = c.applicationContext.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
         prefs = p
+        carregar(p)
+    }
+
+    private fun carregar(p: SharedPreferences) {
         brilho = p.getInt("brilho", 100).coerceIn(5, 100)
         ociosoSeg = p.getInt("ociosoSeg", 60)
         escurecerOcioso = p.getBoolean("escurecerOcioso", true)
         sonsResposta = p.getBoolean("sonsResposta", true)
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
-        palavra = p.getString("palavra", "Alexa") ?: "Alexa"
         mostrarResposta = p.getBoolean("mostrarResposta", true)
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
+        volumeVoz = p.getInt("volumeVoz", 100).coerceIn(10, 100)
+        avisoVolumeMax = p.getBoolean("avisoVolumeMax", true)
+        nomeAparelho = p.getString("nomeAparelho", "LM Sound") ?: "LM Sound"
+        cidadeNome = p.getString("cidadeNome", "") ?: ""
+        cidadeLat = p.getFloat("cidadeLat", 0f).toDouble()
+        cidadeLon = p.getFloat("cidadeLon", 0f).toDouble()
     }
 
     private fun guardar(f: SharedPreferences.Editor.() -> Unit) { prefs?.edit()?.apply(f)?.apply() }
@@ -50,6 +69,21 @@ object Ajustes {
     fun definirVolumeAlarme(v: Int) { volumeAlarme = v.coerceIn(0, 2); guardar { putInt("volumeAlarme", volumeAlarme) } }
     fun definirMostrarResposta(v: Boolean) { mostrarResposta = v; guardar { putBoolean("mostrarResposta", v) } }
     fun definirSensMic(v: Int) { sensMic = v.coerceIn(1, 10); guardar { putInt("sensMic", sensMic) } }
+    fun definirVolumeVoz(v: Int) { volumeVoz = v.coerceIn(10, 100); guardar { putInt("volumeVoz", volumeVoz) } }
+    fun definirAvisoVolumeMax(v: Boolean) { avisoVolumeMax = v; guardar { putBoolean("avisoVolumeMax", v) } }
+    fun definirNome(n: String) { nomeAparelho = n.trim().ifEmpty { "LM Sound" }; guardar { putString("nomeAparelho", nomeAparelho) } }
+
+    fun definirCidade(nome: String, lat: Double, lon: Double) {
+        cidadeNome = nome; cidadeLat = lat; cidadeLon = lon
+        guardar { putString("cidadeNome", nome).putFloat("cidadeLat", lat.toFloat()).putFloat("cidadeLon", lon.toFloat()) }
+    }
+
+    fun usarCidadeAutomatica() { cidadeNome = ""; guardar { remove("cidadeNome").remove("cidadeLat").remove("cidadeLon") } }
+
+    /** Volta todos os ajustes ao padrão. */
+    fun restaurar() {
+        prefs?.let { it.edit().clear().apply(); carregar(it) }
+    }
 
     /** Tempo até o modo ocioso em milissegundos (Long.MAX_VALUE = nunca entra). */
     fun ociosoMs(): Long = if (ociosoSeg <= 0) Long.MAX_VALUE else ociosoSeg * 1000L

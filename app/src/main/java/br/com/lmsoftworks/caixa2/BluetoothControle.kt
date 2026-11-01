@@ -52,7 +52,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
     val ligado: Boolean get() = adaptador?.isEnabled == true
     val visivel: Boolean get() = adaptador?.scanMode == BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE
     val buscando: Boolean get() = adaptador?.isDiscovering == true
-    val nomeCaixa: String get() = adaptador?.name ?: NOME_CAIXA
+    val nomeCaixa: String get() = adaptador?.name ?: Ajustes.nomeAparelho
     val algumConectado: Boolean get() = conectados.isNotEmpty()
 
     fun nomeConectado(): String? =
@@ -148,9 +148,15 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         perfilSink = null
     }
 
+    /** O nome da caixa mudou em Configurações: aplica no Bluetooth (se estiver ligado). */
+    fun aplicarNome() {
+        val a = adaptador ?: return
+        if (a.isEnabled && a.name != Ajustes.nomeAparelho) a.name = Ajustes.nomeAparelho
+    }
+
     private fun aoLigar() {
         val a = adaptador ?: return
-        if (a.name != NOME_CAIXA) a.name = NOME_CAIXA
+        if (a.name != Ajustes.nomeAparelho) a.name = Ajustes.nomeAparelho
         // aparelhos já ligados e pareados
         a.bondedDevices?.forEach { if (estaConectado(it)) conectados.add(it.address) }
         if (perfilSink == null) {

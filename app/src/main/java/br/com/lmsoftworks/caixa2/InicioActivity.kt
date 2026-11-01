@@ -164,7 +164,12 @@ class InicioActivity : Activity() {
         painelVolume = PainelVolume(this) { p, mudo -> barra.definirVolume(p, mudo) }
         cobertura = CoberturaEnergia(this)
         modalEnergia = ModalEnergia(this) { desligar -> sequenciaEnergia(desligar) }
-        painelVolume.aoNoLimite = { Som.tocar(this, R.raw.som_volume_max) }
+        painelVolume.aoNoLimite = {
+            if (Ajustes.avisoVolumeMax) {
+                playerMidia.volume(0.2f)      // a música abaixa enquanto o aviso toca, para não ficar tudo misturado
+                Som.tocar(this, R.raw.som_volume_max) { playerMidia.volume(1f) }
+            }
+        }
         painelVolume.aoMostrar = { sairOcioso() }
         barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
         barra.colocarPilulaVolume(painelVolume.pilula)
@@ -209,7 +214,7 @@ class InicioActivity : Activity() {
         lembretes = LembreteControle(this)
         listas = ListaControle(this)
         dormir = HoraDeDormir(this)
-        telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas) { a -> tocarAlarme(a, teste = true) }
+        telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas, dormir) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
         telaConfig.lerVolume = { Math.round(painelVolume.porcento / 10f) }
@@ -217,6 +222,22 @@ class InicioActivity : Activity() {
         telaConfig.aoMudarBrilho = { aplicarBrilho() }
         telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
+        telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
+        telaConfig.aoMudarCidade = { climaEm = 0L; previsao = null }      // o clima e a previsão buscam de novo, na cidade nova
+        telaConfig.aoMudarNome = { bluetooth.aplicarNome() }
+        telaConfig.aoRestaurar = { aplicarBrilho(); bluetooth.aplicarNome(); climaEm = 0L; previsao = null }
+        telaConfig.lerRegistro = { volta ->
+            Thread {
+                val txt = try {
+                    val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "-s", "Assistente:D", "VozCaixa:D", "Midia:D", "CaixaLed:D", "CaixaBt:D", "Atualizador:D", "AndroidRuntime:E"))
+                    p.inputStream.bufferedReader().readLines().filter { !it.startsWith("---") }.takeLast(70).joinToString("\n") { it.replace(Regex("^\\d\\d-\\d\\d "), "") }
+                } catch (e: Throwable) { "Não consegui ler o registro: ${e.message}" }
+                relogio.post { volta(txt) }
+            }.start()
+        }
+        telaConfig.salvarRegistro = { txt ->
+            try { val f = java.io.File(getExternalFilesDir(null), "registro.txt"); f.writeText(txt); f.absolutePath } catch (e: Throwable) { "" }
+        }
         telaConfig.versao = try { "" + packageManager.getPackageInfo(packageName, 0).versionName + " (" + Atualizador.versaoInstalada(this) + ")" } catch (e: Exception) { "" }
         telaPrevisao = TelaPrevisao(this) { buscarPrevisao() }
         telaPrevisao.visibility = View.GONE
@@ -595,7 +616,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal))
+        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -1323,6 +1344,7 @@ class InicioActivity : Activity() {
             "led" -> ir("inicio")
             "alarmes" -> if (!telaAlarmes.voltar()) ir("inicio")
             "clima" -> ir("inicio")
+            "config" -> if (!telaConfig.voltar()) ir("inicio")
         }
     }
 }
