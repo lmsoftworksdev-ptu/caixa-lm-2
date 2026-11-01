@@ -196,7 +196,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }.start()
     }
 
+    private val audioMgr = contexto.applicationContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+    private val foco = android.media.AudioManager.OnAudioFocusChangeListener { }
+
     private fun tocarFonte(fonte: Fonte) {
+        // pede o foco de áudio: o A2DP da caixa perde o dele e manda "pausar" ao celular
+        try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
         val p = criar()
         val origem = origemDe(fonte)
         p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF

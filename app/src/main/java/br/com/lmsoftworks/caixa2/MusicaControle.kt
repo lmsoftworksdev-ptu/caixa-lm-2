@@ -300,6 +300,9 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     // ---- botões ----
     fun tocar() { if (emLocal) { if (!local!!.tocando) local!!.alternar() } else controle?.transportControls?.play() }
+    /** Manda "pausar" ao celular sem checar o estado (ele pode estar tocando sem avisar). */
+    fun pausarCelular() { controle?.transportControls?.pause() }
+
     fun pausar() { if (emLocal) { if (local!!.tocando) local!!.alternar() } else controle?.transportControls?.pause() }
     fun alternar() { if (emLocal) local!!.alternar() else if (tocando) pausar() else tocar() }
     fun proxima() { if (emLocal) local!!.proxima() else controle?.transportControls?.skipToNext() }

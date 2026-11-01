@@ -32,6 +32,8 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         const val NOME_CAIXA = "LM Sound"
         private const val PERFIL_A2DP_SINK = 11
         private const val ACAO_SINK = "android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED"
+        private const val ACAO_TOCANDO = "android.bluetooth.a2dp-sink.profile.action.PLAYING_STATE_CHANGED"
+        private const val A2DP_TOCANDO = 10          // BluetoothA2dp.STATE_PLAYING (11 = não está tocando)
         private const val DURACAO_BUSCA_MS = 12_000L
     }
 
@@ -54,6 +56,11 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
     val buscando: Boolean get() = adaptador?.isDiscovering == true
     val nomeCaixa: String get() = adaptador?.name ?: Ajustes.nomeAparelho
     val algumConectado: Boolean get() = conectados.isNotEmpty()
+
+    /** O celular está mandando áudio agora (estado do A2DP, que chega mesmo quando título e capa não chegam). */
+    @Volatile var celularTocando = false; private set
+    /** O celular começou a tocar: quem estiver tocando na própria caixa (YouTube) deve parar. */
+    var aoCelularTocando: (() -> Unit)? = null
 
     fun nomeConectado(): String? =
         conectados.firstNotNullOfOrNull { end -> adaptador?.bondedDevices?.firstOrNull { it.address == end }?.let(::nomeDe) }
@@ -85,6 +92,10 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                 }
                 BluetoothDevice.ACTION_ACL_CONNECTED -> if (d != null && d.bondState == BluetoothDevice.BOND_BONDED) { conectados.add(d.address); garantirPerfil(d) }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (d != null) conectados.remove(d.address)
+                ACAO_TOCANDO -> {
+                    val tocando = i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == A2DP_TOCANDO
+                    if (tocando != celularTocando) { celularTocando = tocando; if (tocando) aoCelularTocando?.invoke() }
+                }
                 ACAO_SINK -> if (d != null) {
                     when (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)) {
                         BluetoothProfile.STATE_CONNECTING -> aoConectando?.invoke()
@@ -132,6 +143,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
             addAction(ACAO_SINK)
+            addAction(ACAO_TOCANDO)
         }
         ctx.registerReceiver(receptor, f)
         ctx.registerReceiver(receptorPareamento, IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })

@@ -133,8 +133,7 @@ class InicioActivity : Activity() {
             // Celular conectado e som saindo, mas o celular não mandou título nem capa (AVRCP vazio): mostra um cartão simples para
             // a pessoa saber que a caixa está tocando e poder pausar.
             val agoraMs = android.os.SystemClock.uptimeMillis()
-            val semDados = !musica.temMusica && bluetooth.algumConectado && !playerMidia.ativo && !telaVideo.aberto &&
-                (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isMusicActive
+            val semDados = !musica.temMusica && bluetooth.algumConectado && bluetooth.celularTocando && !playerMidia.ativo && !telaVideo.aberto
             if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
             val genericoVisivel = semDadosDesde != 0L && agoraMs - semDadosDesde > 2500L && !dispensada
             if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
@@ -231,6 +230,8 @@ class InicioActivity : Activity() {
         telaConfig.aoMudarBrilho = { aplicarBrilho() }
         telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
+        // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
+        bluetooth.aoCelularTocando = { if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() } }
         telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
         telaConfig.aoMudarCidade = { climaEm = 0L; previsao = null }      // o clima e a previsão buscam de novo, na cidade nova
         telaConfig.aoMudarNome = { bluetooth.aplicarNome() }
@@ -980,6 +981,7 @@ class InicioActivity : Activity() {
         if (!telaVideo.aberto) origemVideo = atual
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
+        musica.pausarCelular()      // o celular que estiver tocando pára (mesmo que ele não avise que está tocando)
         playerMidia.tocarVideo(lista, i, inicioMs)
         telaVideo.abrir()
         relogio.removeCallbacks(amostradorVideo); relogio.post(amostradorVideo)
