@@ -426,7 +426,7 @@ object Respostas {
         val min: Int, val max: Int, val chuva: Int, val horas: List<HoraPrevisao>, val dias: List<DiaPrevisao>
     )
 
-    /** Previsão completa (agora, 7 horas, 15 dias) pela cidade aproximada (IP). null se a internet falhar. */
+    /** Previsão completa (agora, 36 horas, 15 dias) pela cidade aproximada (IP). null se a internet falhar. */
     fun previsaoCompleta(ctx: Context): PrevisaoCompleta? {
         val ip = getJson(ctx, "https://ipwho.is/") ?: return null
         if (!ip.optBoolean("success", false)) return null
@@ -455,7 +455,7 @@ object Respostas {
         var inicio = 0
         if (tempos != null) for (i in 0 until tempos.length()) if (tempos.getString(i).startsWith(agoraTxt)) { inicio = i; break }
         val horas = ArrayList<HoraPrevisao>()
-        if (tempos != null) for (k in 0 until 7) {
+        if (tempos != null) for (k in 0 until 36) {
             val i = inicio + k
             if (i >= tempos.length()) break
             val hora = tempos.getString(i).substring(11, 13).toInt()

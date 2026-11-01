@@ -161,18 +161,24 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
         esquerda.addView(grade, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 20.d() })
         esquerda.addView(View(c), LinearLayout.LayoutParams(-1, 0, 1f))
         esquerda.addView(rotuloSecao(c, "Próximas horas").apply { setPadding(0, 10.d(), 0, 12.d()) })
-        val horas = LinearLayout(c)
+        // próximas horas: uma linha que rola para o lado (hora, ícone e temperatura lado a lado), até a manhã do dia seguinte e além
+        val horas = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
         p.horas.forEachIndexed { i, h ->
             val (corH, _) = coresDoTipo(tipoDoCodigo(h.codigo))
             horas.addView(LinearLayout(c).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = fundoArredondado(Color.parseColor("#0FFFFFFF"), 18.d())
+                setPadding(14.d(), 10.d(), 14.d(), 10.d())
                 addView(texto(c, if (i == 0) "Agora" else "${h.hora}h", 17, Tema.TEXTO3))
-                addView(IconeAnimado(c, tipoDoCodigo(h.codigo), corH, 28, animado = false), LinearLayout.LayoutParams(28.d(), 28.d()).apply { topMargin = 8.d(); bottomMargin = 8.d() })
-                addView(texto(c, "${h.temp}°", 21, Tema.TEXTO, true))
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(IconeAnimado(c, tipoDoCodigo(h.codigo), corH, 24), LinearLayout.LayoutParams(24.d(), 24.d()).apply { leftMargin = 10.d(); rightMargin = 10.d() })
+                addView(texto(c, "${h.temp}°", 20, Tema.TEXTO, true))
+            }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 8.d() })
         }
-        esquerda.addView(horas, LinearLayout.LayoutParams(-1, -2))
+        esquerda.addView(android.widget.HorizontalScrollView(c).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(horas, LayoutParams(-2, -2))
+        }, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun montarDias(p: Respostas.PrevisaoCompleta) {
@@ -186,7 +192,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
             dias.addView(LinearLayout(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(texto(c, nome, 22, Tema.TEXTO, d.indice == 0), LinearLayout.LayoutParams(118.d(), -2))
-                addView(IconeAnimado(c, tipoDoCodigo(d.codigo), cor, 28, animado = false), LinearLayout.LayoutParams(28.d(), 28.d()))
+                addView(IconeAnimado(c, tipoDoCodigo(d.codigo), cor, 28), LinearLayout.LayoutParams(28.d(), 28.d()))
                 addView(texto(c, if (d.chuva >= 20) "${d.chuva}%" else "", 17, Color.parseColor("#8FC2FF")).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(64.d(), -2).apply { leftMargin = 16.d() })
                 addView(texto(c, "${d.min}°", 21, Tema.TEXTO2).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(50.d(), -2).apply { leftMargin = 8.d() })
                 addView(FaixaTemp(c, d.min, d.max, gmin, gmax), LinearLayout.LayoutParams(0, 6.d(), 1f).apply { leftMargin = 14.d(); rightMargin = 14.d() })

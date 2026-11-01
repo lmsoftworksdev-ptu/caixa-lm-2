@@ -48,7 +48,7 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
 
     override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(tam.d(), tam.d())
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (animado) postInvalidateOnAnimation() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (animado) postInvalidateDelayed(33) }
 
     private fun suave(x: Float) = .5f - .5f * cos(x * 2f * PI.toFloat())     // 0 -> 1 -> 0 em um ciclo (ease in-out)
 
@@ -109,10 +109,10 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
             }
         }
         canvas.restore()
-        if (animado && ativo()) postInvalidateOnAnimation()
+        if (animado && ativo()) postInvalidateDelayed(33)      // 30 quadros por segundo: leve para várias animações juntas
     }
 
-    override fun onVisibilityAggregated(v: Boolean) { super.onVisibilityAggregated(v); if (v && animado) postInvalidateOnAnimation() }
+    override fun onVisibilityAggregated(v: Boolean) { super.onVisibilityAggregated(v); if (v && animado) postInvalidateDelayed(33) }
 }
 
 /** Ícone "Mídia" da v3: retângulo arredondado com o triângulo de play vazado (só contorno, cantos retos). */
