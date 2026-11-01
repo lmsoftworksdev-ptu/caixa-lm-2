@@ -18,7 +18,7 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * Fundo animado da interface v3: 12 manchas redondas de luz (cor 1 / cor 2 da tela, somadas) desenhadas num bitmap de
+ * Fundo animado da interface v3: 6 manchas redondas (raio 1,5x o do protótipo) de luz (cor 1 / cor 2 da tela, somadas) desenhadas num bitmap de
  * 128 x 72 (quadro de 320 x 180 com escala 0,4) e ampliadas para a tela com filtro bilinear. Por cima, o véu radial.
  * A cor caminha para o alvo a cada quadro: atual += (alvo - atual) * 0,045.
  */
@@ -36,9 +36,9 @@ class FundoView(c: Context) : View(c) {
     private val matriz = Matrix()
 
     // posições base (fração do quadro) e raios (no quadro de 320 x 180)
-    private val bx = floatArrayOf(.15f, .42f, .70f, .90f, .28f, .58f, .05f, .35f, .82f, .52f, .18f, .96f)
-    private val by = floatArrayOf(.30f, .70f, .28f, .72f, .88f, .10f, .62f, .20f, .12f, .48f, .72f, .42f)
-    private val br = floatArrayOf(92f, 104f, 96f, 88f, 72f, 70f, 78f, 66f, 72f, 82f, 62f, 70f)
+    private val bx = floatArrayOf(.15f, .42f, .70f, .90f, .28f, .58f)
+    private val by = floatArrayOf(.30f, .70f, .28f, .72f, .88f, .10f)
+    private val br = floatArrayOf(138f, 156f, 144f, 132f, 108f, 105f)
 
     private val atual = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)   // r1 g1 b1 r2 g2 b2 brilho
     private val alvo = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)
@@ -102,7 +102,7 @@ class FundoView(c: Context) : View(c) {
         img.eraseColor(Tema.FUNDO)
         tela.save()
         tela.scale(.4f, .4f)
-        for (i in 0 until 12) {
+        for (i in 0 until 6) {
             val sp = 1f + (i % 4) * .15f
             val x = quadroL * bx[i] + sin(t * .00056f * sp + i * 1.9f) * quadroL * .15f
             val y = quadroA * by[i] + cos(t * .0007f * sp + i * 2.4f) * quadroA * .24f

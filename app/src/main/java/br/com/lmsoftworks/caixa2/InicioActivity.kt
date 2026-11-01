@@ -156,7 +156,7 @@ class InicioActivity : Activity() {
         modalEnergia = ModalEnergia(this) { desligar -> sequenciaEnergia(desligar) }
         painelVolume.aoNoLimite = { Som.tocar(this, R.raw.som_volume_max) }
         painelVolume.aoMostrar = { sairOcioso() }
-        barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
+        barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
         barra.colocarPilulaVolume(painelVolume.pilula)
         gesto = GestoVoltar(this)
         barra.translationZ = 30f; painelVolume.translationZ = 20f; gesto.translationZ = 30f      // acima das telas que deslizam
@@ -208,7 +208,7 @@ class InicioActivity : Activity() {
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1))
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
-            addView(barra, FrameLayout.LayoutParams(-1, 92.d()))
+            addView(barra, FrameLayout.LayoutParams(-1, 104.d()))
             addView(gesto, FrameLayout.LayoutParams(-1, -1))
         }
 
@@ -347,6 +347,7 @@ class InicioActivity : Activity() {
     }
 
     private fun aoMudarLed() {
+        barra.definirLed(led.conectado, led.ligado, led.conectando)
         if (atual == "led") telaLed.atualizar()
     }
 

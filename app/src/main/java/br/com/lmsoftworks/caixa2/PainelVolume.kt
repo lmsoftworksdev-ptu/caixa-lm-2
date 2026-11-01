@@ -29,14 +29,14 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         /** O amplificador da caixa distorce acima de 87% do volume do aparelho: o 100% do app é esse 87% real. */
         const val LIMITE_REAL = 1.0f
         private const val LARGURA_DP = 540
-        private const val ALTURA_DP = 64
+        private const val ALTURA_DP = 76
     }
 
     private val audio = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val canal = AudioManager.STREAM_MUSIC
     private val barra = BarraVolume(c)
-    private val rotulo: TextView = texto(c, "", 26, Color.WHITE, true)
-    private val botaoMudo = BotaoRedondo(c, R.drawable.ic_volume_2, "Mudo", 30)
+    private val rotulo: TextView = texto(c, "", 30, Color.WHITE, true)
+    private val botaoMudo = BotaoRedondo(c, R.drawable.ic_volume_2, "Mudo", 36)
     private var anterior = 0
     private var registrado = false
     private val handler = Handler(Looper.getMainLooper())
@@ -71,8 +71,8 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         // fora da pílula: um toque em qualquer lugar fecha
         addView(View(c).apply { isClickable = true; setOnClickListener { fechar() } }, LayoutParams(-1, -1))
 
-        val menos = BotaoRedondo(c, R.drawable.ic_menos, "Diminuir volume", 28).apply { pintar(Color.WHITE, false); setOnClickListener { passo(-1) } }
-        val mais = BotaoRedondo(c, R.drawable.ic_mais, "Aumentar volume", 28).apply { pintar(Color.WHITE, false); setOnClickListener { passo(+1) } }
+        val menos = BotaoRedondo(c, R.drawable.ic_menos, "Diminuir volume", 36).apply { pintar(Color.WHITE, false); setOnClickListener { passo(-1) } }
+        val mais = BotaoRedondo(c, R.drawable.ic_mais, "Aumentar volume", 36).apply { pintar(Color.WHITE, false); setOnClickListener { passo(+1) } }
         botaoMudo.setOnClickListener { alternarMudo() }
         barra.aoMudar = { f -> definir(Math.round(f * 10) / 10f) }
         botaoMudo.pintar(Color.WHITE, false)
@@ -83,7 +83,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         val conteudo = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(View(c), LinearLayout.LayoutParams(64.d(), 1))
+            addView(View(c), LinearLayout.LayoutParams(76.d(), 1))
             addView(botaoMudo, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
             addView(menos, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
             addView(barra, LinearLayout.LayoutParams(0, ALTURA_DP.d(), 1f).apply { leftMargin = 6.d(); rightMargin = 6.d() })
@@ -93,7 +93,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         }
         // o conteúdo tem largura fixa; só a pílula cresce, e o que passa da borda é cortado (efeito de abrir)
         pilula.apply {
-            background = fundoArredondado(Color.parseColor("#1A1A22"), (ALTURA_DP / 2).d())
+            background = fundoArredondado(Color.parseColor("#EB0D152C"), (ALTURA_DP / 2).d())
             visibility = View.GONE
             alpha = 0f
             addView(conteudo, FrameLayout.LayoutParams(LARGURA_DP.d(), ALTURA_DP.d()))
@@ -137,8 +137,8 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         val de = (pilula.layoutParams?.width ?: 0).coerceAtLeast(0)
         val para = if (abrir) LARGURA_DP.d() else 0
         animador = ValueAnimator.ofInt(de, para).apply {
-            duration = 350
-            interpolator = DecelerateInterpolator()
+            duration = 380
+            interpolator = Tema.CURVA
             addUpdateListener {
                 val w = it.animatedValue as Int
                 pilula.layoutParams = pilula.layoutParams.apply { width = w }
@@ -233,10 +233,11 @@ class BarraVolume(c: Context) : View(c) {
     override fun onDraw(canvas: android.graphics.Canvas) {
         val f = if (arrastando) atual else valor
         val meio = height / 2f
-        val r = 5.d().toFloat()
-        p.color = Color.parseColor("#1FFFFFFF")
+        val r = 2.d().toFloat()
+        p.color = Color.parseColor("#29FFFFFF")
         canvas.drawRoundRect(0f, meio - r, width.toFloat(), meio + r, r, r, p)
         p.color = Color.WHITE
         canvas.drawRoundRect(0f, meio - r, width * f, meio + r, r, r, p)
+        canvas.drawCircle((width * f).coerceIn(9.d().toFloat(), width - 9.d().toFloat()), meio, 9.d().toFloat(), p)
     }
 }
