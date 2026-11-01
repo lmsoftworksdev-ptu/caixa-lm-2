@@ -551,7 +551,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && telaAlarmes.emTexto)
+        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal))
 
     // ------------------------------------------------------------------ assistente de voz
 

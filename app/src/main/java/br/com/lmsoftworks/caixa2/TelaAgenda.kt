@@ -98,8 +98,10 @@ class TelaAlarmes(
     private val editor = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
     private val principal = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
     private val telaTexto = TelaTexto(c)
+    private val modal = ModalV3(c)
 
     val emTexto: Boolean get() = telaTexto.aberto
+    val emModal: Boolean get() = modal.aberto
     private val destaque get() = Cfg.AZUL
 
     init {
@@ -126,6 +128,7 @@ class TelaAlarmes(
         addView(principal, LayoutParams(-1, -1))
         telaTexto.aoFechar = { principal.visibility = View.VISIBLE }
         addView(telaTexto, LayoutParams(-1, -1))
+        addView(modal, LayoutParams(-1, -1))
         atualizar()
     }
 
@@ -140,6 +143,7 @@ class TelaAlarmes(
     }
 
     fun voltar(): Boolean {
+        if (modal.aberto) { modal.fechar(); return true }
         if (telaTexto.aberto) { telaTexto.fechar(); return true }
         return false
     }
@@ -253,7 +257,7 @@ class TelaAlarmes(
         }
     }
 
-    private fun chip(rotulo: String, ligado: Boolean, altura: Int = 46, aoClicar: () -> Unit): View = TextView(c).apply {
+    private fun chip(rotulo: String, ligado: Boolean, altura: Int = 46, aoSegurar: (() -> Unit)? = null, aoClicar: () -> Unit): View = TextView(c).apply {
         text = rotulo
         setTextColor(Color.WHITE)
         setTextSize(TypedValue.COMPLEX_UNIT_PX, 19.d().toFloat())
@@ -263,6 +267,7 @@ class TelaAlarmes(
         background = fundoArredondado(if (ligado) destaque else Color.parseColor("#14FFFFFF"), (altura / 2).d(), if (ligado) 0 else Tema.BOTAO_BORDA)
         isClickable = true
         setOnClickListener { aoClicar() }
+        if (aoSegurar != null) setOnLongClickListener { aoSegurar(); true }
         efeitoToque()
         layoutParams = LinearLayout.LayoutParams(-2, altura.d()).apply { leftMargin = 5.d(); rightMargin = 5.d() }
     }
@@ -315,15 +320,18 @@ class TelaAlarmes(
         editor.addView(relogio(a.hora, a.minuto, 84, 96, 52) { h, m -> a.hora = h; a.minuto = m; salvarAlarme() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 14.d() })
         editor.addView(bolinhasDias(a.dias) { m -> a.dias = m; salvarAlarme() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 16.d() })
         // o nome é opcional: toque para marcar e toque de novo para desmarcar; o "+" abre a digitação de um nome seu (até 3 ficam guardados)
-        val nomes = LinearLayout(c).apply { gravity = Gravity.CENTER }
-        for (n in AlarmeControle.NOMES) nomes.addView(chip(n, a.nome == n) { a.nome = if (a.nome == n) "" else n; salvarAlarme() })
-        editor.addView(nomes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 18.d() })
-        val proprios = LinearLayout(c).apply { gravity = Gravity.CENTER }
-        for (n in alarmes.extras) proprios.addView(chip(n, a.nome == n) { a.nome = if (a.nome == n) "" else n; salvarAlarme() })
-        proprios.addView(chip("+", false) {
-            abrirTexto(R.drawable.ic_alarme, "Nome do alarme", "Adicionar", "", "Escreva o nome do alarme.") { t -> alarmes.adicionarNomeExtra(t); a.nome = t.trim(); salvarAlarme() }
+        // segurar um nome (os de fábrica também) abre "Editar / Excluir"
+        val todosNomes = alarmes.nomes
+        val linha1 = LinearLayout(c).apply { gravity = Gravity.CENTER }
+        val linha2 = LinearLayout(c).apply { gravity = Gravity.CENTER }
+        todosNomes.forEachIndexed { i, n ->
+            (if (i < 4) linha1 else linha2).addView(chip(n, a.nome == n, 46, { opcoesNome(n) }) { a.nome = if (a.nome == n) "" else n; salvarAlarme() })
+        }
+        if (todosNomes.size < AlarmeControle.MAX_NOMES) linha2.addView(chip("+", false) {
+            abrirTexto(R.drawable.ic_alarme, "Nome do alarme", "Adicionar", "", "Escreva o nome do alarme.") { t -> if (alarmes.adicionarNome(t)) a.nome = t.trim(); salvarAlarme() }
         })
-        editor.addView(proprios, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
+        editor.addView(linha1, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 18.d() })
+        if (linha2.childCount > 0) editor.addView(linha2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         editor.addView(View(c), LinearLayout.LayoutParams(-1, 0, 1f))
         editor.addView(botoesRodape(
             botao(c, "Excluir", Tema.BOTAO, Tema.VERMELHO_SUAVE) { alarmes.excluir(a.id); atualizar() },
@@ -332,6 +340,23 @@ class TelaAlarmes(
     }
 
     private fun salvarAlarme() { alarmes.salvar(); atualizar() }
+
+    /** Janelinha de um nome de alarme (ao segurar): Editar ou Excluir. */
+    private fun opcoesNome(nome: String) {
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        conteudo.addView(texto(c, nome, 30, Tema.TEXTO, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        conteudo.addView(texto(c, "O que você quer fazer com esse nome?", 20, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d(); bottomMargin = 24.d() })
+        val botoes = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
+        botoes.addView(botao(c, "Excluir", Tema.BOTAO, Tema.VERMELHO_SUAVE) { modal.fechar(); alarmes.excluirNome(nome); atualizar() })
+        botoes.addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
+        botoes.addView(botao(c, "Cancelar", Tema.BOTAO) { modal.fechar() })
+        botoes.addView(botao(c, "Editar", Cfg.AZUL) {
+            modal.fechar()
+            abrirTexto(R.drawable.ic_alarme, "Nome do alarme", "Salvar", nome, "Escreva o nome do alarme.") { t -> alarmes.renomearNome(nome, t); atualizar() }
+        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+        conteudo.addView(botoes, LinearLayout.LayoutParams(-1, -2))
+        modal.mostrar(620, conteudo)
+    }
 
     // ------------------------------------------------------------------ LEMBRETES
 
@@ -412,7 +437,7 @@ class TelaAlarmes(
         val pend = it.count { !it.marcado }
         return when {
             it.isEmpty() -> "Lista vazia"
-            pend == 0 -> "Tudo comprado"
+            pend == 0 -> "Tudo finalizado"
             else -> "$pend ${if (pend == 1) "item pendente" else "itens pendentes"} · ${it.size} no total"
         }
     }
@@ -482,7 +507,7 @@ class TelaAlarmes(
         if (itens.isEmpty()) corpo.addView(vazio("A lista está vazia.\nToque em \"+ Adicionar item\"."), LinearLayout.LayoutParams(-1, 280.d()))
         pend.forEach { corpo.addView(linhaItem(nome, it), LinearLayout.LayoutParams(-1, 62.d())) }
         if (feitos.isNotEmpty()) {
-            corpo.addView(rotuloSecao(c, "No carrinho").apply { setPadding(8.d(), 14.d(), 0, 6.d()) })
+            corpo.addView(rotuloSecao(c, "Finalizados").apply { setPadding(8.d(), 14.d(), 0, 6.d()) })
             feitos.forEach { corpo.addView(linhaItem(nome, it), LinearLayout.LayoutParams(-1, 62.d())) }
         }
         editor.addView(RolagemFina(c).apply { addView(corpo) }, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 12.d() })

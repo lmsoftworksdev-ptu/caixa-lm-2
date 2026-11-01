@@ -29,6 +29,7 @@ class AlarmeControle(contexto: Context, private val aoMudar: () -> Unit) {
         val NOMES = listOf("Acordar", "Dormir", "Remédio", "Trabalho")
         const val DIAS_UTEIS = 0b0111110           // segunda a sexta (bits 1 a 5)
         const val TODOS = 0b1111111
+        const val MAX_NOMES = 7
         const val SONECA_MS = 5 * 60_000L
         private val ABREV = listOf("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")
     }
@@ -64,14 +65,33 @@ class AlarmeControle(contexto: Context, private val aoMudar: () -> Unit) {
         aoMudar()
     }
 
-    /** Nomes personalizados que a pessoa digitou (no máximo 3; o mais antigo sai quando entra um novo). */
-    val extras: List<String> get() = (prefs.getString("nomes_extra", "") ?: "").split("|").filter { it.isNotBlank() }
+    /** Os nomes que aparecem para escolher: começam com Acordar, Dormir, Remédio e Trabalho; a pessoa pode editar, excluir e adicionar (até [MAX_NOMES]). */
+    val nomes: List<String>
+        get() = if (prefs.contains("nomes_lista")) (prefs.getString("nomes_lista", "") ?: "").split("|").filter { it.isNotBlank() } else NOMES
 
-    fun adicionarNomeExtra(nome: String) {
+    private fun guardarNomes(l: List<String>) { prefs.edit().putString("nomes_lista", l.joinToString("|")).apply() }
+
+    fun adicionarNome(nome: String): Boolean {
         val n = nome.trim()
-        if (n.isEmpty() || NOMES.any { it.equals(n, true) }) return
-        val l = extras.filter { !it.equals(n, true) } + n
-        prefs.edit().putString("nomes_extra", l.takeLast(3).joinToString("|")).apply()
+        if (n.isEmpty() || nomes.any { it.equals(n, true) } || nomes.size >= MAX_NOMES) return false
+        guardarNomes(nomes + n)
+        return true
+    }
+
+    /** Troca o nome na lista e nos alarmes que o usavam. */
+    fun renomearNome(velho: String, novo: String) {
+        val n = novo.trim()
+        if (n.isEmpty()) return
+        guardarNomes(nomes.map { if (it == velho) n else it }.distinct())
+        lista.filter { it.nome == velho }.forEach { it.nome = n }
+        salvar()
+    }
+
+    /** Tira o nome da lista; os alarmes que o usavam ficam sem nome. */
+    fun excluirNome(nome: String) {
+        guardarNomes(nomes.filter { it != nome })
+        lista.filter { it.nome == nome }.forEach { it.nome = "" }
+        salvar()
     }
 
     fun porId(id: Int): Alarme? = lista.firstOrNull { it.id == id }
