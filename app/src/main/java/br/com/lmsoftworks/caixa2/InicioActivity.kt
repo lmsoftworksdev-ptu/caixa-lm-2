@@ -181,6 +181,7 @@ class InicioActivity : Activity() {
             }
         }
         painelVolume.aoMostrar = { sairOcioso() }
+        br.com.lmsoftworks.caixa2.voz.Fala.aoMexerNoVolume = { painelVolume.ignorarMudancas() }
         barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
         barra.colocarPilulaVolume(painelVolume.pilula)
         gesto = GestoVoltar(this)

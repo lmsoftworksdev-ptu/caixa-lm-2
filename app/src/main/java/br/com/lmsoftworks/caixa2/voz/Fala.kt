@@ -27,29 +27,42 @@ object Fala {
     private var contador = 0
     private val aoTerminar = HashMap<String, () -> Unit>()
 
-    // ---- a voz da caixa sai num canal próprio (o do alarme), no volume escolhido em Configurações: o volume da música não muda ----
+    // ---- a voz da caixa sai no volume escolhido em Configurações (1 a 10), qualquer que seja o volume da música; depois o volume
+    // volta. A barra de volume não acompanha essas mudanças ([aoMexerNoVolume] avisa a tela para ignorá-las). ----
     private var contexto: Context? = null
-    const val CANAL = android.media.AudioManager.STREAM_ALARM
+    const val CANAL = android.media.AudioManager.STREAM_MUSIC
+    var aoMexerNoVolume: (() -> Unit)? = null
+    private var volumeAntes = -1
+    private var volumeFixado = -1
 
-    /** Põe o canal da voz no nível de Configurações (de 1 a 10). */
-    fun aplicarVolume(ctx: Context? = contexto) {
-        ctx ?: return
+    /** Compatibilidade com a tela de Configurações: o nível novo vale na próxima fala. */
+    fun aplicarVolume(ctx: Context? = contexto) {}
+
+    private fun fixarVolume() {
+        val ctx = contexto ?: return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            // o canal do alarme é mais forte que o da música: o nível 10 vai a 70% dele e o 6 a 42% (3 de 7)
-            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * 0.7f * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
-            Log.d(TAG, "volume da voz: nivel ${Ajustes.volumeVoz} -> canal $alvo (era ${audio.getStreamVolume(CANAL)})")
-            if (audio.getStreamVolume(CANAL) != alvo) audio.setStreamVolume(CANAL, alvo, 0)
+            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(CANAL)
+            if (audio.getStreamVolume(CANAL) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, alvo, 0) }
+            volumeFixado = alvo
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }
 
-    private fun fixarVolume() = aplicarVolume()
-    private fun devolverVolume() {}
+    private fun devolverVolume() {
+        val ctx = contexto ?: return
+        if (volumeAntes < 0) return
+        try {
+            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            // só devolve se ninguém mexeu no volume enquanto ela falava
+            if (audio.getStreamVolume(CANAL) == volumeFixado) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, volumeAntes, 0) }
+        } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
+        volumeAntes = -1; volumeFixado = -1
+    }
 
     /** Chame cedo (ex.: ao ligar a voz) para o motor ja estar pronto na primeira resposta. */
     fun preparar(ctx: Context) {
         contexto = ctx.applicationContext
-        aplicarVolume()
         if (tts != null) return
         tts = TextToSpeech(ctx.applicationContext) { status ->
             val t = tts

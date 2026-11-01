@@ -169,38 +169,50 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
         player = p
     }
 
-    private var rs: android.renderscript.RenderScript? = null
-
-    /** Foto da tela em 1/4 do tamanho (rápido, na thread principal); o desfoque de verdade (RenderScript) é feito fora dela. */
+    /** Desfoque em CPU: foto em 1/8 do tamanho, três passadas de média (box blur) fora da thread principal e esticada com filtro. */
     private fun desfocar() {
         try {
             val v = alvo()
             if (v.width <= 0 || v.height <= 0) return
-            val f = 4
-            val foto = Bitmap.createBitmap(v.width / f, v.height / f, Bitmap.Config.ARGB_8888)
+            val f = 8
+            val w = v.width / f; val h = v.height / f
+            val foto = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val cv = Canvas(foto)
             cv.scale(1f / f, 1f / f)
             v.draw(cv)
-            // enquanto o desfoque não fica pronto, mostra a foto já esticada e suavizada (não trava a abertura)
-            fundo.setImageBitmap(foto)
+            fundo.setImageBitmap(foto)      // já aparece suave; o desfoque forte entra em seguida
             Thread {
-                val saida = try {
-                    val ctx = rs ?: android.renderscript.RenderScript.create(c.applicationContext).also { rs = it }
-                    val blur = android.renderscript.ScriptIntrinsicBlur.create(ctx, android.renderscript.Element.U8_4(ctx))
-                    blur.setRadius(25f)
-                    val ent = android.renderscript.Allocation.createFromBitmap(ctx, foto)
-                    val sai = android.renderscript.Allocation.createTyped(ctx, ent.type)
-                    repeat(3) { blur.setInput(ent); blur.forEach(sai); sai.copyTo(foto); ent.copyFrom(foto) }
-                    ent.destroy(); sai.destroy(); blur.destroy()
-                    foto
-                } catch (e: Throwable) {
-                    var b = foto
-                    repeat(3) { b = Bitmap.createScaledBitmap(b, maxOf(2, b.width / 2), maxOf(2, b.height / 2), true) }
-                    b
-                }
-                post { if (aberta || abertoFlag) fundo.setImageBitmap(saida) }
+                try {
+                    val px = IntArray(w * h)
+                    foto.getPixels(px, 0, w, 0, 0, w, h)
+                    val tmp = IntArray(w * h)
+                    repeat(3) { caixa(px, tmp, w, h, 5, true); caixa(tmp, px, w, h, 5, false) }
+                    val saida = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
+                    post { if (abertoFlag) fundo.setImageBitmap(saida) }
+                } catch (_: Throwable) {}
             }.start()
         } catch (e: Throwable) { fundo.setImageDrawable(null) }
+    }
+
+    /** Média móvel de raio [r] na horizontal ou na vertical (as bordas repetem o último pixel). */
+    private fun caixa(ent: IntArray, sai: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
+        val n = if (horizontal) w else h
+        val linhas = if (horizontal) h else w
+        val passo = if (horizontal) 1 else w
+        val janela = 2 * r + 1
+        for (l in 0 until linhas) {
+            val base = if (horizontal) l * w else l
+            var ra = 0; var ga = 0; var ba = 0
+            for (k in -r..r) { val p = ent[base + k.coerceIn(0, n - 1) * passo]; ra += p shr 16 and 255; ga += p shr 8 and 255; ba += p and 255 }
+            for (i in 0 until n) {
+                sai[base + i * passo] = (0xFF shl 24) or ((ra / janela) shl 16) or ((ga / janela) shl 8) or (ba / janela)
+                val sai0 = ent[base + (i - r).coerceIn(0, n - 1) * passo]
+                val ent0 = ent[base + (i + r + 1).coerceIn(0, n - 1) * passo]
+                ra += (ent0 shr 16 and 255) - (sai0 shr 16 and 255)
+                ga += (ent0 shr 8 and 255) - (sai0 shr 8 and 255)
+                ba += (ent0 and 255) - (sai0 and 255)
+            }
+        }
     }
 
     private fun abrir(novo: Int) {

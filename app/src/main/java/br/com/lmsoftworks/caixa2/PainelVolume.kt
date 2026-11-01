@@ -52,6 +52,9 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
      * Baixa o volume do aparelho (a música do celular) enquanto o assistente ouve e fala, e devolve depois. Não abre a pílula
      * nem mexe na barra: é só um abaixar temporário. Só devolve se ninguém mexeu no volume nesse meio-tempo.
      */
+    /** Mudanças de volume feitas pelo app (voz do assistente): a barra e a pílula não reagem nos próximos instantes. */
+    fun ignorarMudancas() { ignorarAte = android.os.SystemClock.uptimeMillis() + 1500 }
+
     fun abafarSistema(sim: Boolean) {
         if (sim) {
             if (abafado >= 0) return

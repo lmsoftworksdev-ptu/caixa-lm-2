@@ -48,6 +48,7 @@ class EscutaAssistente(
     }
 
     @Volatile private var rodando = false
+    private var blocosLog = 0
     private var threadMic: Thread? = null
     private var threadVosk: Thread? = null
     private val fila = LinkedBlockingQueue<Bloco>()
@@ -141,6 +142,7 @@ class EscutaAssistente(
                     bloco[i] = when { v > Short.MAX_VALUE -> Short.MAX_VALUE; v < Short.MIN_VALUE -> Short.MIN_VALUE; else -> v.toInt().toShort() }
                 }
                 nivel = min(1f, rmsBruto / 3000f)
+                if (++blocosLog % 15 == 0) Log.d(TAG, "mic: nivel=${rmsBruto.toInt()} ganho=${"%.1f".format(ganho)} piso=${pisoSala.toInt()} k=${"%.2f".format(Ajustes.fatorMic())} pedindo=$pedindo")
 
                 if (pedidoNovo) { pedidoNovo = false; iniciarGravacao() }
                 if (pedindo) {
