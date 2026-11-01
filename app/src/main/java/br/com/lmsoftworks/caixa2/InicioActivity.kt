@@ -123,6 +123,8 @@ class InicioActivity : Activity() {
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome)
+            // a faixa fechada com o gesto só fica escondida enquanto parada: tocou de novo, o cartão volta e o pause não o esconde mais
+            if (musica.tocando && android.os.SystemClock.uptimeMillis() >= musicaDispensadaAte) musicaDispensada = ""
             val dispensada = android.os.SystemClock.uptimeMillis() < musicaDispensadaAte || (musicaDispensada == musica.titulo + musica.artista && !musica.tocando)
             if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando) else inicio.definirMusica(null, null)
             val proximoLembrete = lembretes.todos.firstOrNull()
