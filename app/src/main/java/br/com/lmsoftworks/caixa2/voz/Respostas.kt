@@ -385,6 +385,8 @@ object Respostas {
             if (chuva != null && chuva > 0) append("  ·  chuva ").append(chuva).append("%")
             if (cidade.isNotBlank()) append("  ·  ").append(cidade)
         }
+        /** O emoji do tempo (☀️ ⛅ ☁️ 🌧️ ⛈️ ...). */
+        fun emoji(): String = emoji(codigo)
         private fun emoji(c: Int) = when (c) {
             0 -> "☀️"; 1, 2 -> "⛅"; 3 -> "☁️"; 45, 48 -> "🌫️"; in 51..67 -> "🌧️"; in 71..77 -> "❄️"; in 80..82 -> "🌦️"; in 95..99 -> "⛈️"; else -> "🌡️"
         }

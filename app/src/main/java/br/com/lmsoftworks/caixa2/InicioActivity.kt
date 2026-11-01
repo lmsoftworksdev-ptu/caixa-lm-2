@@ -39,6 +39,9 @@ class InicioActivity : Activity() {
     private lateinit var assistente: br.com.lmsoftworks.caixa2.voz.Assistente
     private lateinit var alarmes: AlarmeControle
     private lateinit var telaAlarmes: TelaAlarmes
+    private lateinit var telaConfig: TelaConfig
+    /** Wi-Fi, Bluetooth e Alarmes abertos pela tela Configurações: o "voltar" deles leva de volta para ela. */
+    private var origemConfig = false
     private lateinit var telaAlarmeTocando: TelaAlarmeTocando
     private var alarmeTocando: Alarme? = null
     private var alarmeEhTeste = false
@@ -81,7 +84,7 @@ class InicioActivity : Activity() {
             val c = try { br.com.lmsoftworks.caixa2.voz.Respostas.climaHoje(this) } catch (e: Throwable) { null }
             relogio.post {
                 climaBuscando = false
-                if (c != null) inicio.definirClima(c.texto()) else climaEm = android.os.SystemClock.uptimeMillis() - 25 * 60_000L
+                if (c != null) inicio.definirClima(c) else climaEm = android.os.SystemClock.uptimeMillis() - 25 * 60_000L
             }
         }.start()
     }
@@ -112,13 +115,15 @@ class InicioActivity : Activity() {
         override fun run() {
             inicio.atualizar()
             if (atual == "musica") telaMusica.atualizar()
+            if (atual == "config") atualizarConfig()
             barra.atualizarHora()
             alarmes.verificar()?.let { tocarAlarme(it) }
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto())
-            inicio.definirLembrete(lembretes.todos.firstOrNull()?.let { "${it.texto}, ${LembreteControle.quando(it.quandoMs)}" })
+            val proximoLembrete = lembretes.todos.firstOrNull()
+            inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
             if (!ocioso) {
                 if (android.os.SystemClock.uptimeMillis() - ultimoToque > IDLE_MS && !ocupado()) entrarOcioso()
@@ -150,7 +155,7 @@ class InicioActivity : Activity() {
         modalEnergia = ModalEnergia(this) { desligar -> sequenciaEnergia(desligar) }
         painelVolume.aoNoLimite = { Som.tocar(this, R.raw.som_volume_max) }
         painelVolume.aoMostrar = { sairOcioso() }
-        barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
+        barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
         barra.colocarPilulaVolume(painelVolume.pilula)
         gesto = GestoVoltar(this)
         barra.translationZ = 30f; painelVolume.translationZ = 20f; gesto.translationZ = 30f      // acima das telas que deslizam
@@ -183,6 +188,8 @@ class InicioActivity : Activity() {
         dormir = HoraDeDormir(this)
         telaAlarmes = TelaAlarmes(this, alarmes) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
+        telaConfig = TelaConfig(this) { abrir(it) }
+        telaConfig.visibility = View.GONE
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
         telaOciosa = TelaOciosa(this)
         modalAtualizacao = ModalAtualizacao(this)
@@ -191,13 +198,14 @@ class InicioActivity : Activity() {
         conteudo = FrameLayout(this).apply {
             alpha = 0f
             addView(fundo, FrameLayout.LayoutParams(-1, -1))
-            addView(inicio, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(inicio, FrameLayout.LayoutParams(-1, -1))      // a v2 posiciona tudo no quadro inteiro de 1280x720
             addView(telaWifi, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaBluetooth, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMusica, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(telaConfig, FrameLayout.LayoutParams(-1, -1))
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
             addView(barra, FrameLayout.LayoutParams(-1, 92.d()))
             addView(gesto, FrameLayout.LayoutParams(-1, -1))
@@ -337,7 +345,6 @@ class InicioActivity : Activity() {
     }
 
     private fun aoMudarLed() {
-        barra.definirLed(led.online, led.ligado)
         if (atual == "led") telaLed.atualizar()
     }
 
@@ -360,12 +367,13 @@ class InicioActivity : Activity() {
         "midia" -> telaMidia
         "led" -> telaLed
         "alarmes" -> telaAlarmes
+        "config" -> telaConfig
         else -> inicio
     }
 
     private fun abrir(id: String) {
         if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
-        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes") ir(id)
+        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config") ir(id)
         else Toast.makeText(this, "Em breve", Toast.LENGTH_SHORT).show()
     }
 
@@ -392,6 +400,7 @@ class InicioActivity : Activity() {
             "midia" -> Triple("#FF4F7A", "#6A4DFF", "#FF5C7A")
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
             "alarmes" -> Triple("#FF4FA3", "#7A3CFF", "#B07CFF")
+            "config" -> Triple("#4A6BFF", "#8A4DFF", "#5B8CFF")
             else -> Triple("#2A62FF", "#7A3CFF", "#FFB84D")
         }
         fundo.tema(Color.parseColor(a), Color.parseColor(b))
@@ -428,6 +437,7 @@ class InicioActivity : Activity() {
         else bluetooth.definirVisivel(false)
         if (destino == "led") telaLed.atualizar()
         if (destino == "alarmes") telaAlarmes.atualizar()
+        if (destino == "config") atualizarConfig()
         if (destino == "midia") telaMidia.aoMostrar()
     }
 
@@ -468,6 +478,7 @@ class InicioActivity : Activity() {
         val de: View = tela(atual)
         val para: View = tela(destino)
         val dir = if (destino == "inicio" || destino == destinoVoltar()) 1 else -1      // voltar gira para a direita; entrar, para o outro lado
+        origemConfig = atual == "config" && (destino == "wifi" || destino == "bluetooth" || destino == "alarmes")
         mudarEstado(destino)
         if (!apareceu) { de.visibility = View.GONE; para.visibility = View.VISIBLE; aoChegar(destino); return }
         girando = true
@@ -477,7 +488,18 @@ class InicioActivity : Activity() {
     }
 
     /** Para onde o "voltar" leva: música do YouTube volta à busca (Mídia); Mídia e os demais menus voltam à tela inicial. */
-    private fun destinoVoltar() = if (atual == "musica" && musica.emLocal) "midia" else "inicio"
+    private fun destinoVoltar() = when {
+        atual == "musica" && musica.emLocal -> "midia"
+        origemConfig && (atual == "wifi" || atual == "bluetooth" || atual == "alarmes") -> "config"
+        else -> "inicio"
+    }
+
+    /** O estado que a tela Configurações mostra embaixo de cada item. */
+    private fun atualizarConfig() {
+        telaConfig.definirEstado("wifi", if (!wifi.ligado) "Desligado" else wifi.conectadoSsid?.let { "Conectado a $it" } ?: "Sem rede conectada")
+        telaConfig.definirEstado("bluetooth", if (!bluetooth.ligado) "Desligado" else bluetooth.nomeConectado()?.let { "Conectado a $it" } ?: "Visível como “${bluetooth.nomeCaixa}”")
+        telaConfig.definirEstado("alarmes", alarmes.proximoTexto()?.let { "Próximo: $it" } ?: "Nenhum alarme ligado")
+    }
 
     private fun emDetalheAtual() = (atual == "wifi" && telaWifi.emDetalhe) || (atual == "bluetooth" && telaBluetooth.emDetalhe)
 

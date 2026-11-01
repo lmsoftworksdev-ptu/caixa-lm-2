@@ -52,7 +52,7 @@ class BotaoRedondo(c: Context, recurso: Int, private val descricao: String, tamI
     companion object { val AZUL_OK = Color.parseColor("#3DA5FF") }
 }
 
-/** A barra diagonal que "corta" um ícone sem conexão: branca, com contorno escuro para aparecer sobre o desenho. */
+/** A barra diagonal que "corta" um ícone sem conexão: da mesma cor do ícone. */
 class CorteView(c: Context) : View(c) {
     private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
@@ -61,9 +61,7 @@ class CorteView(c: Context) : View(c) {
 
     override fun onDraw(canvas: android.graphics.Canvas) {
         val m = width * .1f
-        p.color = Color.BLACK; p.strokeWidth = 8.d().toFloat()
-        canvas.drawLine(m, m, width - m, height - m, p)
-        p.color = Color.WHITE; p.strokeWidth = 3.d().toFloat()
+        p.color = Color.WHITE; p.strokeWidth = 3.d().toFloat()      // só a barra, na cor do ícone (sem contorno)
         canvas.drawLine(m, m, width - m, height - m, p)
     }
 }
@@ -103,16 +101,14 @@ class BarraTopo(
     c: Context,
     aoAbrirWifi: () -> Unit,
     aoAbrirBluetooth: () -> Unit,
-    aoAbrirLed: () -> Unit,
     aoAbrirVolume: () -> Unit,
     aoAbrirEnergia: () -> Unit
 ) : FrameLayout(c) {
 
-    private val wifi = IconeStatus(c, R.drawable.ic_wifi, "Wi-Fi")
-    private val bluetooth = IconeStatus(c, R.drawable.ic_bluetooth, "Bluetooth")
-    private val led = IconeStatus(c, R.drawable.ic_bulb, "Fita de LED")
-    private val volume = IconeStatus(c, R.drawable.ic_volume_2, "Volume", 30)
-    private val energia = IconeStatus(c, R.drawable.ic_power, "Desligar ou reiniciar")
+    private val wifi = IconeStatus(c, R.drawable.ic_wifi, "Wi-Fi", TAM_ICONE)
+    private val bluetooth = IconeStatus(c, R.drawable.ic_bluetooth, "Bluetooth", TAM_ICONE)
+    private val volume = IconeStatus(c, R.drawable.ic_volume_2, "Volume", TAM_ICONE)
+    private val energia = IconeStatus(c, R.drawable.ic_power, "Desligar ou reiniciar", TAM_ICONE)
     private val hora: TextView = texto(c, "", 30, Cfg.TX).apply {
         typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         letterSpacing = 0.02f
@@ -120,7 +116,16 @@ class BarraTopo(
 
     /** Coloca a pílula do volume atrás do botão de volume (ela cresce para a direita a partir dele). */
     fun colocarPilulaVolume(pilula: View) {
-        addView(pilula, indexOfChild(volume), LayoutParams(0, 64.d()).apply { leftMargin = 240.d(); topMargin = 14.d() })
+        addView(pilula, indexOfChild(volume), LayoutParams(0, AREA.d()).apply { leftMargin = X_VOLUME.d(); topMargin = 14.d() })
+    }
+
+    companion object {
+        /** Ícones de status: todos do mesmo tamanho (desenho de 40 px numa área de toque de 64 x 64). */
+        const val TAM_ICONE = 40
+        const val AREA = 64
+        const val X_WIFI = 46
+        const val X_BLUETOOTH = 114
+        const val X_VOLUME = 182
     }
 
     /** Posição do botão de volume na barra. */
@@ -129,20 +134,17 @@ class BarraTopo(
     init {
         wifi.setOnClickListener { aoAbrirWifi() }
         bluetooth.setOnClickListener { aoAbrirBluetooth() }
-        led.setOnClickListener { aoAbrirLed() }
         volume.setOnClickListener { aoAbrirVolume() }
         energia.setOnClickListener { aoAbrirEnergia() }
 
-        addView(wifi, LayoutParams(56.d(), 56.d()).apply { leftMargin = 58.d(); topMargin = 18.d() })
-        addView(bluetooth, LayoutParams(56.d(), 56.d()).apply { leftMargin = 118.d(); topMargin = 18.d() })
-        addView(led, LayoutParams(56.d(), 56.d()).apply { leftMargin = 174.d(); topMargin = 18.d() })
-        addView(volume, LayoutParams(64.d(), 64.d()).apply { leftMargin = 240.d(); topMargin = 14.d() })
-        addView(hora, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 112.d(); topMargin = 26.d() })
-        addView(energia, LayoutParams(56.d(), 56.d(), Gravity.END or Gravity.TOP).apply { rightMargin = 40.d(); topMargin = 18.d() })
+        addView(wifi, LayoutParams(AREA.d(), AREA.d()).apply { leftMargin = X_WIFI.d(); topMargin = 14.d() })
+        addView(bluetooth, LayoutParams(AREA.d(), AREA.d()).apply { leftMargin = X_BLUETOOTH.d(); topMargin = 14.d() })
+        addView(volume, LayoutParams(AREA.d(), AREA.d()).apply { leftMargin = X_VOLUME.d(); topMargin = 14.d() })
+        addView(hora, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 118.d(); topMargin = 24.d() })
+        addView(energia, LayoutParams(AREA.d(), AREA.d(), Gravity.END or Gravity.TOP).apply { rightMargin = 36.d(); topMargin = 14.d() })
 
         wifi.estado(Color.WHITE, true)
         bluetooth.estado(Color.WHITE, true)
-        led.estado(Color.WHITE, true)
         volume.estado(Color.WHITE, false)
         energia.estado(Color.WHITE, false)
         atualizarHora()
@@ -159,14 +161,7 @@ class BarraTopo(
         if (conectado) bluetooth.estado(Color.WHITE, false, 1f, "conectado") else bluetooth.estado(Color.WHITE, true, 1f, "desconectado")
     }
 
-    /** Fita de LED: branca quando respondeu; vermelha com pontinho enquanto não responde (sem girar); apagada pelo usuário: branca a 45%. */
-    fun definirLed(online: Boolean, ligada: Boolean) {
-        when {
-            !ligada -> led.estado(Color.WHITE, false, .45f, "desligada")
-            online -> led.estado(Color.WHITE, false, 1f, "conectada")
-            else -> led.estado(Color.WHITE, true, 1f, "sem conexão")
-        }
-    }
+    /** A fita de LED não tem mais ícone na barra: o estado dela ("conectada ou não") fica dentro do menu de luzes. */
 
     /** O volume não é uma conexão: fica sempre branco; o ícone mostra o nível (0 a 10). [mudo] = cortado. */
     fun definirVolume(porcento: Int, mudo: Boolean) {

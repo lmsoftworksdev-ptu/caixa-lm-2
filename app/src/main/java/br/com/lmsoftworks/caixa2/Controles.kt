@@ -23,6 +23,8 @@ import android.widget.TextView
 
 val FONTE_NORMAL: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
 val FONTE_MEDIA: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+/** Pesos 200 e 300 da interface v2 (o Android só tem o "light" entre o fino e o normal). */
+val FONTE_LEVE: Typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
 
 fun fundoArredondado(cor: Int, raio: Int, borda: Int = 0): GradientDrawable =
     GradientDrawable().apply {

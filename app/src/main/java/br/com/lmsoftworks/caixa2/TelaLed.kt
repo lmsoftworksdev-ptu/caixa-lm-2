@@ -171,6 +171,7 @@ class TelaLed(private val c: Context, private val led: LedControle) : FrameLayou
     private val interruptor = Interruptor(c)
     private val matiz = Deslizante(c, true)
     private val brilho = Deslizante(c, false)
+    private val estadoFita = texto(c, "", 20, Cfg.MUDO)
     private val rotuloBrilho = texto(c, "", 20, Color.WHITE)
     private val sens = Deslizante(c, false)
     private val rotuloSens = texto(c, "", 20, Color.WHITE)
@@ -198,6 +199,7 @@ class TelaLed(private val c: Context, private val led: LedControle) : FrameLayou
             addView(interruptor)
         }
         esquerda.addView(topo, LinearLayout.LayoutParams(-1, -2))
+        esquerda.addView(estadoFita, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 4.d() })      // o estado da fita (antes era um ícone na barra de cima)
 
         esquerda.addView(espaco(), LinearLayout.LayoutParams(-1, 0, 0.8f))
         esquerda.addView(rotulo("Cor"))
@@ -278,6 +280,11 @@ class TelaLed(private val c: Context, private val led: LedControle) : FrameLayou
 
     fun atualizar() {
         interruptor.ligado = led.ligado
+        when {
+            led.online -> { estadoFita.text = "Fita conectada"; estadoFita.setTextColor(Cfg.OK2) }
+            led.conectandoParaTela -> { estadoFita.text = "Conectando à fita…"; estadoFita.setTextColor(Cfg.MUDO) }
+            else -> { estadoFita.text = "Fita sem conexão"; estadoFita.setTextColor(Cfg.VERM2) }
+        }
         matiz.valor = hueDe(led.cor) / 360f
         brilho.valor = (led.brilho - 5) / 95f
         rotuloBrilho.text = "Brilho  ${led.brilho}%"
