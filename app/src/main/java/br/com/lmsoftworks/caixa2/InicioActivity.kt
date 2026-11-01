@@ -122,7 +122,8 @@ class InicioActivity : Activity() {
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
-            inicio.definirProximoAlarme(alarmes.proximoTexto())
+            inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome)
+            if (musica.tocando && musica.temMusica) inicio.definirMusica(musica.titulo, musica.artista) else inicio.definirMusica(null, null)
             val proximoLembrete = lembretes.todos.firstOrNull()
             inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
@@ -375,7 +376,8 @@ class InicioActivity : Activity() {
     }
 
     private fun abrir(id: String) {
-        if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
+        if (id == "lembretes") ir("alarmes")      // a aba Lembretes entra na etapa 10
+        else if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
         else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config") ir(id)
         else Toast.makeText(this, "Em breve", Toast.LENGTH_SHORT).show()
     }
@@ -399,6 +401,7 @@ class InicioActivity : Activity() {
         if (menu == "inicio") {
             val h = Tema.fundoDaHora(Tema.horaAgora())
             fundo.tema(h.cor1, h.cor2, h.brilho)
+            inicio.definirSombra(h.sombra)
             Cfg.AZUL = Color.parseColor("#3D8BFF")
             return
         }
@@ -863,6 +866,7 @@ class InicioActivity : Activity() {
     private fun entrarOcioso() {
         if (ocioso) return
         ocioso = true
+        Animacao.pausada = true
         painelVolume.fechar()
         telaOciosa.atualizar()
         telaOciosa.alpha = 0f
@@ -876,6 +880,7 @@ class InicioActivity : Activity() {
         ultimoToque = android.os.SystemClock.uptimeMillis()
         if (!ocioso) return
         ocioso = false
+        Animacao.pausada = false
         telaOciosa.animate().cancel()
         telaOciosa.visibility = View.GONE
         if (apareceu) fundo.iniciar()
@@ -970,7 +975,7 @@ class InicioActivity : Activity() {
 
     // ------------------------------------------------------------------ alarmes
 
-    private fun aoMudarAlarmes() { inicio.definirProximoAlarme(alarmes.proximoTexto()) }
+    private fun aoMudarAlarmes() { inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome) }
 
     /** O Android trouxe o app para a frente no horário de um alarme: confere e toca. */
     override fun onNewIntent(intent: android.content.Intent) {
