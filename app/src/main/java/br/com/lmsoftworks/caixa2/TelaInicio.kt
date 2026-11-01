@@ -97,7 +97,16 @@ class CapaMini(c: Context) : View(c) {
         }
         canvas.drawRoundRect(area, raio, raio, p)
         p.shader = null
+        // sem imagem: o mesmo ícone de música da tela Tocando agora, por cima do degradê
+        if (img == null) nota?.let {
+            val t = 44.d()
+            val cx = width / 2; val cy = height / 2
+            it.setBounds(cx - t / 2, cy - t / 2, cx + t / 2, cy + t / 2)
+            it.setTint(Color.argb(190, 255, 255, 255))
+            it.draw(canvas)
+        }
     }
+    private val nota = c.getDrawable(R.drawable.ic_music)?.mutate()
 }
 
 /** Tipo de ícone animado do clima ("sol", "nublado" ou "chuva") para o código do tempo do Open-Meteo. */
