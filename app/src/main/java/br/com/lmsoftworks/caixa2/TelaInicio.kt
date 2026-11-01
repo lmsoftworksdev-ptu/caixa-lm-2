@@ -24,6 +24,82 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Texto de uma linha que, se for maior que o campo, desliza sozinho (devagar, com uma pausa no começo) para o usuário ler tudo.
+ * As pontas somem num degradê (desfoque) em vez de serem cortadas de uma vez.
+ */
+class TextoRolante(c: Context, private val texto: String, tamanho: Int, cor: Int, media: Boolean = false) : View(c) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = tamanho.d().toFloat(); color = cor; typeface = if (media) FONTE_MEDIA else FONTE_NORMAL
+    }
+    private val fade = Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT) }
+    private val largura = p.measureText(texto)
+    private val folga = 70.d().toFloat()
+    private val borda = 30.d().toFloat()
+    private val inicio = android.os.SystemClock.uptimeMillis()
+    private var gradDir: LinearGradient? = null
+    private var gradEsq: LinearGradient? = null
+
+    private companion object { const val VELOCIDADE = 38f; const val PAUSA_MS = 1800L }      // px por segundo
+
+    override fun onMeasure(w: Int, h: Int) {
+        val m = p.fontMetricsInt
+        setMeasuredDimension(MeasureSpec.getSize(w), m.descent - m.ascent + 2.d())
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        gradDir = LinearGradient(w - borda, 0f, w.toFloat(), 0f, Color.TRANSPARENT, Color.BLACK, Shader.TileMode.CLAMP)
+        gradEsq = LinearGradient(0f, 0f, borda, 0f, Color.BLACK, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val base = -p.fontMetrics.ascent + 1.d()
+        if (largura <= width) { canvas.drawText(texto, 0f, base, p); return }
+        val ciclo = largura + folga
+        val periodo = PAUSA_MS + (ciclo / VELOCIDADE * 1000f).toLong()
+        val m = (android.os.SystemClock.uptimeMillis() - inicio) % periodo
+        val off = if (m < PAUSA_MS) 0f else (m - PAUSA_MS) / 1000f * VELOCIDADE
+        val camada = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        canvas.drawText(texto, -off, base, p)
+        canvas.drawText(texto, -off + ciclo, base, p)
+        fade.shader = gradDir
+        canvas.drawRect(width - borda, 0f, width.toFloat(), height.toFloat(), fade)
+        if (off > 0f) { fade.shader = gradEsq; canvas.drawRect(0f, 0f, borda, height.toFloat(), fade) }
+        canvas.restoreToCount(camada)
+        if (isShown && !Animacao.pausada) postInvalidateOnAnimation()
+    }
+
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); postInvalidateOnAnimation() }
+}
+
+/** Capa pequena (88) com cantos arredondados: a imagem da música ou o degradê da faixa. */
+class CapaMini(c: Context) : View(c) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val area = RectF()
+    var imagem: Bitmap? = null
+        set(v) { field = v; invalidate() }
+    var semente = ""
+        set(v) { field = v; invalidate() }
+
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(88.d(), 88.d())
+
+    override fun onDraw(canvas: Canvas) {
+        area.set(0f, 0f, width.toFloat(), height.toFloat())
+        val raio = 18.d().toFloat()
+        val img = imagem
+        if (img != null) {
+            val sh = android.graphics.BitmapShader(img, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            sh.setLocalMatrix(android.graphics.Matrix().apply { setScale(width / img.width.toFloat(), height / img.height.toFloat()) })
+            p.shader = sh
+        } else {
+            val h = CapaView.matiz(semente)
+            p.shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(), CorCapa.hsl(h, .82f, .48f), CorCapa.hsl(h + 35f, .72f, .32f), Shader.TileMode.CLAMP)
+        }
+        canvas.drawRoundRect(area, raio, raio, p)
+        p.shader = null
+    }
+}
+
 /** Tipo de ícone animado do clima ("sol", "nublado" ou "chuva") para o código do tempo do Open-Meteo. */
 fun Respostas.ClimaHoje.tipo(): String = when (codigo) {
     0, 1 -> "sol"
@@ -143,6 +219,9 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private var alarmeTxt: String? = null; private var alarmeNome: String? = null
     private var lembreteTxt: String? = null; private var lembreteQuando: String? = null
     private var musicaTxt: String? = null; private var musicaArtista: String? = null
+    private var musicaCapa: Bitmap? = null; private var musicaTocando = false
+    /** Toque no play/pause do cartão de música. */
+    var aoPlayPause: (() -> Unit)? = null
     private var chave = ""
 
     init {
@@ -191,8 +270,8 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
     private fun textoLinha(a: String, b: String): LinearLayout = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
-        addView(texto(c, a, 25, Tema.TEXTO, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-        addView(texto(c, b, 18, Tema.TEXTO2).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
+        addView(TextoRolante(c, a, 25, Tema.TEXTO, true), LinearLayout.LayoutParams(-1, -2))
+        addView(TextoRolante(c, b, 18, Tema.TEXTO2), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
     }
 
     private fun linhaClima(cl: Respostas.ClimaHoje): View {
@@ -207,25 +286,93 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
             val topo = LinearLayout(c).apply {
                 gravity = Gravity.BOTTOM
                 addView(texto(c, "${cl.temp}°", 44, Tema.TEXTO).apply { typeface = FONTE_LEVE })
-                addView(texto(c, cl.descricao(), 25, Tema.TEXTO).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                addView(TextoRolante(c, cl.descricao(), 25, Tema.TEXTO),
                     LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 12.d(); bottomMargin = 4.d() })
             }
             addView(topo)
-            if (cl.cidade.isNotBlank()) addView(texto(c, cl.cidade, 18, Color.parseColor("#DDE5F7")), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 3.d() })
+            if (cl.cidade.isNotBlank()) addView(TextoRolante(c, cl.cidade, 18, Color.parseColor("#DDE5F7")), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
             val detalhe = listOfNotNull(cl.min?.let { "Mín $it°" }, cl.max?.let { "Máx $it°" }, cl.chuva?.let { "Chuva $it%" }).joinToString(" · ")
-            if (detalhe.isNotEmpty()) addView(texto(c, detalhe, 18, Tema.TEXTO2).apply { maxLines = 1 }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 3.d() })
+            if (detalhe.isNotEmpty()) addView(TextoRolante(c, detalhe, 18, Tema.TEXTO2), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
         }
         return linha("clima", caixaIcone(cor, fundo, IconeAnimado(c, tipo, cor, 30)), false, miolo)
     }
 
+    private fun linhaMusica(titulo: String): View {
+        val capa = CapaMini(c).apply { imagem = musicaCapa; semente = titulo + (musicaArtista ?: "") }
+        val textos = LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextoRolante(c, titulo, 25, Tema.TEXTO, true), LinearLayout.LayoutParams(-1, -2))
+            // o artista fica parado (se não couber, termina em "…")
+            addView(texto(c, musicaArtista ?: "Tocando agora", 18, Tema.TEXTO2).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
+        }
+        val play = FrameLayout(c).apply {
+            background = fundoArredondado(Color.WHITE, 30.d())
+            isClickable = true
+            contentDescription = if (musicaTocando) "Pausar" else "Tocar"
+            setOnClickListener { aoPlayPause?.invoke() }
+            efeitoToque()
+            addView(icone(c, if (musicaTocando) R.drawable.ic_pausar else R.drawable.ic_tocar, 30, Color.parseColor("#0A1020")), LayoutParams(30.d(), 30.d(), Gravity.CENTER))
+        }
+        return LinearLayout(c).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 20.d(), 0, 20.d())
+            isClickable = true
+            addView(capa, LinearLayout.LayoutParams(88.d(), 88.d()))
+            addView(textos, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 16.d(); rightMargin = 12.d() })
+            addView(play, LinearLayout.LayoutParams(60.d(), 60.d()))
+            setOnClickListener { aoAbrir("musica") }
+            deslizarParaFechar(this)
+        }
+    }
+
+    /** Pede para fechar o player (a música para): o usuário arrastou o cartão de música para a esquerda. */
+    var aoFecharMusica: (() -> Unit)? = null
+
+    /** Arrastar o cartão de música para a esquerda (mais de ~120 px) o fecha, como dispensar uma notificação; um toque simples abre a música. */
+    private fun deslizarParaFechar(v: View) {
+        var x0 = 0f; var y0 = 0f; var capturado = false
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; capturado = false; false }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - x0; val dy = e.rawY - y0
+                    if (!capturado && dx < -18.d() && Math.abs(dx) > Math.abs(dy)) {
+                        capturado = true
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                        view.cancelLongPress(); view.isPressed = false
+                    }
+                    if (capturado) {
+                        view.translationX = Math.min(0f, dx)
+                        view.alpha = (1f + dx / view.width).coerceIn(.2f, 1f)
+                        true
+                    } else false
+                }
+                MotionEvent.ACTION_UP -> if (capturado) {
+                    capturado = false
+                    if (view.translationX < -120.d()) {
+                        view.animate().translationX(-view.width.toFloat()).alpha(0f).setDuration(160)
+                            .withEndAction { aoFecharMusica?.invoke() }.start()
+                    } else view.animate().translationX(0f).alpha(1f).setDuration(160).start()
+                    true
+                } else false
+                MotionEvent.ACTION_CANCEL -> { if (capturado) { capturado = false; view.animate().translationX(0f).alpha(1f).setDuration(160).start() }; false }
+                else -> false
+            }
+        }
+    }
+
     /** Refaz o cartão só com os itens que existem; quem some libera o lugar e os de baixo sobem (sem buraco no meio). */
     private fun refazer() {
-        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista"
+        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista|$musicaTocando|${musicaCapa?.hashCode()}"
         if (nova == chave) return
         chave = nova
         cartao.removeAllViews()
         val linhas = ArrayList<View>()
         clima?.let { linhas.add(linhaClima(it)) }
+        // tocando agora: cartão logo abaixo do clima (miniatura, título, artista e play/pause); alarme e lembrete ficam depois
+        musicaTxt?.let { linhas.add(linhaMusica(it)) }
         alarmeTxt?.let {
             linhas.add(linha("alarmes", caixaIcone(corAlarme, Color.parseColor("#2E8B5CFF"), icone(c, R.drawable.ic_alarme, 28, corAlarme)), false,
                 textoLinha(it, "Próximo alarme" + (alarmeNome?.let { n -> " · $n" } ?: ""))))
@@ -233,13 +380,6 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
         lembreteTxt?.let {
             linhas.add(linha("lembretes", caixaIcone(corLembrete, Color.parseColor("#29FFBE5A"), icone(c, R.drawable.ic_sino, 28, corLembrete)), false,
                 textoLinha(it, "Lembrete" + (lembreteQuando?.let { q -> " · ${q.replaceFirstChar { ch -> ch.lowercase() }}" } ?: ""))))
-        }
-        musicaTxt?.let {
-            val eq = IconeAnimado(c, "eq", corMusica, 56)
-            linhas.add(linha("musica", FrameLayout(c).apply {
-                background = fundoArredondado(Color.parseColor("#2946DC96"), 18.d())
-                addView(eq, LayoutParams(56.d(), 56.d()))
-            }, false, textoLinha(it, (musicaArtista?.let { a -> "$a · " } ?: "") + "tocando agora")))
         }
         for ((i, l) in linhas.withIndex()) {
             cartao.addView(l, LinearLayout.LayoutParams(-1, -2))
@@ -257,7 +397,10 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     fun definirLembrete(texto: String?, quando: String?) { lembreteTxt = texto; lembreteQuando = quando; refazer() }
 
     /** Tocando agora: [titulo] e [artista]; nulo some com o item. */
-    fun definirMusica(titulo: String?, artista: String?) { musicaTxt = titulo?.ifBlank { null }; musicaArtista = artista?.ifBlank { null }; refazer() }
+    fun definirMusica(titulo: String?, artista: String?, capa: Bitmap? = null, tocando: Boolean = false) {
+        musicaTxt = titulo?.ifBlank { null }; musicaArtista = artista?.ifBlank { null }; musicaCapa = capa; musicaTocando = tocando
+        refazer()
+    }
 
     /** Cor da sombra do relógio (muda com a hora do dia). */
     fun definirSombra(rgb: Int) {

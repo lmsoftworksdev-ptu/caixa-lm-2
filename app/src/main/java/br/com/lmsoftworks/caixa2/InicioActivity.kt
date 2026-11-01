@@ -123,7 +123,8 @@ class InicioActivity : Activity() {
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome)
-            if (musica.tocando && musica.temMusica) inicio.definirMusica(musica.titulo, musica.artista) else inicio.definirMusica(null, null)
+            val dispensada = android.os.SystemClock.uptimeMillis() < musicaDispensadaAte || (musicaDispensada == musica.titulo + musica.artista && !musica.tocando)
+            if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando) else inicio.definirMusica(null, null)
             val proximoLembrete = lembretes.todos.firstOrNull()
             inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
@@ -162,6 +163,13 @@ class InicioActivity : Activity() {
         gesto = GestoVoltar(this)
         barra.translationZ = 30f; painelVolume.translationZ = 20f; gesto.translationZ = 30f      // acima das telas que deslizam
         inicio = TelaInicio(this) { abrir(it) }
+        inicio.aoFecharMusica = {
+            musicaDispensada = musica.titulo + musica.artista
+            musicaDispensadaAte = android.os.SystemClock.uptimeMillis() + 1500      // dá tempo de o player confirmar que parou
+            if (musica.emLocal) playerMidia.parar() else musica.pausar()
+            inicio.definirMusica(null, null)
+        }
+        inicio.aoPlayPause = { semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000; musica.alternar() }      // play/pause no Início não abre a tela da música
         telaWifi = TelaWifi(this, wifi)
         telaWifi.visibility = View.GONE
         telaBluetooth = TelaBluetooth(this, bluetooth)
@@ -349,7 +357,9 @@ class InicioActivity : Activity() {
         val t = android.os.SystemClock.uptimeMillis() / 1000f
         val corFita = led.corDestaque(t)
         fundo.tema(corFita, Color.rgb((Color.red(corFita) * .45f).toInt(), (Color.green(corFita) * .45f).toInt(), (Color.blue(corFita) * .45f).toInt()))
-        Cfg.AZUL = Cfg.COR_FIXA   // o fundo acompanha a fita, mas os botões ficam na cor padrão
+        val antes = Cfg.AZUL
+        Cfg.AZUL = if (corFita == Color.WHITE) Cfg.COR_FIXA else corFita      // o destaque da tela é a cor da fita (branca: azul)
+        if (Cfg.AZUL != antes) telaLed.atualizar()      // os cartões e deslizadores seguem a cor sem precisar mexer neles
     }
 
     private fun aoMudarLed() {
@@ -357,10 +367,15 @@ class InicioActivity : Activity() {
         if (atual == "led") telaLed.atualizar()
     }
 
+    /** Até esse instante a música que começar a tocar NÃO abre sozinha a tela Tocando agora (foi o play do cartão do Início). */
+    private var semAbrirMusicaAte = 0L
+    private var musicaDispensada = ""          // faixa fechada com o gesto no cartão do Início: o cartão só volta quando ela tocar de novo
+    private var musicaDispensadaAte = 0L
+
     private fun aoMudarMusica() {
         if (atual == "musica") { telaMusica.atualizar(); aplicarTema("musica"); atualizarLedDaMusica() }   // a cor da capa pode chegar depois
         // quando alguém começa a tocar pelo Bluetooth, abre sozinho a tela Tocando agora
-        if (musica.tocando && !tocandoAntes && atual == "inicio") ir("musica")
+        if (musica.tocando && !tocandoAntes && atual == "inicio" && android.os.SystemClock.uptimeMillis() > semAbrirMusicaAte) ir("musica")
         tocandoAntes = musica.tocando
     }
 
@@ -414,6 +429,7 @@ class InicioActivity : Activity() {
             val h = Tema.fundoDaHora(Tema.horaAgora())
             fundo.tema(h.cor1, h.cor2, h.brilho)
             inicio.definirSombra(h.sombra)
+            corFundoMenu = h.cor1
             Cfg.AZUL = Color.parseColor("#3D8BFF")
             return
         }
@@ -428,6 +444,7 @@ class InicioActivity : Activity() {
             else -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
         }
         fundo.tema(Color.parseColor(a), Color.parseColor(b))
+        corFundoMenu = Color.parseColor(a)
         Cfg.AZUL = Color.parseColor(destaque)
     }
 
@@ -441,8 +458,11 @@ class InicioActivity : Activity() {
     }
 
     /** Ambilight (modo da fita): na tela de música ela acompanha a cor da capa; no vídeo, a cor da imagem (ver [tique]). Fora disso, volta à cor escolhida. */
+    /** Cor de fundo do menu atual: é a que o Ambilight da fita segue quando não há capa de música nem vídeo na tela. */
+    private var corFundoMenu: Int? = null
+
     private fun atualizarLedDaMusica() {
-        var cor: Int? = null
+        var cor: Int? = if (atual == "led") null else corFundoMenu
         if (atual == "musica" && musica.temMusica) {
             val tema = temaMusica()
             cor = if (corCapa == null) Color.BLACK else Color.parseColor(tema.first)      // preto = fita apagada
