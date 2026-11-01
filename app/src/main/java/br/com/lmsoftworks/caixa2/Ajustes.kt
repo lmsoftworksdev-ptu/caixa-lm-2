@@ -53,7 +53,7 @@ object Ajustes {
         mostrarResposta = p.getBoolean("mostrarResposta", true)
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
         avisoVolumeMax = p.getBoolean("avisoVolumeMax", true)
-        volumeVoz = p.getInt("volumeVoz", 6).coerceIn(1, 10)
+        volumeVoz = p.getInt("volumeVozNivel", 6).coerceIn(1, 10)
         nomeAparelho = p.getString("nomeAparelho", "LM Sound") ?: "LM Sound"
         cidadeNome = p.getString("cidadeNome", "") ?: ""
         cidadeLat = p.getFloat("cidadeLat", 0f).toDouble()
@@ -70,7 +70,7 @@ object Ajustes {
     fun definirMostrarResposta(v: Boolean) { mostrarResposta = v; guardar { putBoolean("mostrarResposta", v) } }
     fun definirSensMic(v: Int) { sensMic = v.coerceIn(1, 10); guardar { putInt("sensMic", sensMic) } }
     fun definirAvisoVolumeMax(v: Boolean) { avisoVolumeMax = v; guardar { putBoolean("avisoVolumeMax", v) } }
-    fun definirVolumeVoz(v: Int) { volumeVoz = v.coerceIn(1, 10); guardar { putInt("volumeVoz", volumeVoz) } }
+    fun definirVolumeVoz(v: Int) { volumeVoz = v.coerceIn(1, 10); guardar { putInt("volumeVozNivel", volumeVoz) } }
     fun definirNome(n: String) { nomeAparelho = n.trim().ifEmpty { "LM Sound" }; guardar { putString("nomeAparelho", nomeAparelho) } }
 
     fun definirCidade(nome: String, lat: Double, lon: Double) {
