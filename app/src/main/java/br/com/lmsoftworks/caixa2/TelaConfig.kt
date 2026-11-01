@@ -29,7 +29,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private val secoes = listOf(
         Secao("tela", "Tela", "Brilho e modo ocioso", R.drawable.ic_bulb),
         Secao("som", "Som", "Volume e avisos", R.drawable.ic_volume_2),
-        Secao("assistente", "Assistente", "Palavra de ativação e voz", R.drawable.ic_mic),
+        Secao("assistente", "Assistente", "Resposta e microfone", R.drawable.ic_mic),
         Secao("conexoes", "Conexões", "Wi-Fi, Bluetooth e fita", R.drawable.ic_wifi),
         Secao("sistema", "Sistema", "Versão e energia", R.drawable.ic_config)
     )
@@ -155,7 +155,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 }))
                 val tempos = listOf("30 s" to 30, "1 min" to 60, "5 min" to 300, "Nunca" to 0)
                 opcoes.addView(linha("Modo ocioso", "Tela preta só com a hora, depois de um tempo sem uso",
-                    escolhas(tempos.map { it.first }, tempos.indexOfFirst { it.second == Ajustes.ociosoSeg }.coerceAtLeast(1)) { i -> Ajustes.definirOcioso(tempos[i].second); montar() }))
+                    escolhas(tempos.map { it.first }, tempos.indexOfFirst { it.second == Ajustes.ociosoSeg }.let { if (it < 0) 1 else it }) { i -> Ajustes.definirOcioso(tempos[i].second); montar() }))
                 opcoes.addView(linha("Escurecer no modo ocioso", "Baixa o brilho da tela quando fica ociosa",
                     interruptor(Ajustes.escurecerOcioso) { Ajustes.definirEscurecer(it) }))
             }
@@ -167,10 +167,6 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     escolhas(listOf("Suave", "Médio", "Alto"), Ajustes.volumeAlarme) { i -> Ajustes.definirVolumeAlarme(i); montar() }))
             }
             "assistente" -> {
-                opcoes.addView(linha("Palavra de ativação", "Por enquanto só \"Alexa\" funciona; as outras entram depois",
-                    escolhas(listOf("Alexa", "Caixa", "Computador"), 0) { i ->
-                        if (i != 0) Toast.makeText(c, "Em breve: por enquanto só \"Alexa\"", Toast.LENGTH_SHORT).show()
-                    }))
                 opcoes.addView(linha("Mostrar resposta na tela", "A resposta escrita no alto da tela do assistente",
                     interruptor(Ajustes.mostrarResposta) { Ajustes.definirMostrarResposta(it) }))
                 opcoes.addView(linha("Sensibilidade do microfone", "Quanto mais alto, de mais longe ele ouve a palavra de ativação",
