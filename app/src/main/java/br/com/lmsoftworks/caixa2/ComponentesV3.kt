@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 /** Rótulo de seção da v3: 15, MAIÚSCULAS, espaçamento 1,6, cor terciária. */
@@ -79,4 +80,9 @@ fun linhaDetalhe(c: Context, rotulo: String, valor: String): LinearLayout = Line
     addView(texto(c, rotulo, 21, Tema.TEXTO3), LinearLayout.LayoutParams(190.d(), -2))
     addView(texto(c, valor, 21, Tema.TEXTO), LinearLayout.LayoutParams(0, -2, 1f))
     setPadding(4.d(), 6.d(), 4.d(), 6.d())
+}
+
+/** ScrollView da v3: sem barra de rolagem (a tela é de toque: basta deslizar) e sem o brilho de fim de rolagem. */
+class RolagemFina(c: Context) : ScrollView(c) {
+    init { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
 }

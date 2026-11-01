@@ -44,7 +44,7 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         esquerda.addView(hero, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 20.d() })
         principal.addView(esquerda, LinearLayout.LayoutParams(404.d(), -1))
 
-        val rolagem = ScrollView(c).apply { isVerticalScrollBarEnabled = false; addView(lista) }
+        val rolagem = RolagemFina(c).apply { addView(lista) }
         val cartaoLista = FrameLayout(c).apply {
             background = cartaoVidro()
             setPadding(12.d(), 12.d(), 12.d(), 12.d())

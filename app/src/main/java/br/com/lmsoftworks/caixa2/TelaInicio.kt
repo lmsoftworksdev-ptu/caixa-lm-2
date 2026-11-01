@@ -374,7 +374,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
         // tocando agora: cartão logo abaixo do clima (miniatura, título, artista e play/pause); alarme e lembrete ficam depois
         musicaTxt?.let { linhas.add(linhaMusica(it)) }
         alarmeTxt?.let {
-            linhas.add(linha("alarmes", caixaIcone(corAlarme, Color.parseColor("#2E8B5CFF"), icone(c, R.drawable.ic_alarme, 28, corAlarme)), false,
+            linhas.add(linha("alarme-proximo", caixaIcone(corAlarme, Color.parseColor("#2E8B5CFF"), icone(c, R.drawable.ic_alarme, 28, corAlarme)), false,
                 textoLinha(it, "Próximo alarme" + (alarmeNome?.let { n -> " · $n" } ?: ""))))
         }
         lembreteTxt?.let {

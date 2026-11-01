@@ -64,11 +64,21 @@ class AlarmeControle(contexto: Context, private val aoMudar: () -> Unit) {
         aoMudar()
     }
 
+    /** Nomes personalizados que a pessoa digitou (no máximo 3; o mais antigo sai quando entra um novo). */
+    val extras: List<String> get() = (prefs.getString("nomes_extra", "") ?: "").split("|").filter { it.isNotBlank() }
+
+    fun adicionarNomeExtra(nome: String) {
+        val n = nome.trim()
+        if (n.isEmpty() || NOMES.any { it.equals(n, true) }) return
+        val l = extras.filter { !it.equals(n, true) } + n
+        prefs.edit().putString("nomes_extra", l.takeLast(3).joinToString("|")).apply()
+    }
+
     fun porId(id: Int): Alarme? = lista.firstOrNull { it.id == id }
 
     fun novo(): Alarme {
         val id = (lista.maxOfOrNull { it.id } ?: 0) + 1
-        val a = Alarme(id, 7, 0, DIAS_UTEIS, "Acordar", true)
+        val a = Alarme(id, 7, 0, DIAS_UTEIS, "", true)
         lista.add(a)
         salvar()
         return a

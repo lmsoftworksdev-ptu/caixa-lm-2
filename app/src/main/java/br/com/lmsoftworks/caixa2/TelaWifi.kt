@@ -48,7 +48,7 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         principal.addView(esquerda, LinearLayout.LayoutParams(404.d(), -1))
 
         // ----- coluna da direita -----
-        val rolagem = ScrollView(c).apply { isVerticalScrollBarEnabled = false; addView(lista) }
+        val rolagem = RolagemFina(c).apply { addView(lista) }
         val cartaoLista = FrameLayout(c).apply {
             background = cartaoVidro()
             setPadding(12.d(), 12.d(), 12.d(), 12.d())

@@ -38,7 +38,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
         val lista = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
         for (l in linhas) lista.addView(linha(l), LinearLayout.LayoutParams(-1, -2))
-        val rolagem = ScrollView(c).apply { isVerticalScrollBarEnabled = false; addView(lista) }
+        val rolagem = RolagemFina(c).apply { addView(lista) }
         addView(rolagem, LayoutParams(-1, -1).apply { leftMargin = 520.d(); rightMargin = 64.d(); topMargin = 96.d(); bottomMargin = 40.d() })
     }
 

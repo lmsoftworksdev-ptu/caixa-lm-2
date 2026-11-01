@@ -116,13 +116,14 @@ class InicioActivity : Activity() {
             inicio.atualizar()
             if (atual == "musica") telaMusica.atualizar()
             if (atual == "config") atualizarConfig()
+            if (atual == "alarmes") telaAlarmes.tique()
             barra.atualizarHora()
             if (atual == "inicio") aplicarTema("inicio")      // o fundo do Início acompanha a hora do dia
             alarmes.verificar()?.let { tocarAlarme(it) }
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
-            inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome)
+            inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome?.ifBlank { null })
             // a faixa fechada com o gesto só fica escondida enquanto parada: tocou de novo, o cartão volta e o pause não o esconde mais
             if (musica.tocando && android.os.SystemClock.uptimeMillis() >= musicaDispensadaAte) musicaDispensada = ""
             val dispensada = android.os.SystemClock.uptimeMillis() < musicaDispensadaAte || (musicaDispensada == musica.titulo + musica.artista && !musica.tocando)
@@ -203,7 +204,7 @@ class InicioActivity : Activity() {
         lembretes = LembreteControle(this)
         listas = ListaControle(this)
         dormir = HoraDeDormir(this)
-        telaAlarmes = TelaAlarmes(this, alarmes) { a -> tocarAlarme(a, teste = true) }
+        telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
         telaConfig.visibility = View.GONE
@@ -398,7 +399,8 @@ class InicioActivity : Activity() {
     }
 
     private fun abrir(id: String) {
-        if (id == "lembretes") ir("alarmes")      // a aba Lembretes entra na etapa 10
+        if (id == "lembretes") { telaAlarmes.abrirAba("lembretes", lembretes.todos.firstOrNull()?.id); ir("alarmes") }
+        else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
         else if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
         else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config") ir(id)
         else Toast.makeText(this, "Em breve", Toast.LENGTH_SHORT).show()
@@ -549,7 +551,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel)
+        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && telaAlarmes.emTexto)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -1150,7 +1152,7 @@ class InicioActivity : Activity() {
 
     // ------------------------------------------------------------------ alarmes
 
-    private fun aoMudarAlarmes() { inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome) }
+    private fun aoMudarAlarmes() { inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome?.ifBlank { null }) }
 
     /** O Android trouxe o app para a frente no horário de um alarme: confere e toca. */
     override fun onNewIntent(intent: android.content.Intent) {
@@ -1169,7 +1171,10 @@ class InicioActivity : Activity() {
         alarmeEhTeste = teste
         sairOcioso()                                   // alarme acorda a tela
         painelVolume.fechar(); modalEnergia.fechar()
+        musicaTocavaNoAlarme = musica.tocando
+        videoTocavaNoAlarme = telaVideo.aberto && playerMidia.tocando
         if (musica.tocando) musica.pausar()
+        if (videoTocavaNoAlarme) playerMidia.pausar()
         val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
         val canal = android.media.AudioManager.STREAM_MUSIC
         val limite = Math.round(audio.getStreamMaxVolume(canal) * PainelVolume.LIMITE_REAL)
@@ -1195,7 +1200,13 @@ class InicioActivity : Activity() {
         }
         if (soneca && !alarmeEhTeste) alarmes.adiar(a)
         alarmeEhTeste = false
+        // o que tocava antes do alarme volta a tocar do mesmo ponto (com um fade-in curto)
+        if (musicaTocavaNoAlarme) { musicaTocavaNoAlarme = false; musica.tocar() }
+        if (videoTocavaNoAlarme) { videoTocavaNoAlarme = false; if (!playerMidia.tocando) playerMidia.alternar() }
     }
+
+    private var musicaTocavaNoAlarme = false
+    private var videoTocavaNoAlarme = false
 
     /** Toca o som de início só quando o aparelho acabou de ligar (não quando o app é só reaberto ou reinstalado). */
     private fun tocarSomDeInicio() {
@@ -1261,7 +1272,7 @@ class InicioActivity : Activity() {
             "bluetooth" -> if (!telaBluetooth.voltar()) ir("inicio")
             "musica" -> ir(destinoVoltar())
             "led" -> ir("inicio")
-            "alarmes" -> ir("inicio")
+            "alarmes" -> if (!telaAlarmes.voltar()) ir("inicio")
         }
     }
 }
