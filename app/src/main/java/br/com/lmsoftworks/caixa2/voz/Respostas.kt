@@ -641,12 +641,15 @@ object Respostas {
                     .header("content-type", "application/json")
                     .post(corpo.toString().toRequestBody("application/json".toMediaType()))
                     .build()
+                val inicioMs = System.currentTimeMillis()
                 val (codigo, texto) = try {
-                    Rede.cliente(ctx, leituraSeg = 15).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
+                    Rede.cliente(ctx, leituraSeg = 8).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
                 } catch (e: Exception) {
-                    Log.d(TAG, "transcrever $modelo: falha de rede: $e")
+                    Log.d(TAG, "transcrever $modelo: falha de rede apos ${System.currentTimeMillis() - inicioMs} ms: $e")
+                    if (tentativas < 2) continue
                     return null
                 }
+                Log.d(TAG, "transcrever $modelo: HTTP $codigo em ${System.currentTimeMillis() - inicioMs} ms")
                 if (codigo == 200) {
                     return try {
                         val partes = JSONObject(texto).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
@@ -658,7 +661,7 @@ object Respostas {
                 }
                 Log.d(TAG, "transcrever $modelo: HTTP $codigo ${texto.replace(Regex("""\s+"""), " ").take(300)}")
                 if (codigo == 401 || codigo == 403) return null
-                if (codigo == 503 || codigo == 429) { Thread.sleep(1200); continue }
+                if (codigo == 503 || codigo == 429) { Thread.sleep(500); continue }
                 break
             }
         }

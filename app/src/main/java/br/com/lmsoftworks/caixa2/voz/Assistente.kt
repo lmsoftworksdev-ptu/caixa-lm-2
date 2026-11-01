@@ -347,7 +347,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         Thread {
             // busca por voz só precisa do texto; o pedido normal já vem interpretado (intenção + qual música/vídeo)
             val e = try { Respostas.entenderPedido(ctx, wav) } catch (ex: Throwable) { Log.w(TAG, "entendimento falhou", ex); null }
-            main.post { if (minha == geracao) { entendimento = e; terminouTranscricao(e?.texto, minha) } }
+            main.post { if (minha == geracao) { entendimento = e; terminouTranscricao(e?.texto, minha) } else Log.d(TAG, "resposta do Gemini ignorada: a caixa foi chamada de novo (texto=${e?.texto})") }
         }.start()
     }
 
