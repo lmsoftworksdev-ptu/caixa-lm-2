@@ -59,7 +59,7 @@ fun icone(c: Context, recurso: Int, tamanho: Int, cor: Int): ImageView =
 fun View.efeitoToque() {
     setOnTouchListener { v, e ->
         when (e.action) {
-            MotionEvent.ACTION_DOWN -> v.animate().scaleX(.96f).scaleY(.96f).setDuration(80).start()
+            MotionEvent.ACTION_DOWN -> v.animate().scaleX(.94f).scaleY(.94f).setDuration(120).start()
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
         }
         false
@@ -71,33 +71,73 @@ fun botao(c: Context, rotulo: String, cor: Int, aoClicar: () -> Unit): TextView 
         text = rotulo
         setTextColor(Color.WHITE)
         setTextSize(TypedValue.COMPLEX_UNIT_PX, 22.d().toFloat())
-        typeface = FONTE_NORMAL
+        typeface = FONTE_MEDIA
         gravity = Gravity.CENTER
-        setPadding(28.d(), 14.d(), 28.d(), 14.d())
-        background = fundoArredondado(cor, 16.d(), if (cor == Cfg.LINHA) Cfg.LINHA else 0)
+        minimumHeight = 64.d()
+        setPadding(28.d(), 0, 28.d(), 0)
+        // botão comum = translúcido com borda; principal (qualquer outra cor) = cor de destaque
+        val comum = cor == Cfg.LINHA || cor == Tema.BOTAO
+        background = if (comum) fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA) else fundoArredondado(cor, Tema.RAIO_BOTAO.d())
         isClickable = true
         setOnClickListener { aoClicar() }
         efeitoToque()
     }
 
-/** Interruptor liga/desliga (64 x 34 no projeto). */
+/** Cartão "vidro" da v3 (sem desfoque): cor translúcida, borda de 1 px e raio 28. */
+fun cartaoVidro(raio: Int = Tema.RAIO_CARTAO.d()): GradientDrawable = fundoArredondado(Tema.CARTAO, raio, Tema.CARTAO_BORDA)
+
+/** Interruptor liga/desliga da v3 (76 x 42 no projeto, bolinha de 32 que desliza em 280 ms). */
 class Interruptor(c: Context) : View(c) {
     var ligado = true
-        set(v) { field = v; invalidate() }
+        set(v) {
+            if (field == v) return
+            field = v
+            animar()
+        }
     var aoMudar: ((Boolean) -> Unit)? = null
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var pos = 1f          // 0 = desligado, 1 = ligado
+    private var anim: android.animation.ValueAnimator? = null
 
-    init { setOnClickListener { aoMudar?.invoke(!ligado) } }
+    init {
+        setOnClickListener { aoMudar?.invoke(!ligado) }
+    }
 
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(64.d(), 34.d())
+    private fun animar() {
+        anim?.cancel()
+        val alvo = if (ligado) 1f else 0f
+        if (!isShown) { pos = alvo; invalidate(); return }
+        anim = android.animation.ValueAnimator.ofFloat(pos, alvo).apply {
+            duration = Tema.INTERRUPTOR_MS
+            interpolator = Tema.CURVA
+            addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); pos = if (ligado) 1f else 0f }
+
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(76.d(), 42.d())
 
     override fun onDraw(canvas: Canvas) {
         val a = height.toFloat()
-        p.color = if (ligado) Cfg.AZUL else Color.parseColor("#2AFFFFFF")
+        p.color = Cfg.AZUL
+        p.alpha = (255 * pos).toInt()
+        val fundoOff = Tema.DESLIGADO
+        p.color = fundoOff
         canvas.drawRoundRect(0f, 0f, width.toFloat(), a, a / 2, a / 2, p)
+        p.color = Cfg.AZUL
+        p.alpha = (255 * pos).toInt()
+        canvas.drawRoundRect(0f, 0f, width.toFloat(), a, a / 2, a / 2, p)
+        p.alpha = 255
+        val r = 16.d().toFloat()
+        val x0 = 5.d() + r
+        val x1 = width - 5.d() - r
+        val cx = x0 + (x1 - x0) * pos
+        p.color = Color.argb(70, 0, 0, 0)
+        canvas.drawCircle(cx, a / 2 + 1.5f.d(), r, p)
         p.color = Color.WHITE
-        val cx = if (ligado) width - 17.d() else 17.d()
-        canvas.drawCircle(cx.toFloat(), a / 2, 13.d().toFloat(), p)
+        canvas.drawCircle(cx, a / 2, r, p)
     }
 }
 

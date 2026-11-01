@@ -117,6 +117,7 @@ class InicioActivity : Activity() {
             if (atual == "musica") telaMusica.atualizar()
             if (atual == "config") atualizarConfig()
             barra.atualizarHora()
+            if (atual == "inicio") aplicarTema("inicio")      // o fundo do Início acompanha a hora do dia
             alarmes.verificar()?.let { tocarAlarme(it) }
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
             if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
@@ -340,7 +341,8 @@ class InicioActivity : Activity() {
 
     private fun aplicarTemaLed() {
         val t = android.os.SystemClock.uptimeMillis() / 1000f
-        fundo.tema(led.corDestaque(t), Color.parseColor("#2A1A7A"))
+        val corFita = led.corDestaque(t)
+        fundo.tema(corFita, Color.rgb((Color.red(corFita) * .45f).toInt(), (Color.green(corFita) * .45f).toInt(), (Color.blue(corFita) * .45f).toInt()))
         Cfg.AZUL = Cfg.COR_FIXA   // o fundo acompanha a fita, mas os botões ficam na cor padrão
     }
 
@@ -392,16 +394,22 @@ class InicioActivity : Activity() {
 
     /** Cores do fundo e cor de destaque de cada menu. */
     private fun aplicarTema(menu: String) {
-        // (cor 1 do fundo, cor 2 do fundo, cor de destaque do menu) — interface v2
+        // (cor 1 do fundo, cor 2 do fundo, cor de destaque do menu) — interface v3
+        if (menu == "inicio") {
+            val h = Tema.fundoDaHora(Tema.horaAgora())
+            fundo.tema(h.cor1, h.cor2, h.brilho)
+            Cfg.AZUL = Color.parseColor("#3D8BFF")
+            return
+        }
         val (a, b, destaque) = when (menu) {
-            "wifi" -> Triple("#12C7D6", "#2F6BFF", "#38D5FF")
-            "bluetooth" -> Triple("#3D8BFF", "#8A4DFF", "#5B8CFF")
+            "wifi" -> Triple("#14C9B0", "#0A5E7C", "#14B8A6")
+            "bluetooth" -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
             "musica" -> temaMusica()
-            "midia" -> Triple("#FF4F7A", "#6A4DFF", "#FF5C7A")
+            "midia" -> Triple("#FF5A4E", "#7A1E5A", "#FF5A5F")
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
-            "alarmes" -> Triple("#FF4FA3", "#7A3CFF", "#B07CFF")
-            "config" -> Triple("#4A6BFF", "#8A4DFF", "#5B8CFF")
-            else -> Triple("#2A62FF", "#7A3CFF", "#FFB84D")
+            "alarmes" -> Triple("#8B5CFF", "#3A1FA8", "#8B5CFF")
+            "config" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
+            else -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
         }
         fundo.tema(Color.parseColor(a), Color.parseColor(b))
         Cfg.AZUL = Color.parseColor(destaque)
