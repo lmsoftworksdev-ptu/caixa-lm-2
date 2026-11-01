@@ -201,7 +201,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
             "assistente" -> {
                 opcoes.addView(linha("Mostrar resposta na tela", "A resposta escrita no alto da tela do assistente",
                     interruptor(Ajustes.mostrarResposta) { Ajustes.definirMostrarResposta(it) }))
-                opcoes.addView(linha("Volume da voz", "Da resposta e dos toquinhos. O aparelho vai a este volume enquanto a Alexa está aberta e volta depois",
+                opcoes.addView(linha("Volume da voz", "Da resposta e dos toquinhos. A música abaixa para 2 enquanto a Alexa está aberta",
                     deslizador((Ajustes.volumeVoz - 1) / 9f, { "${1 + Math.round(it * 9)}" }) { f ->
                         Ajustes.definirVolumeVoz(1 + Math.round(f * 9)); br.com.lmsoftworks.caixa2.voz.Fala.aplicarVolume(c)
                     }))

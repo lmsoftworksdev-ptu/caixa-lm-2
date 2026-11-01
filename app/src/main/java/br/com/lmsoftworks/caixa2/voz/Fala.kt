@@ -27,16 +27,25 @@ object Fala {
     private var contador = 0
     private val aoTerminar = HashMap<String, () -> Unit>()
 
-    // ---- a voz da caixa sai no volume escolhido em Configurações (1 a 10), qualquer que seja o volume da música; depois o volume
-    // volta. A barra de volume não acompanha essas mudanças ([aoMexerNoVolume] avisa a tela para ignorá-las). ----
+    // ---- a voz (fala, toquinhos e som de pesquisa) sai num canal próprio, no volume "Volume da voz" de Configurações; a música
+    // (do celular ou do app) é que abaixa em fade até o nível 2 enquanto o assistente está aberto, e volta depois. ----
     private var contexto: Context? = null
-    const val CANAL = android.media.AudioManager.STREAM_MUSIC
+    @Volatile var CANAL = android.media.AudioManager.STREAM_ALARM       // voz, toquinhos e som de pesquisa
+    private const val MUSICA = android.media.AudioManager.STREAM_MUSIC
+    private const val NIVEL_MUSICA_ABAIXADA = 2                     // de 0 a 10
     var aoMexerNoVolume: (() -> Unit)? = null
     private var volumeAntes = -1
     private var volumeFixado = -1
 
-    /** Compatibilidade com a tela de Configurações: o nível novo vale na próxima fala. */
-    fun aplicarVolume(ctx: Context? = contexto) {}
+    /** Põe o canal da voz no nível de Configurações (de 1 a 10). O canal do alarme é forte: o 10 vai a 70% dele. */
+    fun aplicarVolume(ctx: Context? = contexto) {
+        ctx ?: return
+        try {
+            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * 0.7f * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            if (audio.getStreamVolume(CANAL) != alvo) audio.setStreamVolume(CANAL, alvo, 0)
+        } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
+    }
 
     private var ultimoPorApp = -1
     private var rampa: Runnable? = null
@@ -44,17 +53,17 @@ object Fala {
     /** Leva o volume do aparelho até [para] de um em um nível, em ~[ms] (fade); [aoFim] roda ao chegar. */
     private fun ir(audio: android.media.AudioManager, para: Int, ms: Long, aoFim: () -> Unit = {}) {
         rampa?.let { main.removeCallbacks(it) }
-        val passos = Math.abs(para - audio.getStreamVolume(CANAL))
+        val passos = Math.abs(para - audio.getStreamVolume(MUSICA))
         if (passos == 0) { ultimoPorApp = para; rampa = null; aoFim(); return }
         val intervalo = (ms / passos).coerceAtLeast(30L)
         val r = object : Runnable {
             override fun run() {
                 try {
-                    val atual = audio.getStreamVolume(CANAL)
+                    val atual = audio.getStreamVolume(MUSICA)
                     if (atual == para) { ultimoPorApp = para; rampa = null; aoFim(); return }
                     val prox = if (para > atual) atual + 1 else atual - 1
                     aoMexerNoVolume?.invoke()
-                    audio.setStreamVolume(CANAL, prox, 0)
+                    audio.setStreamVolume(MUSICA, prox, 0)
                     ultimoPorApp = prox
                     if (prox == para) { rampa = null; aoFim() } else main.postDelayed(this, intervalo)
                 } catch (e: Throwable) { rampa = null }
@@ -68,15 +77,15 @@ object Fala {
         val ctx = contexto ?: return
         try {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
-            if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(CANAL)
+            val alvo = Math.round(audio.getStreamMaxVolume(MUSICA) * NIVEL_MUSICA_ABAIXADA / 10f).coerceAtLeast(1)
+            if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(MUSICA)
             volumeFixado = alvo
             // com o assistente aberto a música abaixa em fade; numa fala avulsa o volume muda na hora
-            if (mantido) ir(audio, alvo, 450) else if (audio.getStreamVolume(CANAL) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, alvo, 0); ultimoPorApp = alvo }
+            if (mantido) ir(audio, alvo, 450) else if (audio.getStreamVolume(MUSICA) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(MUSICA, alvo, 0); ultimoPorApp = alvo }
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
     }
 
-    /** Enquanto o assistente está aberto (ouvindo, pensando, falando) o volume fica no nível da voz: cobre também os toquinhos e o som de pesquisa. */
+    /** Enquanto o assistente está aberto (ouvindo, pensando, falando) a música fica abaixada. */
     @Volatile private var mantido = false
 
     fun prenderVolume() { mantido = true; fixarVolume() }
@@ -90,7 +99,7 @@ object Fala {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             val antes = volumeAntes
             // só devolve se ninguém mexeu no volume enquanto o assistente estava aberto; a música volta em fade
-            if (audio.getStreamVolume(CANAL) == ultimoPorApp) ir(audio, antes, 900)
+            if (audio.getStreamVolume(MUSICA) == ultimoPorApp) ir(audio, antes, 900)
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }
         volumeAntes = -1; volumeFixado = -1
     }
@@ -98,6 +107,7 @@ object Fala {
     /** Chame cedo (ex.: ao ligar a voz) para o motor ja estar pronto na primeira resposta. */
     fun preparar(ctx: Context) {
         contexto = ctx.applicationContext
+        aplicarVolume()
         if (tts != null) return
         tts = TextToSpeech(ctx.applicationContext) { status ->
             val t = tts
@@ -130,7 +140,7 @@ object Fala {
         geracaoOnline++
         val id = "fala-${contador++}"
         falando = true
-        fixarVolume()
+        aplicarVolume()
         aoTerminar.clear() // QUEUE_FLUSH abaixo corta a fala anterior: ela nao deve avisar fim nenhum
         aoTerminar[id] = fim
         // Seguranca: nunca trava o fluxo, mas deixa tempo para respostas longas.
@@ -158,7 +168,7 @@ object Fala {
     private fun falarOnline(ctx: Context, texto: String, fim: () -> Unit) {
         val minha = ++geracaoOnline
         falando = true
-        fixarVolume()
+        aplicarVolume()
         aoTerminar.clear()
         Thread {
             val arquivos = ArrayList<File>()

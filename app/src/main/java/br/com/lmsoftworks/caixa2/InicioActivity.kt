@@ -312,6 +312,19 @@ class InicioActivity : Activity() {
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) { tocarAlarme(Alarme(0, 7, 0, 0, "Acordar", true), teste = true) }
         }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_ALARME"))
+        // teste do canal de som da voz: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_TOM --ei canal 4
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                br.com.lmsoftworks.caixa2.voz.Fala.CANAL = i.getIntExtra("canal", 3)
+                br.com.lmsoftworks.caixa2.voz.Fala.aplicarVolume(this@InicioActivity)
+                br.com.lmsoftworks.caixa2.voz.Fala.prenderVolume()
+                br.com.lmsoftworks.caixa2.voz.TonsVoz.ativacao()
+                relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.fimEscuta() }, 1500)
+                relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.Fala.falar(this@InicioActivity, "Teste de voz da caixa") { br.com.lmsoftworks.caixa2.voz.Fala.soltarVolume() } }, 7000)
+                relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.comecarPensando(this@InicioActivity) }, 3000)
+                relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.TonsVoz.pararPensando() }, 6000)
+            }
+        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_TOM"))
         // abre um menu como se tivesse tocado nele: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_IR --es para wifi
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) { ir(i.getStringExtra("para") ?: "inicio") }
