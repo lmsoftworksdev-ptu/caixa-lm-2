@@ -64,7 +64,13 @@ object Atualizador {
         conferir(c)
     }
 
-    private fun conferir(c: Context) {
+    /** "Verificar atualização" da tela Configurações: confere agora e diz o resultado em uma frase. */
+    fun verificarAgora(c: Context, aoResultado: (String) -> Unit) {
+        if (conferindo) { aoResultado("Já estou verificando…"); return }
+        conferir(c, aoResultado)
+    }
+
+    private fun conferir(c: Context, aviso: ((String) -> Unit)? = null) {
         if (REPOSITORIO.startsWith("SEU-USUARIO") || conferindo) return
         conferindo = true
         val app = c.applicationContext
@@ -85,9 +91,10 @@ object Atualizador {
                 if (url != null && codigo > versaoInstalada(app)) {
                     val v = VersaoNova(codigo, json.optString("name", "versão $codigo"), url, tam)
                     principal.post { pendente = v; aoHaAtualizacao?.invoke(v) }
-                }
+                } else principal.post { aviso?.invoke("A caixa já está na versão mais recente.") }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel conferir atualizacao", e)
+                principal.post { aviso?.invoke("Não consegui verificar agora. Confira a internet.") }
             } finally { conferindo = false }
         }.start()
     }

@@ -1,5 +1,6 @@
 package br.com.lmsoftworks.caixa2.voz
 
+import br.com.lmsoftworks.caixa2.Ajustes
 import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -21,6 +22,7 @@ import kotlin.math.sin
 /** Sons curtos e suaves do assistente, gerados na hora (sem arquivos): ativação, confirmação e erro. */
 object TonsVoz {
     private fun tocar(notas: List<Pair<Double, Int>>) {
+        if (!Ajustes.sonsResposta) return
         Thread {
             try {
                 val taxa = 22050
@@ -46,7 +48,7 @@ object TonsVoz {
 
     /** O som de "pensando" do projeto anterior (som_pesquisando.mp3): fica repetindo, baixinho, até a caixa terminar de pensar. */
     fun comecarPensando(ctx: Context) {
-        if (pensando != null) return
+        if (pensando != null || !Ajustes.sonsResposta) return
         try {
             val mp = android.media.MediaPlayer()
             val afd = ctx.resources.openRawResourceFd(br.com.lmsoftworks.caixa2.R.raw.som_pesquisando)

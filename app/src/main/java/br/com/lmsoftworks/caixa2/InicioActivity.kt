@@ -135,7 +135,7 @@ class InicioActivity : Activity() {
             inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
             if (!ocioso) {
-                if (android.os.SystemClock.uptimeMillis() - ultimoToque > IDLE_MS && !ocupado()) entrarOcioso()
+                if (android.os.SystemClock.uptimeMillis() - ultimoToque > Ajustes.ociosoMs() && !ocupado()) entrarOcioso()
             } else {
                 telaOciosa.atualizar()
                 if (tocandoMusica()) sairOcioso()      // alguém começou a tocar: acorda
@@ -153,6 +153,8 @@ class InicioActivity : Activity() {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
         Cfg.iniciar(this)
+        Ajustes.iniciar(this)
+        aplicarBrilho()
 
         wifi = WifiControle(this) { aoMudarWifi() }
         fundo = FundoView(this)
@@ -210,6 +212,12 @@ class InicioActivity : Activity() {
         telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas) { a -> tocarAlarme(a, teste = true) }
         telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
+        telaConfig.lerVolume = { Math.round(painelVolume.porcento / 10f) }
+        telaConfig.definirVolume = { n -> painelVolume.definirSilencioso(n * 10) }
+        telaConfig.aoMudarBrilho = { aplicarBrilho() }
+        telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
+        telaConfig.aoEnergia = { modalEnergia.abrir() }
+        telaConfig.versao = try { "" + packageManager.getPackageInfo(packageName, 0).versionName + " (" + Atualizador.versaoInstalada(this) + ")" } catch (e: Exception) { "" }
         telaPrevisao = TelaPrevisao(this) { buscarPrevisao() }
         telaPrevisao.visibility = View.GONE
         telaConfig.visibility = View.GONE
@@ -228,7 +236,7 @@ class InicioActivity : Activity() {
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaConfig, FrameLayout.LayoutParams(-1, -1))
+            addView(telaConfig, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaPrevisao, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(painelVolume, FrameLayout.LayoutParams(-1, -1))
             addView(barra, FrameLayout.LayoutParams(-1, 104.d()))
@@ -499,7 +507,7 @@ class InicioActivity : Activity() {
         else bluetooth.definirVisivel(false)
         if (destino == "led") telaLed.atualizar()
         if (destino == "alarmes") telaAlarmes.atualizar()
-        if (destino == "config") atualizarConfig()
+        if (destino == "config") { atualizarConfig(); telaConfig.atualizar() }
         if (destino == "midia") telaMidia.aoMostrar()
         if (destino == "clima") {
             // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
@@ -582,7 +590,7 @@ class InicioActivity : Activity() {
     private fun atualizarConfig() {
         telaConfig.definirEstado("wifi", if (!wifi.ligado) "Desligado" else wifi.conectadoSsid?.let { "Conectado a $it" } ?: "Sem rede conectada")
         telaConfig.definirEstado("bluetooth", if (!bluetooth.ligado) "Desligado" else bluetooth.nomeConectado()?.let { "Conectado a $it" } ?: "Visível como “${bluetooth.nomeCaixa}”")
-        telaConfig.definirEstado("alarmes", alarmes.proximoTexto()?.let { "Próximo: $it" } ?: "Nenhum alarme ligado")
+        telaConfig.definirEstado("led", when { led.online -> "Conectada" + if (!led.ligado) " · desligada" else ""; led.conectandoParaTela -> "Conectando…"; else -> "Sem conexão" })
     }
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
@@ -1084,7 +1092,12 @@ class InicioActivity : Activity() {
         telaOciosa.visibility = View.VISIBLE
         telaOciosa.animate().alpha(1f).setDuration(600).start()
         fundo.parar()
-        val lp = window.attributes; lp.screenBrightness = 0.05f; window.attributes = lp
+        val lp = window.attributes; lp.screenBrightness = if (Ajustes.escurecerOcioso) 0.05f else Ajustes.brilho / 100f; window.attributes = lp
+    }
+
+    /** Brilho da tela escolhido em Configurações (fora do modo ocioso). */
+    private fun aplicarBrilho() {
+        val lp = window.attributes; lp.screenBrightness = Ajustes.brilho / 100f; window.attributes = lp
     }
 
     private fun sairOcioso() {
@@ -1095,7 +1108,7 @@ class InicioActivity : Activity() {
         telaOciosa.animate().cancel()
         telaOciosa.visibility = View.GONE
         if (apareceu) fundo.iniciar()
-        val lp = window.attributes; lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE; window.attributes = lp
+        aplicarBrilho()
     }
 
     /** Deslizar do canto esquerdo para a direita volta uma tela: a caixa gira acompanhando o dedo. */
@@ -1214,7 +1227,7 @@ class InicioActivity : Activity() {
         val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
         val canal = android.media.AudioManager.STREAM_MUSIC
         val limite = Math.round(audio.getStreamMaxVolume(canal) * PainelVolume.LIMITE_REAL)
-        val piso = Math.round(limite * 0.4f)
+        val piso = Math.round(limite * Ajustes.pisoAlarme())
         volumeAntesDoAlarme = audio.getStreamVolume(canal)
         if (volumeAntesDoAlarme < piso) audio.setStreamVolume(canal, piso, 0)
         telaAlarmeTocando.mostrar(a)

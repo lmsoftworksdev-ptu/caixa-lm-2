@@ -1,5 +1,6 @@
 package br.com.lmsoftworks.caixa2.voz
 
+import br.com.lmsoftworks.caixa2.Ajustes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -149,7 +150,8 @@ class EscutaAssistente(
                     // modo chamada, só com voz: guarda 3 blocos de antes e segue 8 blocos (0,8 s) depois de a voz parar
                     if (pisoSala < 0f) pisoSala = max(3f, rmsBruto)
                     pisoSala = if (rmsBruto < pisoSala) max(3f, rmsBruto) else pisoSala * 0.9995f + rmsBruto * 0.0005f
-                    val voz = rmsBruto > max(45f, pisoSala * 1.8f)      // sensível: pega voz mais baixa ou mais longe
+                    val k = Ajustes.fatorMic()      // sensibilidade escolhida em Configurações (5 = como era)
+                    val voz = rmsBruto > max(45f * k, pisoSala * 1.8f * k)      // sensível: pega voz mais baixa ou mais longe
                     if (voz) restoVoz = 10 else if (restoVoz > 0) restoVoz--
                     val copia = bloco.copyOf(n)
                     if (voz || restoVoz > 0) {

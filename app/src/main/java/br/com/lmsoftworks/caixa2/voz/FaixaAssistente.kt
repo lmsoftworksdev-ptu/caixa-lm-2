@@ -1,5 +1,6 @@
 package br.com.lmsoftworks.caixa2.voz
 
+import br.com.lmsoftworks.caixa2.Ajustes
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -220,7 +221,7 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
 
     fun respondendo(resposta: String, dito: String = "") {
         abrir(3)
-        rotulo.text = ""; linha.text = resposta
+        rotulo.text = ""; linha.text = if (Ajustes.mostrarResposta) resposta else ""
         linha.setTextColor(Color.parseColor("#D6E4FF"))
     }
 
