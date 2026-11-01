@@ -122,6 +122,9 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private var comecarTocando = true
 
+    /** Dada uma faixa, devolve o vídeo (clipe) dela; o áudio da música passa a vir dele. Chamado fora da thread principal. */
+    var achador: ((Resultado) -> Resultado?)? = null
+
     // ---------------------------------------------------------------- troca música <-> clipe sem esperar
 
     private val videoPre = LinkedHashMap<String, Fonte>()
@@ -161,7 +164,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         carregarCapa(r, minha)
         Thread {
             try {
-                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
+                val t0 = SystemClock.uptimeMillis()
+                // música do YouTube: o áudio vem do vídeo (clipe) da faixa, para o que se ouve ser sempre o que o vídeo mostra
+                val alvo = if (!video && pronta == null) (try { achador?.invoke(r) } catch (e: Exception) { null }) ?: r else r
+                val t1 = SystemClock.uptimeMillis()
+                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(alvo.url, soAudio = !video)
+                Log.d(TAG, "faixa '${r.titulo}': achar o clipe ${t1 - t0} ms + abrir o áudio ${SystemClock.uptimeMillis() - t1} ms (${if (alvo.url == r.url) "áudio da faixa" else "áudio do clipe"})")
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
@@ -375,7 +383,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             preparando = true
             val minha = geracao
             Thread {
-                val f = try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
+                val f = try { YouTube.resolver((try { achador?.invoke(prox) } catch (e: Exception) { null } ?: prox).url, soAudio = true) } catch (e: Exception) { null }
                 handler.post {
                     preparando = false
                     if (f != null && minha == geracao && !ehVideo) { preparada = Preparada(prox, f); prepararProximo() }

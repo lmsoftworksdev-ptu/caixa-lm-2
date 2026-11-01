@@ -169,17 +169,22 @@ class InicioActivity : Activity() {
         telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") }) { videoDaMusica() }
         telaMusica.visibility = View.GONE
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
+        // toda música tocada pelo app usa o áudio do clipe da faixa (achado e guardado aqui; bloqueante, roda fora da thread principal)
+        playerMidia.achador = { r ->
+            clipesProntos[r.url] ?: acharClipe(r.titulo, r.canal.removeSuffix(" - Topic"), r.duracaoSeg)?.also { clipesProntos[r.url] = it }
+        }
         musica.local = playerMidia
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
+        telaMidia.aoAbrirWifi = { ir("wifi") }
         telaMidia.visibility = View.GONE
-        telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { fecharVideoAnimado() }) { fecharVideoAnimado() }
+        telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
         telaMidia.aoMicrofone = {
             assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { parcial -> telaMidia.mostrarParcial(parcial) }, { texto ->
                 telaMidia.ouvindoVoz(false)
-                if (texto != null) telaMidia.pesquisar(texto)
+                if (texto != null) telaMidia.pesquisar(texto) else telaMidia.avisoBusca("Não ouvi. Toque no microfone e fale de novo.")
             })
         }
         telaLed = TelaLed(this, led)
@@ -824,13 +829,36 @@ class InicioActivity : Activity() {
     private var capaDaMusica: android.graphics.Bitmap? = null
     private var musicaTocavaAntes = false
     private var pedidoClipe = 0
-    private val clipesProntos = HashMap<String, Resultado>()
+    private val clipesProntos = java.util.concurrent.ConcurrentHashMap<String, Resultado>()
     private var ultimoPrefetch = ""
 
-    /** Acha o clipe oficial de uma faixa (o primeiro vídeo de 30 s a 15 min, de preferência sem "ao vivo"). */
-    private fun acharClipe(titulo: String, artista: String): Resultado? = try {
-        YouTube.buscar("$titulo $artista clipe oficial", false)
-            .let { l -> l.firstOrNull { it.duracaoSeg in 30..900 && !it.titulo.contains("ao vivo", true) } ?: l.firstOrNull { it.duracaoSeg in 30..900 } }
+    private fun normalizar(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
+
+    private val palavrasComuns = setOf("feat", "com", "part", "video", "oficial", "official", "clipe", "audio", "lyrics", "letra", "the", "and", "dos", "das")
+    private fun palavras(s: String): Set<String> = normalizar(s).split(" ").filter { it.length > 2 && it !in palavrasComuns }.toSet()
+    private fun ehAoVivo(s: String): Boolean = normalizar(s).let { it.contains("ao vivo") || it.contains(" live") || it.startsWith("live") || it.contains("acustico") }
+
+    /**
+     * Acha o vídeo que corresponde à faixa: entre os resultados de 30 s a 15 min, pontua quem tem as palavras do título e o artista,
+     * é "ao vivo" só se a faixa for, e tem a duração mais próxima da da faixa (a mais forte pista de ser a mesma gravação).
+     */
+    private fun acharClipe(titulo: String, artista: String, duracaoSeg: Long = 0L): Resultado? = try {
+        val lista = YouTube.buscar("$titulo $artista clipe oficial", false).filter { it.duracaoSeg in 30..900 }
+        val pt = palavras(titulo.replace(Regex("\\(.*?\\)"), " ")); val pa = palavras(artista)
+        val aoVivo = ehAoVivo(titulo)
+        lista.maxByOrNull { r ->
+            val rt = normalizar(r.titulo + " " + r.canal)
+            var pts = 0.0
+            if (pt.isNotEmpty()) { val ach = pt.count { rt.contains(it) }; pts += 4.0 * ach / pt.size - (if (ach * 2 < pt.size) 3.0 else 0.0) }
+            if (pa.isNotEmpty() && pa.any { rt.contains(it) }) pts += 2.0
+            pts += if (ehAoVivo(r.titulo) == aoVivo) 1.0 else -3.0
+            if (duracaoSeg > 0) {
+                val dif = kotlin.math.abs(r.duracaoSeg - duracaoSeg)
+                pts += when { dif <= 8 -> 4.0; dif <= 20 -> 2.0; dif <= 45 -> 0.0; else -> -2.0 }
+            }
+            pts
+        }
     } catch (e: Exception) { null }
 
     /** Música do app tocando: já deixa o clipe achado e o endereço dele resolvido, para o seletor abrir sem demora. */
@@ -838,17 +866,18 @@ class InicioActivity : Activity() {
         val faixa = playerMidia.item ?: return
         if (playerMidia.ehVideo || !playerMidia.tocando || faixa.url == ultimoPrefetch) return
         ultimoPrefetch = faixa.url
-        val tit = faixa.titulo; val art = faixa.canal.removeSuffix(" - Topic")
+        clipesProntos[faixa.url]?.let { playerMidia.prefetchVideo(it); return }      // veio de um vídeo: o vínculo já é exato
+        val tit = faixa.titulo; val art = faixa.canal.removeSuffix(" - Topic"); val dur = faixa.duracaoSeg
         Thread {
             try { Thread.sleep(4000) } catch (e: Exception) { }
-            val achado = acharClipe(tit, art) ?: return@Thread
+            val achado = acharClipe(tit, art, dur) ?: return@Thread
             relogio.post { clipesProntos[faixa.url] = achado; playerMidia.prefetchVideo(achado) }
         }.start()
     }
 
     private fun abrirVideo(lista: List<Resultado>, i: Int, inicioMs: Long = 0L) {
         videoDeMusica = false
-        telaVideo.mostrarSeletor(false)
+        telaVideo.mostrarSeletor(true)      // todo vídeo tem o seletor: a nota leva para Tocando agora com o áudio dele
         if (!telaVideo.aberto) origemVideo = atual
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
@@ -882,6 +911,24 @@ class InicioActivity : Activity() {
         }
     }
 
+    /**
+     * Toque na nota do seletor dentro do player. Vídeo que veio de uma música: volta para a música (como antes). Vídeo aberto pela
+     * Mídia (ou por voz): ele próprio vira a música de Tocando agora, com o mesmo áudio e no mesmo segundo, e o vínculo com o vídeo
+     * fica guardado, então o ícone de vídeo reabre exatamente esse vídeo.
+     */
+    private fun seletorParaMusica() {
+        if (videoDeMusica) { fecharVideoAnimado(); return }
+        val item = playerMidia.item ?: return
+        if (!playerMidia.ehVideo || girando) return
+        clipesProntos[item.url] = item
+        pedidoClipe++
+        playerMidia.virarMusica(item, playerMidia.fila, playerMidia.indice, playerMidia.capa)
+        telaVideo.mostrarSeletor(false)
+        telaVideo.fechar()
+        relogio.removeCallbacks(amostradorVideo)
+        ir("musica")
+    }
+
     /** Seletor da tela Tocando agora: abre o clipe da mesma faixa no mesmo segundo; a música para. */
     private fun videoDaMusica() {
         if (!musica.emLocal || buscandoClipe || telaVideo.aberto) return
@@ -909,7 +956,7 @@ class InicioActivity : Activity() {
         if (pronto != null) { abrirClipe(pronto); return }
         buscandoClipe = true
         Thread {
-            val achado = acharClipe(titulo, artista)
+            val achado = acharClipe(titulo, artista, faixa.duracaoSeg)
             relogio.post {
                 buscandoClipe = false
                 if (meuPedido != pedidoClipe) return@post

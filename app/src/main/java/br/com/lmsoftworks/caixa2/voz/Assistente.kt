@@ -70,6 +70,8 @@ object TonsVoz {
     }
 
     fun ativacao() = tocar(listOf(660.0 to 90, 880.0 to 120))
+    /** Fim da escuta (a pessoa parou de falar): o inverso da ativação, descendo. */
+    fun fimEscuta() = tocar(listOf(880.0 to 90, 660.0 to 120))
     fun confirmacao() = tocar(listOf(784.0 to 80, 988.0 to 110))
     fun erro() = tocar(listOf(520.0 to 100, 392.0 to 140))
 }
@@ -146,6 +148,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private var destinoBusca: ((String?) -> Unit)? = null
     private var aoOuvirBusca: (() -> Unit)? = null
     private var aoParcialBusca: ((String) -> Unit)? = null
+    private var ultimoLivre = ""      // último texto ao vivo (offline) da busca por voz
 
     val nivelMicrofone: Float get() = escuta?.nivel ?: 0f
 
@@ -200,7 +203,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             val gramaticaCmd = (FrasesRapidas.todas()).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val cmd = try { Recognizer(m, TAXA, gramaticaCmd).also { it.setWords(true) } } catch (e: Throwable) { Log.w(TAG, "sem comandos rapidos", e); null }
             // O texto ao vivo (reconhecedor sem gramática) não roda em tempo real neste aparelho e acertava pouco: desligado.
-            val livre: Recognizer? = null
+            val livre: Recognizer? = try { Recognizer(m, TAXA) } catch (e: Throwable) { Log.w(TAG, "sem texto ao vivo", e); null }
             val e = EscutaAssistente(rec, cmd, livre, { parcial -> main.post { aoPalavras(parcial) } }) { campo, json -> verificarChamada(json, campo) }
             if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
@@ -255,13 +258,15 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private fun aoPalavras(texto: String) {
         if (estado != EstadoVoz.OUVINDO_COMANDO) return
         val busca = aoParcialBusca
-        if (destinoBusca != null) busca?.invoke(texto) else faixa.digitando(texto)
+        if (destinoBusca != null) { if (texto.isNotBlank()) ultimoLivre = texto; busca?.invoke(texto) } else faixa.digitando(texto)
     }
 
     /** Chamada pelo botão do microfone da busca: ouve um pedido e entrega o texto a [aoTexto] em vez de executar. */
     fun ouvirParaBusca(aoComecar: () -> Unit, aoParcial: (String) -> Unit, aoTexto: (String?) -> Unit) {
         if (!ativo || escuta == null) { aoTexto(null); return }
         destinoBusca = aoTexto
+        ultimoLivre = ""
+        escuta?.textoAoVivo = true          // o que a pessoa fala vai aparecendo na barra de pesquisa
         aoParcialBusca = aoParcial
         aoOuvirBusca = aoComecar
         acordou()
@@ -274,6 +279,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         Fala.parar()
         escuta?.cancelarPedido()
         val busca = destinoBusca; destinoBusca = null
+        escuta?.textoAoVivo = false
         acoes.abafar(false)
         faixa.esconder()
         estado = if (escuta != null) EstadoVoz.ESPERANDO_CHAMADA else estado
@@ -291,7 +297,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         acoes.abafar(true)
         TonsVoz.ativacao()
         estado = EstadoVoz.OUVINDO_COMANDO
-        if (destinoBusca == null) faixa.ouvindo() else aoOuvirBusca?.invoke()
+        if (destinoBusca == null) { e.textoAoVivo = false; faixa.ouvindo() } else aoOuvirBusca?.invoke()
         resolvido = false
         e.gravarPedido(
             { wav -> main.post { if (minha == geracao) processarPedido(wav, minha) } },
@@ -330,7 +336,11 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             return
         }
         estado = EstadoVoz.PENSANDO
-        TonsVoz.comecarPensando(ctx)
+        if (busca != null) {
+            // busca por voz: primeiro o sinal de que parou de ouvir, só depois o som de "pesquisando"
+            TonsVoz.fimEscuta()
+            main.postDelayed({ if (minha == geracao && destinoBusca != null) TonsVoz.comecarPensando(ctx) }, 400)
+        } else TonsVoz.comecarPensando(ctx)
         if (busca == null) faixa.pensando("")
         Thread {
             // busca por voz só precisa do texto; o pedido normal já vem interpretado (intenção + qual música/vídeo)
@@ -387,11 +397,14 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         val busca = destinoBusca
         if (busca != null) {
             destinoBusca = null
+            escuta?.textoAoVivo = false
             TonsVoz.pararPensando()
             estado = EstadoVoz.ESPERANDO_CHAMADA
             acoes.abafar(false)
-            if (texto.isNullOrBlank()) TonsVoz.erro() else TonsVoz.confirmacao()
-            busca(texto?.takeIf { it.isNotBlank() })
+            // se o Gemini não respondeu (sem internet, limite), vale o que o reconhecimento offline entendeu enquanto a pessoa falava
+            val final = texto?.takeIf { it.isNotBlank() } ?: ultimoLivre.takeIf { it.isNotBlank() }
+            if (final == null) TonsVoz.erro()
+            busca(final)
             return
         }
         when {

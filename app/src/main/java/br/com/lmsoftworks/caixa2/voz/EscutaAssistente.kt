@@ -64,6 +64,8 @@ class EscutaAssistente(
     private var blocosVistos = 0
     private var blocosFala = 0
     @Volatile private var pedidoNovo = false
+    /** Liga o texto ao vivo (reconhecedor sem gramática): só na busca por voz, para não pesar nos pedidos normais. */
+    @Volatile var textoAoVivo = false
     @Volatile private var comandoFechado = false     // o Vosk já fechou uma frase que é comando fixo (pode encerrar com menos silêncio)
     private var jsonComando: String? = null          // resultado dessa frase (o finalResult vem vazio depois que o Vosk fecha)
 
@@ -236,7 +238,7 @@ class EscutaAssistente(
                             }
                         }
                         // texto ao vivo; se o reconhecimento já está atrasado, pula esta parte (os comandos e o áudio completo continuam)
-                        if (livre != null && fila.size < 12) {
+                        if (livre != null && textoAoVivo && fila.size < 12) {
                             val fechou = livre.acceptWaveForm(d, d.size)
                             val atual = lerJson(if (fechou) livre.result else livre.partialResult, if (fechou) "text" else "partial")
                             if (fechou && atual.isNotBlank()) textoLivre = (textoLivre + " " + atual).trim()

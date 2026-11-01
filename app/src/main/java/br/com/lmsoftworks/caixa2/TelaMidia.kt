@@ -70,8 +70,8 @@ class TelaMidia(
 
     companion object {
         private const val LIMITE = 12
-        private const val LARGURA_VIDEO = 228
-        private const val LADO_MUSICA = 134
+        private const val LARGURA_VIDEO = 236
+        private const val LADO_MUSICA = 128
         private const val VALIDADE_ALTA_MS = 30 * 60 * 1000L
     }
 
@@ -87,10 +87,14 @@ class TelaMidia(
     private var erro: String? = null
     private var piscar: ValueAnimator? = null
 
-    private val textoBusca = texto(c, "", 25, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-    private val dica = texto(c, "Pesquisar vídeos e músicas", 25, Color.parseColor("#B8C6E6"))
+    private val textoBusca = texto(c, "", 23, Tema.TEXTO).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+    private val dica = texto(c, "Pesquisar vídeos e músicas", 23, Tema.TEXTO3)
     private val botaoLimpar = FrameLayout(c)
     private val microfone = FrameLayout(c)
+    /** O microfone que aparece em cima do teclado (centralizado acima do 5 e do 6) quando o teclado está aberto. */
+    private val microfoneTeclado = FrameLayout(c)
+    /** "Abrir Wi-Fi" do estado sem internet. */
+    var aoAbrirWifi: (() -> Unit)? = null
     /** Quem trata o toque no microfone (liga a escuta do assistente). */
     var aoMicrofone: (() -> Unit)? = null
     private var pulsoMic: ValueAnimator? = null
@@ -104,37 +108,36 @@ class TelaMidia(
     init {
         // ---- barra de pesquisa ----
         barra.apply {
-            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 33.d(), Cfg.LINHA)
+            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 32.d(), Cfg.LINHA)
             isClickable = true
             setOnClickListener { abrirTeclado() }
             efeitoToque()
         }
-        val lupa = icone(c, R.drawable.ic_busca, 30, Color.parseColor("#D6E0F7"))
-        barra.addView(lupa, LayoutParams(30.d(), 30.d(), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 26.d() })
+        val lupa = icone(c, R.drawable.ic_busca, 28, Color.parseColor("#D6E0F7"))
+        barra.addView(lupa, LayoutParams(28.d(), 28.d(), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 26.d() })
         barra.addView(dica, LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d() })
-        barra.addView(textoBusca, LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d(); rightMargin = 150.d() })
+        barra.addView(textoBusca, LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d(); rightMargin = 70.d() })
         botaoLimpar.apply {
-            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 20.d())
+            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 24.d())
             visibility = View.GONE
             isClickable = true
             setOnClickListener { consulta = ""; atualizarBarra(); buscar() }
-            addView(icone(c, R.drawable.ic_fechar, 22, Color.WHITE), LayoutParams(22.d(), 22.d(), Gravity.CENTER))
+            addView(icone(c, R.drawable.ic_fechar, 24, Color.WHITE), LayoutParams(24.d(), 24.d(), Gravity.CENTER))
         }
-        barra.addView(botaoLimpar, LayoutParams(40.d(), 40.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 84.d() })
+        barra.addView(botaoLimpar, LayoutParams(48.d(), 48.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 8.d() })
         microfone.apply {
-            background = fundoArredondado(Color.parseColor("#33FFFFFF"), 25.d())
+            background = fundoArredondado(Color.parseColor("#33FFFFFF"), 24.d())
             isClickable = true
-            setOnClickListener { aoMicrofone?.invoke() ?: avisoVoz() }
+            setOnClickListener { aoMicrofone?.invoke() ?: avisoBusca("Busca por voz indisponível") }
             addView(icone(c, R.drawable.ic_mic, 28, Color.WHITE), LayoutParams(28.d(), 28.d(), Gravity.CENTER))
         }
-        barra.addView(microfone, LayoutParams(50.d(), 50.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 8.d() })
 
         // ---- conteúdo ----
         area.orientation = LinearLayout.VERTICAL
         val coluna = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        coluna.addView(barra, LinearLayout.LayoutParams(-1, 66.d()).apply { leftMargin = 48.d(); rightMargin = 48.d() })
+        coluna.addView(barra, LinearLayout.LayoutParams(-1, 64.d()).apply { leftMargin = 48.d(); rightMargin = 48.d() })
         coluna.addView(area, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 8.d() })
-        addView(coluna, LayoutParams(-1, -1).apply { topMargin = 22.d(); bottomMargin = 6.d() })
+        addView(coluna, LayoutParams(-1, -1).apply { topMargin = 32.d(); bottomMargin = 6.d() })      // a barra de busca fica em y 96 (a tela começa em 64)
 
         montarTeclado()
         addView(teclado, LayoutParams(-1, (720 - 166).d(), Gravity.BOTTOM))
@@ -212,9 +215,9 @@ class TelaMidia(
         val q = consulta.trim()
         erro?.let { mostrarErro(it); return }
         if (carregando) {
-            area.addView(cabecalho(if (q.isEmpty()) "🔥 Vídeos em alta" else "Vídeos", ""), cabLp())
+            area.addView(cabecalho(if (q.isEmpty()) "Vídeos em alta" else "Vídeos", ""), cabLp())
             area.addView(fileira(List(6) { esqueleto(true) }), fileiraLp())
-            area.addView(cabecalho(if (q.isEmpty()) "🔥 Músicas em alta" else "Músicas", ""), cabLp())
+            area.addView(cabecalho(if (q.isEmpty()) "Músicas em alta" else "Músicas", ""), cabLp())
             area.addView(fileira(List(8) { esqueleto(false) }), fileiraLp())
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
                 duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
@@ -227,15 +230,15 @@ class TelaMidia(
         val tituloV: String; val tituloM: String; val contaV: String; val contaM: String
         if (q.isEmpty()) {
             v = altaV.orEmpty(); m = altaM.orEmpty()
-            tituloV = "🔥 Vídeos em alta"; tituloM = "🔥 Músicas em alta"; contaV = v.size.toString(); contaM = m.size.toString()
+            tituloV = "Vídeos em alta"; tituloM = "Músicas em alta"; contaV = ""; contaM = ""
         } else if (resV.isNullOrEmpty() && resM.isNullOrEmpty()) {
             v = altaV.orEmpty(); m = altaM.orEmpty()
             tituloV = "Vídeos em alta"; tituloM = "Músicas em alta"; contaV = "Nada encontrado para “$q”"; contaM = ""
         } else {
             v = resV.orEmpty(); m = resM.orEmpty()
             tituloV = "Vídeos"; tituloM = "Músicas"
-            contaV = if (v.isEmpty()) "nenhum encontrado" else v.size.toString()
-            contaM = if (m.isEmpty()) "nenhuma encontrada" else m.size.toString()
+            contaV = ""
+            contaM = ""
         }
         val vv = if (v.isEmpty() && q.isNotEmpty()) altaV.orEmpty() else v
         val mm = if (m.isEmpty() && q.isNotEmpty()) altaM.orEmpty() else m
@@ -245,13 +248,13 @@ class TelaMidia(
         area.addView(fileira(mm.mapIndexed { i, r -> cartaoMusica(r) { aoMusica(mm, i) } }), fileiraLp())
     }
 
-    private fun cabLp() = LinearLayout.LayoutParams(-1, -2).apply { leftMargin = 52.d(); rightMargin = 48.d(); topMargin = 22.d(); bottomMargin = 12.d() }
+    private fun cabLp() = LinearLayout.LayoutParams(-1, -2).apply { leftMargin = 52.d(); rightMargin = 48.d(); topMargin = 18.d(); bottomMargin = 10.d() }
     private fun fileiraLp() = LinearLayout.LayoutParams(-1, -2)
 
     private fun cabecalho(titulo: String, conta: String): View = LinearLayout(c).apply {
         gravity = Gravity.BOTTOM
-        addView(texto(c, titulo, 27, Color.WHITE, true))
-        if (conta.isNotEmpty()) addView(texto(c, conta, 19, Color.parseColor("#B8C6E6")), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d(); bottomMargin = 2.d() })
+        addView(texto(c, titulo, 23, Tema.TEXTO, true))
+        if (conta.isNotEmpty()) addView(texto(c, conta, 19, Color.parseColor("#FFB3BC")), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d(); bottomMargin = 2.d() })
     }
 
     private fun fileira(cartoes: List<View>): HorizontalScrollView {
@@ -290,19 +293,19 @@ class TelaMidia(
         isClickable = true
         setOnClickListener { aoToque() }
         efeitoToque()
-        val quadro = FrameLayout(c).apply { background = fundoArredondado(Color.parseColor("#22FFFFFF"), 16.d()) }
+        val quadro = FrameLayout(c).apply { background = fundoArredondado(Color.parseColor("#22FFFFFF"), 18.d()) }
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-        arredondar(quadro, 16)
+        arredondar(quadro, 18)
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
         Miniaturas.carregar(r.miniaturas, imagem)
-        quadro.addView(texto(c, r.duracaoTexto, 17, Color.WHITE, true).apply {
-            background = fundoArredondado(Color.parseColor("#CC000000"), 7.d())
+        quadro.addView(texto(c, r.duracaoTexto, 15, Color.WHITE, true).apply {
+            background = fundoArredondado(Color.parseColor("#B8000000"), 7.d())
             setPadding(8.d(), 3.d(), 8.d(), 3.d())
         }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
-        addView(quadro, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), (LARGURA_VIDEO * 9 / 16).d()))
+        addView(quadro, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), 133.d()))
         addView(texto(c, r.titulo, 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 9.d() })
         val sub = listOf(r.canal, r.visualizacoesTexto).filter { it.isNotEmpty() }.joinToString(" · ")
-        addView(texto(c, sub, 17, Color.parseColor("#B8C6E6")).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 3.d() })
+        addView(texto(c, sub, 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 3.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
@@ -317,22 +320,27 @@ class TelaMidia(
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
         Miniaturas.carregar(r.miniaturas, imagem)
         val play = FrameLayout(c).apply {
-            background = fundoArredondado(Color.parseColor("#B3000000"), 18.d())
-            addView(icone(c, R.drawable.ic_tocar, 18, Color.WHITE), LayoutParams(18.d(), 18.d(), Gravity.CENTER))
+            background = fundoArredondado(Color.WHITE, 20.d())
+            addView(icone(c, R.drawable.ic_tocar, 20, Color.parseColor("#0A1020")), LayoutParams(20.d(), 20.d(), Gravity.CENTER))
         }
-        quadro.addView(play, FrameLayout.LayoutParams(36.d(), 36.d(), Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
+        quadro.addView(play, FrameLayout.LayoutParams(40.d(), 40.d(), Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
         addView(quadro, LinearLayout.LayoutParams(LADO_MUSICA.d(), LADO_MUSICA.d()))
-        addView(texto(c, r.titulo, 20, Color.WHITE, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 9.d() })
-        addView(texto(c, r.canal.removeSuffix(" - Topic"), 17, Color.parseColor("#B8C6E6")).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 3.d() })
+        addView(texto(c, r.titulo, 18, Color.WHITE, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 9.d() })
+        addView(texto(c, r.canal.removeSuffix(" - Topic"), 16, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 3.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
     private fun mostrarErro(msg: String) {
         val caixa = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        caixa.addView(icone(c, R.drawable.ic_wifi_off, 84, Color.WHITE), LinearLayout.LayoutParams(84.d(), 84.d()))
-        caixa.addView(texto(c, msg, 34, Color.WHITE, true), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 18.d() })
-        caixa.addView(texto(c, "Confira a internet da caixa e tente de novo.", 22, Color.parseColor("#D6E0F7")), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 8.d() })
-        caixa.addView(botao(c, "Tentar de novo", Cfg.AZUL) { erro = null; if (consulta.isBlank()) carregarAlta() else buscar() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 24.d() })
+        caixa.addView(AnelIcone(c, R.drawable.ic_wifi_off, 96, Tema.VERMELHO_SUAVE, Color.parseColor("#24FF4D5E"), 0))
+        caixa.addView(texto(c, msg, 34, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d() })
+        caixa.addView(texto(c, "Confira a internet da caixa e tente de novo.", 22, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 8.d() })
+        val botoes = LinearLayout(c).apply {
+            gravity = Gravity.CENTER
+            addView(botao(c, "Tentar de novo", Cfg.AZUL) { erro = null; if (consulta.isBlank()) carregarAlta() else buscar() })
+            addView(botao(c, "Abrir Wi-Fi", Tema.BOTAO) { aoAbrirWifi?.invoke() }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d() })
+        }
+        caixa.addView(botoes, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 24.d() })
         area.addView(caixa, LinearLayout.LayoutParams(-1, -1))
     }
 
@@ -349,17 +357,22 @@ class TelaMidia(
         pulsoMic?.cancel(); pulsoMic = null
         principal.removeCallbacks(restaurarDica)
         if (sim) {
-            fecharTeclado()
-            microfone.background = fundoArredondado(Cfg.VERMELHO, 25.d())
-            dica.text = "Ouvindo…"; dica.visibility = View.VISIBLE
-            pulsoMic = ValueAnimator.ofFloat(1f, 1.18f).apply {
+            // o teclado fica como está: o que a pessoa fala vai aparecendo na barra de pesquisa
+            microfone.background = fundoArredondado(Tema.ERRO, 24.d())
+            microfoneTeclado.background = fundoArredondado(Tema.ERRO, 32.d())
+            consulta = ""; textoBusca.text = ""; dica.visibility = View.VISIBLE     // a barra espera o texto ao vivo
+            pulsoMic = ValueAnimator.ofFloat(1f, 1.15f).apply {
                 duration = 600; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
-                addUpdateListener { microfone.scaleX = it.animatedValue as Float; microfone.scaleY = it.animatedValue as Float }
+                addUpdateListener {
+                    val v = it.animatedValue as Float
+                    microfone.scaleX = v; microfone.scaleY = v; microfoneTeclado.scaleX = v; microfoneTeclado.scaleY = v
+                }
                 start()
             }
         } else {
-            microfone.scaleX = 1f; microfone.scaleY = 1f
-            microfone.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 25.d())
+            microfone.scaleX = 1f; microfone.scaleY = 1f; microfoneTeclado.scaleX = 1f; microfoneTeclado.scaleY = 1f
+            microfone.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 24.d())
+            microfoneTeclado.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 32.d())
             restaurarDica.run()
         }
     }
@@ -380,8 +393,10 @@ class TelaMidia(
         buscar()
     }
 
-    private fun avisoVoz() {
-        dica.text = "Busca por voz em breve"
+    /** Mensagem curta na barra (ex.: a busca por voz não ouviu nada); volta ao texto normal em 2 s. */
+    fun avisoBusca(msg: String) {
+        consulta = ""; textoBusca.text = ""
+        dica.text = msg
         dica.visibility = View.VISIBLE
         principal.removeCallbacks(restaurarDica)
         principal.postDelayed(restaurarDica, 2200)
@@ -404,6 +419,14 @@ class TelaMidia(
         tecladoV3.aoDigitar = { s -> digitar(s) }
         tecladoV3.aoApagar = { apagar() }
         tecladoV3.aoAcao = { fecharTeclado(); buscar() }
+        microfoneTeclado.apply {
+            background = fundoArredondado(Color.parseColor("#33FFFFFF"), 32.d())
+            isClickable = true
+            setOnClickListener { aoMicrofone?.invoke() ?: avisoBusca("Busca por voz indisponível") }
+            efeitoToque()
+            addView(icone(c, R.drawable.ic_mic, 30, Color.WHITE), LayoutParams(30.d(), 30.d(), Gravity.CENTER))
+        }
+        teclado.addView(microfoneTeclado, LayoutParams(64.d(), 64.d(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 16.d() })
         teclado.addView(tecladoV3, LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = 12.d() })
     }
 
