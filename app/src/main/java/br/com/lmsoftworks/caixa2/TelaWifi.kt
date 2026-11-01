@@ -24,24 +24,17 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
     private val aviso = texto(c, "", 20, Cfg.VERMELHO)
     private val principal = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
 
-    // Teclado (tela cheia)
-    private val camada = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-    private val tituloSenha = texto(c, "", 28, Cfg.MUDO)
-    private val campoSenha = TextView(c)
-    private val avisoSenha = texto(c, "", 18, Cfg.VERMELHO)
-    private val botaoOlho = android.widget.ImageView(c)
-    private val teclado = TecladoView(c)
+    // Senha (tela de texto em tela cheia)
+    private val telaTexto = TelaTexto(c)
 
     // Detalhes de uma rede (janela no meio)
     private val detalhe = FrameLayout(c)
 
     private var redeSenha: WifiControle.Rede? = null
-    private var senha = ""
-    private var mostrar = false
     private var assinatura = ""
     private var detalheEstado = ""
 
-    val emSenha: Boolean get() = camada.visibility == View.VISIBLE
+    val emSenha: Boolean get() = telaTexto.aberto
     val emDetalhe: Boolean get() = detalhe.visibility == View.VISIBLE
 
     init {
@@ -67,43 +60,8 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         principal.addView(cartao, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(principal, LayoutParams(-1, -1))
 
-        // ----- Camada da senha -----
-        camada.setPadding(48.d(), 24.d(), 48.d(), 28.d())
-        val linhaTopo = LinearLayout(c).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            addView(tituloSenha, LinearLayout.LayoutParams(0, -2, 1f))
-        }
-        camada.addView(linhaTopo, LinearLayout.LayoutParams(-1, -2))
-
-        campoSenha.apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 28.d().toFloat())
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(20.d(), 0, 20.d(), 0)
-            background = fundoArredondado(Color.parseColor("#050D22"), 14.d(), Cfg.LINHA)
-        }
-        botaoOlho.apply {
-            setPadding(16.d(), 16.d(), 16.d(), 16.d())
-            setColorFilter(Cfg.TEXTO)
-            background = fundoArredondado(Color.parseColor("#14FFFFFF"), 14.d(), Cfg.LINHA)
-            isClickable = true
-            setOnClickListener { mostrar = !mostrar; atualizarCampo() }
-            efeitoToque()
-        }
-        val linhaCampo = LinearLayout(c).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            addView(campoSenha, LinearLayout.LayoutParams(0, 62.d(), 1f))
-            addView(botaoOlho, LinearLayout.LayoutParams(62.d(), 62.d()).apply { leftMargin = 12.d() })
-            addView(botao(c, "Conectar", Cfg.AZUL) { enviarSenha() },
-                LinearLayout.LayoutParams(-2, 62.d()).apply { leftMargin = 12.d() })
-        }
-        camada.addView(linhaCampo, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 14.d() })
-        camada.addView(avisoSenha, LinearLayout.LayoutParams(-1, 28.d()).apply { topMargin = 4.d() })
-        camada.addView(teclado, LinearLayout.LayoutParams(-1, 0, 1f))
-        camada.visibility = View.GONE
-        addView(camada, LayoutParams(-1, -1))
-
-        teclado.aoDigitar = { s -> if (senha.length < 63) { senha += s; avisoSenha.text = ""; atualizarCampo() } }
-        teclado.aoApagar = { if (senha.isNotEmpty()) { senha = senha.dropLast(1); atualizarCampo() } }
+        telaTexto.aoFechar = { cancelarSenha() }
+        addView(telaTexto, LayoutParams(-1, -1))
 
         // ----- Janela de detalhes -----
         detalhe.setBackgroundColor(Color.parseColor("#99000000"))
@@ -118,54 +76,30 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
 
     private fun abrirSenha(r: WifiControle.Rede) {
         redeSenha = r
-        senha = ""
-        mostrar = false
-        avisoSenha.text = ""
-        tituloSenha.text = "Senha de ${r.ssid}"
-        atualizarCampo()
         principal.visibility = View.INVISIBLE
-        camada.visibility = View.VISIBLE
+        telaTexto.abrir(
+            iconeRes = R.drawable.ic_lock, titulo = "Senha para", destaque = r.ssid, dica = "Digite a senha", acao = "Conectar",
+            senha = true, maximo = 63,
+            validar = { t -> if (r.seguranca != "WEP" && t.length < 8) "A senha precisa ter pelo menos 8 caracteres." else null }
+        ) { t ->
+            wifi.conectar(r, t)
+            principal.visibility = View.VISIBLE
+            redeSenha = null
+            atualizar(true)
+        }
     }
 
     fun cancelarSenha() {
-        camada.visibility = View.GONE
+        telaTexto.fechar()
         principal.visibility = View.VISIBLE
         redeSenha = null
-        senha = ""
         atualizar(true)
-    }
-
-    private fun enviarSenha() {
-        val r = redeSenha ?: return
-        if (r.seguranca != "WEP" && senha.length < 8) {
-            avisoSenha.text = "A senha precisa ter pelo menos 8 caracteres"
-            return
-        }
-        wifi.conectar(r, senha)
-        camada.visibility = View.GONE
-        principal.visibility = View.VISIBLE
-        redeSenha = null
-        senha = ""
-        atualizar(true)
-    }
-
-    private fun atualizarCampo() {
-        if (senha.isEmpty()) {
-            campoSenha.setTextColor(Cfg.MUDO)
-            campoSenha.letterSpacing = 0f
-            campoSenha.text = "Digite a senha"
-        } else {
-            campoSenha.setTextColor(Cfg.TEXTO)
-            campoSenha.letterSpacing = if (mostrar) 0f else 0.15f
-            campoSenha.text = if (mostrar) senha else "•".repeat(senha.length)
-        }
-        botaoOlho.setImageResource(if (mostrar) R.drawable.ic_olho_fechado else R.drawable.ic_olho)
     }
 
     // ---------------------------------------------------------------- lista
 
     fun reiniciar() {
-        if (emSenha) { camada.visibility = View.GONE; principal.visibility = View.VISIBLE }
+        if (emSenha) { telaTexto.fechar(); principal.visibility = View.VISIBLE }
         fecharDetalhe()
         wifi.limparErro()
         atualizar(true)

@@ -96,7 +96,8 @@ class TelaMidia(
     private var pulsoMic: ValueAnimator? = null
     private val barra = FrameLayout(c)
     private val area = LinearLayout(c)
-    private val teclado = LinearLayout(c)
+    private val teclado = FrameLayout(c)
+    private val tecladoV3 = TecladoView(c)
     private val fileiras = ArrayList<HorizontalScrollView>()
     private var tecladoAberto = false
 
@@ -136,7 +137,7 @@ class TelaMidia(
         addView(coluna, LayoutParams(-1, -1).apply { topMargin = 22.d(); bottomMargin = 6.d() })
 
         montarTeclado()
-        addView(teclado, LayoutParams(-1, -2, Gravity.BOTTOM))
+        addView(teclado, LayoutParams(-1, (720 - 166).d(), Gravity.BOTTOM))
         teclado.visibility = View.GONE
         renderizar()
     }
@@ -391,42 +392,29 @@ class TelaMidia(
     private fun apagar() { if (consulta.isNotEmpty()) { consulta = consulta.dropLast(1); mudouTexto() } }
     private fun mudouTexto() { atualizarBarra() }      // a busca só roda ao tocar em "Buscar"
 
-    private fun tecla(rotulo: String?, recurso: Int, peso: Float, destaque: Boolean = false, acao: () -> Unit): View =
-        FrameLayout(c).apply {
-            background = fundoArredondado(if (destaque) Cfg.AZUL else Color.parseColor("#2AFFFFFF"), 12.d(), Cfg.LINHA)
-            isClickable = true
-            setOnClickListener { acao() }
-            efeitoToque()
-            if (rotulo != null) addView(texto(c, rotulo, 30, Color.WHITE), LayoutParams(-2, -2, Gravity.CENTER))
-            else addView(icone(c, recurso, 32, Color.WHITE), LayoutParams(32.d(), 32.d(), Gravity.CENTER))
-            layoutParams = LinearLayout.LayoutParams(0, 77.d(), peso).apply { setMargins(4.d(), 4.d(), 4.d(), 4.d()) }
-        }
-
     private fun montarTeclado() {
-        teclado.orientation = LinearLayout.VERTICAL
-        teclado.setPadding(60.d(), 10.d(), 60.d(), 12.d())
-        teclado.background = fundoArredondado(Color.parseColor("#EE0A1633"), 0, Cfg.LINHA)
-        teclado.isClickable = true
-        for ((i, linha) in listOf("1234567890", "qwertyuiop", "asdfghjklç", "zxcvbnm").withIndex()) {
-            val l = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
-            for (ch in linha) l.addView(tecla(ch.toString(), 0, 1f) { digitar(ch.toString()) })
-            if (i == 3) l.addView(tecla(null, R.drawable.ic_apagar, 1.6f) { apagar() })
-            teclado.addView(l, LinearLayout.LayoutParams(-1, -2))
+        // sobe de baixo cobrindo de y 218 até o fim (fundo sólido, cantos de cima 30), sem botão de recolher
+        teclado.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(Color.parseColor("#080D1E"))
+            cornerRadii = floatArrayOf(30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 0f, 0f, 0f, 0f)
         }
-        val ultima = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
-        ultima.addView(tecla(null, R.drawable.ic_seta_baixo, 1.4f) { fecharTeclado() })
-        ultima.addView(tecla("espaço", 0, 5f) { if (consulta.isNotEmpty() && !consulta.endsWith(" ")) digitar(" ") })
-        ultima.addView(tecla("Buscar", 0, 2f, true) { fecharTeclado(); buscar() })
-        teclado.addView(ultima, LinearLayout.LayoutParams(-1, -2))
+        teclado.isClickable = true
+        teclado.setPadding(0, 0, 0, 0)
+        tecladoV3.acao = "Buscar"
+        tecladoV3.aoDigitar = { s -> digitar(s) }
+        tecladoV3.aoApagar = { apagar() }
+        tecladoV3.aoAcao = { fecharTeclado(); buscar() }
+        teclado.addView(tecladoV3, LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = 12.d() })
     }
 
     fun abrirTeclado() {
         if (tecladoAberto) return
         tecladoAberto = true
+        tecladoV3.capitalizar(consulta.isEmpty() && false)
         teclado.visibility = View.VISIBLE
         teclado.post {
             teclado.translationY = teclado.height.toFloat()
-            teclado.animate().translationY(0f).setDuration(220).start()
+            teclado.animate().translationY(0f).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).start()
         }
         barra.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 33.d(), Color.parseColor("#88FFFFFF"))
     }
@@ -435,7 +423,7 @@ class TelaMidia(
         if (!tecladoAberto) return
         tecladoAberto = false
         barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 33.d(), Cfg.LINHA)
-        teclado.animate().translationY(teclado.height.toFloat()).setDuration(180).withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
+        teclado.animate().translationY(teclado.height.toFloat()).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
     }
 
     private var engolirToque = false

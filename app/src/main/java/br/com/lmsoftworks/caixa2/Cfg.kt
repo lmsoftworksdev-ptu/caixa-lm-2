@@ -87,6 +87,7 @@ object Tema {
 
     const val CUBO_MS = 640L
     const val MODAL_MS = 300L
+    const val TECLADO_MS = 340L
     const val INTERRUPTOR_MS = 280L
 
     /** Curva padrão do protótipo. */

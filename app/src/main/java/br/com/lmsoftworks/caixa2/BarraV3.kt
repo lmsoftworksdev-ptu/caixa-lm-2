@@ -133,7 +133,7 @@ class BarraTopo(
 
     /** [ligado] = Wi-Fi ligado; [conectado] = tem rede. Sem conexão: vermelho com o ícone wifi-off. */
     fun definirWifi(ligado: Boolean, conectado: Boolean) {
-        wifi.trocarIcone(if (conectado) R.drawable.ic_wifi else R.drawable.ic_wifi_off)
+        wifi.trocarIcone(R.drawable.ic_wifi)      // sem conexão: o mesmo ícone, só vermelho (sem a barra cortando)
         if (conectado) wifi.estado(Tema.CONECTADO, false, false, "conectado") else wifi.estado(Tema.ERRO, true, false, if (ligado) "sem rede" else "desligado")
     }
 
