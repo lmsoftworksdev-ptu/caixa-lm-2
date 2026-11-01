@@ -154,6 +154,8 @@ class InicioActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        bootNovo = aparelhoAcabouDeLigar()
+        if (bootNovo) aquecerAudio()
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
@@ -290,11 +292,27 @@ class InicioActivity : Activity() {
                 if (v.width > v.height && !apareceu) {
                     apareceu = true
                     fundo.iniciar()
-                    relogio.postDelayed({ tocarSomDeInicio() }, 1500)
                     // espera a animação de giro do Android terminar antes de mostrar a interface
                     conteudo.animate().alpha(1f)
                         .setStartDelay(Cfg.ATRASO_ENTRADA_MS).setDuration(Cfg.FADE_ENTRADA_MS).start()
+                    // a tela de carregamento some em fade enquanto a interface aparece; o som começa junto, do início
+                    val carregando = carregando
+                    if (carregando != null) {
+                        carregando.animate().alpha(0f)
+                            .setStartDelay(Cfg.ATRASO_ENTRADA_MS).setDuration(Cfg.FADE_ENTRADA_MS)
+                            .withEndAction { (carregando.parent as? android.view.ViewGroup)?.removeView(carregando) }.start()
+                    }
+                    if (bootNovo) relogio.postDelayed({ tocarSomDeInicio() }, Cfg.ATRASO_ENTRADA_MS)
                 }
+            }
+            // só quando o aparelho acabou de ligar: tela de carregamento (a mesma imagem da abertura) por cima de tudo
+            if (bootNovo) {
+                carregando = android.widget.ImageView(this@InicioActivity).apply {
+                    setImageResource(R.drawable.tela_carregando)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    setBackgroundColor(Color.BLACK)
+                }
+                addView(carregando, FrameLayout.LayoutParams(-1, -1))
             }
         }
         setContentView(raiz)
@@ -1292,13 +1310,47 @@ class InicioActivity : Activity() {
     private var videoTocavaNoAlarme = false
 
     /** Toca o som de início só quando o aparelho acabou de ligar (não quando o app é só reaberto ou reinstalado). */
-    private fun tocarSomDeInicio() {
+    private fun aparelhoAcabouDeLigar(): Boolean {
         val prefs = getSharedPreferences("sistema", MODE_PRIVATE)
         val boot = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
-        if (Math.abs(boot - prefs.getLong("boot", 0L)) > 15_000) {
-            prefs.edit().putLong("boot", boot).apply()
-            Som.tocar(this, R.raw.som_inicio)
-        }
+        if (Math.abs(boot - prefs.getLong("boot", 0L)) <= 15_000) return false
+        prefs.edit().putLong("boot", boot).apply()
+        return true
+    }
+
+    private var bootNovo = false
+    private var carregando: android.widget.ImageView? = null
+    private var aquecimento: android.media.AudioTrack? = null
+
+    /**
+     * A saída de áudio "dorme" e engole o começo do primeiro som. Por isso, assim que o app abre, toca um silêncio contínuo
+     * para acordá-la; o som de início sai inteiro quando a interface começa a aparecer, e o silêncio para quando ele termina.
+     */
+    private fun aquecerAudio() {
+        try {
+            val taxa = 44100
+            val faixa = android.media.AudioTrack(
+                android.media.AudioManager.STREAM_MUSIC, taxa, android.media.AudioFormat.CHANNEL_OUT_STEREO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT, taxa * 4, android.media.AudioTrack.MODE_STREAM
+            )
+            aquecimento = faixa
+            faixa.play()
+            Thread {
+                val silencio = ByteArray(taxa / 5 * 4)
+                try { while (aquecimento === faixa) faixa.write(silencio, 0, silencio.size) } catch (_: Throwable) {}
+            }.start()
+        } catch (_: Throwable) { aquecimento = null }
+    }
+
+    private fun pararAquecimento() {
+        val f = aquecimento ?: return
+        aquecimento = null
+        try { f.stop(); f.release() } catch (_: Throwable) {}
+    }
+
+    /** Toca o som de início do começo ao fim (só chamado quando o aparelho acabou de ligar). */
+    private fun tocarSomDeInicio() {
+        Som.tocar(this, R.raw.som_inicio) { relogio.postDelayed({ pararAquecimento() }, 300) }
     }
 
     /**
