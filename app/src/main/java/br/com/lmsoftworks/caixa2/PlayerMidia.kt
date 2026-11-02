@@ -165,7 +165,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 // música é música e vídeo é vídeo: o áudio vem sempre da própria faixa pedida
                 val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
                 Log.d(TAG, "faixa '${r.titulo}': abrir ${if (video) "o vídeo" else "o áudio"} ${SystemClock.uptimeMillis() - t0} ms")
-                handler.post { if (minha == geracao) { relacionados = fonte.relacionados; tocarFonte(fonte); aoMudar() } }
+                handler.post { if (minha == geracao) { relacionados = fonte.relacionados; modoMusica = fonte.musica; tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
                 handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível abrir"; aoMudar() } }
@@ -330,7 +330,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** O que o YouTube sugere depois, sem as outras versões do que já tocou: segue com músicas diferentes do mesmo estilo. */
-    private fun relacionadosNovos(): List<Resultado> = relacionados.filter { !repetida(it) }
+    private fun relacionadosNovos(): List<Resultado> = relacionados.filter { !repetida(it) && (!modoMusica || YouTube.pareceMusica(it.titulo, it.canal, it.duracaoSeg, item?.canal.orEmpty())) }
+
+    /** O que está tocando é música: as sugestões também têm que ser (nada de reação, entrevista, aula...). Outros assuntos seguem livres. */
+    private var modoMusica = true
 
     val temProxima: Boolean get() = indice + 1 < fila.size || relacionadosNovos().isNotEmpty()
     val temAnterior: Boolean get() = indice > 0
@@ -486,7 +489,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         try { antigo.release() } catch (_: Throwable) {}
         indice++
         item = pre.item
-        relacionados = pre.fonte.relacionados
+        relacionados = pre.fonte.relacionados; modoMusica = pre.fonte.musica
         capa = null; erro = null; carregando = false; recuperacoes = 0
         novo.volume = volumeBase
         tocando = novo.isPlaying || novo.playWhenReady

@@ -105,6 +105,12 @@ class TelaMidia(
     private val fileiras = ArrayList<HorizontalScrollView>()
     private var tecladoAberto = false
 
+    private var cursorVisivel = true
+    private val piscarCursor = object : Runnable {
+        override fun run() { cursorVisivel = !cursorVisivel; escreverBusca(); if (tecladoAberto) principal.postDelayed(this, 530) }
+    }
+    private fun escreverBusca(t: String = consulta) { textoBusca.text = comCursor(t, tecladoAberto, cursorVisivel) }
+
     init {
         // ---- barra de pesquisa ----
         barra.apply {
@@ -347,7 +353,7 @@ class TelaMidia(
     // ------------------------------------------------------------------ barra e teclado
 
     private fun atualizarBarra() {
-        textoBusca.text = consulta
+        escreverBusca()
         dica.visibility = if (consulta.isEmpty()) View.VISIBLE else View.GONE
         botaoLimpar.visibility = if (consulta.isEmpty()) View.GONE else View.VISIBLE
     }
@@ -375,7 +381,7 @@ class TelaMidia(
         principal.removeCallbacks(restaurarDica)
         if (sim) {
             // o teclado fica como está: o que a pessoa fala vai aparecendo na barra de pesquisa
-            consulta = ""; textoBusca.text = ""; dica.text = "Ouvindo…"; dica.visibility = View.VISIBLE     // a barra espera o texto ao vivo
+            consulta = ""; escreverBusca(""); dica.text = "Ouvindo…"; dica.visibility = View.VISIBLE     // a barra espera o texto ao vivo
             val apagado = misturar(Tema.ERRO, Color.BLACK, 0.35f)
             var suave = 0f
             val t0 = android.os.SystemClock.uptimeMillis()
@@ -411,7 +417,7 @@ class TelaMidia(
     /** Busca por voz: as palavras vão aparecendo na barra enquanto a pessoa fala. */
     fun mostrarParcial(texto: String) {
         consulta = texto
-        textoBusca.text = texto
+        escreverBusca(texto)
         dica.visibility = View.GONE
         botaoLimpar.visibility = View.GONE
     }
@@ -426,7 +432,7 @@ class TelaMidia(
 
     /** Mensagem curta na barra (ex.: a busca por voz não ouviu nada); volta ao texto normal em 2 s. */
     fun avisoBusca(msg: String) {
-        consulta = ""; textoBusca.text = ""
+        consulta = ""; escreverBusca("")
         dica.text = msg
         dica.visibility = View.VISIBLE
         principal.removeCallbacks(restaurarDica)
@@ -464,6 +470,8 @@ class TelaMidia(
     fun abrirTeclado() {
         if (tecladoAberto) return
         tecladoAberto = true
+        cursorVisivel = true; escreverBusca(); principal.removeCallbacks(piscarCursor); principal.postDelayed(piscarCursor, 530)
+        tecladoV3.acao = "Buscar"      // remonta o teclado: a tecla Buscar pega a cor de destaque do menu de agora
         tecladoV3.capitalizar(consulta.isEmpty() && false)
         teclado.visibility = View.VISIBLE
         teclado.post {
@@ -476,6 +484,7 @@ class TelaMidia(
     fun fecharTeclado() {
         if (!tecladoAberto) return
         tecladoAberto = false
+        principal.removeCallbacks(piscarCursor); escreverBusca()
         barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 33.d(), Cfg.LINHA)
         teclado.animate().translationY(teclado.height.toFloat()).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
     }

@@ -43,7 +43,7 @@ data class Resultado(
 }
 
 /** O que o player precisa para tocar: uma ou duas URLs (video + audio separados). */
-data class Fonte(val videoUrl: String?, val audioUrl: String?, val unicaUrl: String?, val relacionados: List<Resultado> = emptyList())
+data class Fonte(val videoUrl: String?, val audioUrl: String?, val unicaUrl: String?, val relacionados: List<Resultado> = emptyList(), val musica: Boolean = true)
 
 object YouTube {
     private val service get() = ServiceList.YouTube
@@ -111,6 +111,29 @@ object YouTube {
             itens = executarBusca(consulta, YoutubeSearchQueryHandlerFactory.VIDEOS)
         }
         return itens
+    }
+
+    private val FORA_DE_MUSICA = listOf(
+        "react", "reacao", "reagindo", "reaction", "podcast", "entrevista", "corte", "cortes", "tutorial", "aula", "como fazer", "como tocar",
+        "vlog", "gameplay", "review", "analise", "bastidores", "making of", "shorts", "compilado", "melhores momentos", "meme", "humor",
+        "stand up", "noticia", "jornal", "trailer", "episodio", "capitulo", "dublado", "resumo", "explicando", "explicacao", "historia de",
+        "minuto", "polemica", "treta", "fofoca", "debate", "palestra", "curso", "unboxing", "teste de"
+    )
+    private val SINAL_DE_MUSICA = listOf("clipe", "videoclipe", "official", "oficial", "video", "audio", "ao vivo", "lyric", "letra", "dvd", "acustico", "feat", "part.")
+
+    /**
+     * Esse vídeo é música (clipe, áudio, show)? Entra quem tem de 1,5 a 12 minutos, não tem cara de reação, entrevista, aula, corte
+     * etc., e tem sinal de música (clipe, oficial, "Artista - Música", canal do artista, VEVO...) ou é do mesmo canal do que está tocando.
+     */
+    fun pareceMusica(titulo: String, canal: String, duracaoSeg: Long, canalAtual: String): Boolean {
+        if (duracaoSeg in 1..89 || duracaoSeg > 720) return false
+        val t = java.text.Normalizer.normalize(titulo.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+        if (FORA_DE_MUSICA.any { t.contains(it) }) return false
+        val c = java.text.Normalizer.normalize(canal.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+        if (canalAtual.isNotEmpty() && canal.removeSuffix(" - Topic").equals(canalAtual.removeSuffix(" - Topic"), true)) return true
+        if (SINAL_DE_MUSICA.any { t.contains(it) }) return true
+        if (c.contains("vevo") || c.endsWith("topic") || c.contains("oficial") || c.contains("official") || c.contains("music") || c.contains("musica") || c.contains("records") || c.contains("gravadora")) return true
+        return Regex("""\S+ [-–|] \S+""").containsMatchIn(t)      // "Artista - Música"
     }
 
     /** "Em alta": o YouTube não tem mais a página de tendências, então usamos buscas que trazem o que está mais visto. */
@@ -256,7 +279,9 @@ object YouTube {
     fun resolver(url: String, soAudio: Boolean): Fonte {
         garantirInicio()
         val info = StreamInfo.getInfo(service, url)
-        return resolverDe(info, soAudio).copy(relacionados = try { relacionadosDe(info) } catch (e: Exception) { emptyList() })
+        val categoria = try { info.category.orEmpty().lowercase() } catch (e: Exception) { "" }
+        val ehMusica = categoria.contains("mus") || pareceMusica(info.name.orEmpty(), info.uploaderName.orEmpty(), info.duration, "")
+        return resolverDe(info, soAudio).copy(relacionados = try { relacionadosDe(info) } catch (e: Exception) { emptyList() }, musica = ehMusica)
     }
 
     private fun resolverDe(info: StreamInfo, soAudio: Boolean): Fonte {

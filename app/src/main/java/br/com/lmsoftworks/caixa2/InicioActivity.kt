@@ -37,6 +37,7 @@ class InicioActivity : Activity() {
     private lateinit var telaLed: TelaLed
     private lateinit var telaMusica: TelaMusica
     private lateinit var telaMidia: TelaMidia
+    private lateinit var telaReceitas: TelaReceitas
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
     private lateinit var modalAtualizacao: ModalAtualizacao
@@ -210,6 +211,8 @@ class InicioActivity : Activity() {
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(listOf(lista[i]), 0) }, { lista, i -> tocarMusicaDoYoutube(listOf(lista[i]), 0) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.aoAbrirWifi = { ir("wifi") }
         telaMidia.visibility = View.GONE
+        telaReceitas = TelaReceitas(this)
+        telaReceitas.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
@@ -275,6 +278,7 @@ class InicioActivity : Activity() {
             addView(telaBluetooth, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMusica, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(telaReceitas, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
@@ -395,6 +399,7 @@ class InicioActivity : Activity() {
         "bluetooth" -> telaBluetooth
         "musica" -> telaMusica
         "midia" -> telaMidia
+        "receitas" -> telaReceitas
         "led" -> telaLed
         "alarmes" -> telaAlarmes
         "config" -> telaConfig
@@ -406,7 +411,7 @@ class InicioActivity : Activity() {
         if (id == "lembretes") { telaAlarmes.abrirAba("lembretes", lembretes.todos.firstOrNull()?.id); ir("alarmes") }
         else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
         else if (id == "midia") ir(if (musica.temMusica) "musica" else "midia")      // tocando algo: Tocando agora; senão, a busca
-        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima") ir(id)
+        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima" || id == "receitas") ir(id)
         else Aviso.mostrar(this, "Em breve")
     }
 
@@ -446,6 +451,7 @@ class InicioActivity : Activity() {
             "bluetooth" -> Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
             "musica" -> temaMusica()
             "midia" -> Triple("#FF5A4E", "#7A1E5A", "#FF5A5F")
+            "receitas" -> Triple("#FF9A3D", "#8A2E1A", "#FF9A3D")
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
             "alarmes" -> Triple("#8B5CFF", "#3A1FA8", "#8B5CFF")
             "config" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
@@ -464,9 +470,19 @@ class InicioActivity : Activity() {
     }
 
     /** Parte leve da troca de menu: só o que precisa estar certo já no primeiro quadro do giro. */
+    /** O conteúdo de alguns menus é montado com a cor de destaque do menu: refaz ANTES do giro, para já abrir na cor certa. */
+    private fun preencher(destino: String) {
+        when (destino) {
+            "led" -> telaLed.atualizar()
+            "alarmes" -> telaAlarmes.atualizar()
+            "config" -> { atualizarConfig(); telaConfig.atualizar() }
+        }
+    }
+
     private fun mudarEstado(destino: String) {
         atual = destino
         aplicarTema(destino)
+        preencher(destino)
         gesto.ativo = destino != "inicio"
         barra.mostrarHora(destino != "inicio")
         atualizarLedDaMusica()
@@ -494,9 +510,6 @@ class InicioActivity : Activity() {
         if (destino == "wifi") { telaWifi.reiniciar(); wifi.varrer() }
         if (destino == "bluetooth") { telaBluetooth.reiniciar(); bluetooth.definirVisivel(true) }
         else bluetooth.definirVisivel(false)
-        if (destino == "led") telaLed.atualizar()
-        if (destino == "alarmes") telaAlarmes.atualizar()
-        if (destino == "config") { atualizarConfig(); telaConfig.atualizar() }
         if (destino == "midia") telaMidia.aoMostrar()
         if (destino == "clima") {
             // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
@@ -584,7 +597,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
+        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "receitas" && telaReceitas.emDetalhe) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -1150,6 +1163,7 @@ class InicioActivity : Activity() {
             if (destinoCubo.isNotEmpty()) mudarEstado(destinoCubo)
             animarCubo(de, para, 1, grauAtual, 90f) { terminarGiro(de, para, true); if (destinoCubo.isEmpty()) fecharVideo() }
         } else {
+            if (destinoCubo.isNotEmpty() && destinoCubo != "inicio") aplicarTema(atual)
             animarCubo(de, para, 1, grauAtual, 0f) {
                 terminarGiro(de, para, false)
                 if (destinoCubo.isEmpty()) { tela(origemVideo).visibility = View.VISIBLE; telaVideo.cobrir(false) }      // desistiu: o vídeo continua
@@ -1206,11 +1220,12 @@ class InicioActivity : Activity() {
         }
         // teclado da Mídia aberto: tocar no cabeçalho fecha o teclado (o toque segue para o botão tocado)
         if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "midia" && telaMidia.tecladoVisivel && e.rawY < 104.d()) telaMidia.fecharTeclado()
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "receitas" && telaReceitas.tecladoVisivel && e.rawY < 104.d()) telaReceitas.fecharTeclado()
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
         if ((atual != "inicio" || telaVideo.aberto) && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    arrastando = e.rawX < BORDA_GESTO.d() && !(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY))
+                    arrastando = e.rawX < BORDA_GESTO.d() && !(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY)) && !(atual == "receitas" && telaReceitas.areaProtegida(e.rawX, e.rawY))
                     capturado = false
                     x0 = e.rawX; y0 = e.rawY
                 }
@@ -1227,6 +1242,7 @@ class InicioActivity : Activity() {
                         if (modoCubo) {
                             if (telaVideo.aberto) { destinoCubo = ""; deCubo = telaVideo; paraCubo = tela(origemVideo); telaVideo.cobrir(true) }
                             else { destinoCubo = destinoVoltar(); deCubo = tela(atual); paraCubo = tela(destinoCubo) }
+                            if (destinoCubo.isNotEmpty() && destinoCubo != "inicio") { aplicarTema(destinoCubo); preencher(destinoCubo) }      // a tela de destino já aparece na cor dela
                             Cubo.preparar(deCubo!!, paraCubo!!)
                             fundo.parar()      // fundo parado enquanto o dedo gira a caixa
                             girando = true; grauAtual = 0f; tArraste = android.os.SystemClock.uptimeMillis()
@@ -1434,6 +1450,7 @@ class InicioActivity : Activity() {
         if (telaVideo.aberto) { fecharVideoAnimado(); return }
         when (atual) {
             "midia" -> if (!telaMidia.voltar()) ir("inicio")
+            "receitas" -> if (!telaReceitas.voltar()) ir("inicio")
             "wifi" -> if (!telaWifi.voltar()) ir("inicio")
             "bluetooth" -> if (!telaBluetooth.voltar()) ir("inicio")
             "musica" -> ir(destinoVoltar())

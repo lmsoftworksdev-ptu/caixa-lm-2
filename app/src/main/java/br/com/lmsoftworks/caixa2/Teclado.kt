@@ -35,7 +35,7 @@ class TecladoView(c: Context) : LinearLayout(c) {
     /** Liga o ⇧ (a próxima letra sai maiúscula): usado quando o texto está vazio. */
     fun capitalizar(sim: Boolean) { if (maiuscula != sim) { maiuscula = sim; montar() } }
 
-    private fun tecla(rotulo: String, largura: Int, destaque: Boolean = false, ativa: Boolean = false, tamanho: Int = 30, acao: () -> Unit): TextView =
+    private fun tecla(rotulo: String, largura: Int, destaque: Boolean = false, ativa: Boolean = false, tamanho: Int = 30, repetir: Boolean = false, acao: () -> Unit): TextView =
         TextView(context).apply {
             text = rotulo
             setTextColor(Tema.TEXTO)
@@ -46,11 +46,25 @@ class TecladoView(c: Context) : LinearLayout(c) {
             val premida = fundoArredondado(if (destaque || ativa) Cfg.AZUL else Color.parseColor("#47FFFFFF"), 18.d())
             background = normal
             isClickable = true
-            setOnClickListener { acao() }
+            // tecla que repete (apagar): segurando, depois de um instante ela se repete sozinha e vai acelerando
+            var repetiu = false
+            var intervalo = 90L
+            val repeticao = object : Runnable {
+                override fun run() {
+                    repetiu = true
+                    acao(); SomTeclado.tocar()
+                    intervalo = Math.max(35L, (intervalo * 0.92).toLong())
+                    postDelayed(this, intervalo)
+                }
+            }
+            setOnClickListener { if (repetiu) repetiu = false else acao() }
             setOnTouchListener { v, e ->
                 when (e.action) {
-                    MotionEvent.ACTION_DOWN -> v.background = premida
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.background = normal
+                    MotionEvent.ACTION_DOWN -> {
+                        v.background = premida; SomTeclado.tocar()
+                        if (repetir) { repetiu = false; intervalo = 90L; removeCallbacks(repeticao); postDelayed(repeticao, 420) }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { v.background = normal; removeCallbacks(repeticao) }
                 }
                 false
             }
@@ -76,7 +90,7 @@ class TecladoView(c: Context) : LinearLayout(c) {
 
     private fun montar() {
         removeAllViews()
-        val apagar = tecla("⌫", 150) { aoApagar?.invoke() }
+        val apagar = tecla("⌫", 150, repetir = true) { aoApagar?.invoke() }
         if (simbolos) {
             addView(linha(*caracteres("1234567890")))
             addView(linha(*caracteres("!@#$%^&*()")))
@@ -93,5 +107,47 @@ class TecladoView(c: Context) : LinearLayout(c) {
         val espaco = tecla("", 560) { aoDigitar?.invoke(" ") }
         val acaoTecla = tecla(acao, 220, destaque = true, tamanho = 28) { aoAcao?.invoke() }
         addView(linha(modo, espaco, acaoTecla))
+    }
+}
+
+/** Toquinho de tecla: um estalo curto de 18 ms gerado no próprio app, tocado por 3 pistas que se revezam (teclas rápidas não se cortam). */
+object SomTeclado {
+    private const val TAXA = 22050
+    private val estalo: ShortArray by lazy {
+        val n = TAXA * 18 / 1000
+        ShortArray(n) { i ->
+            val t = i / TAXA.toDouble()
+            val envelope = Math.exp(-t * 260.0)
+            (Math.sin(2 * Math.PI * 1700.0 * t) * envelope * 9000).toInt().toShort()
+        }
+    }
+    private val pistas = arrayOfNulls<android.media.AudioTrack>(3)
+    private var vez = 0
+
+    fun tocar() {
+        if (!Ajustes.sonsTeclado) return
+        try {
+            val i = vez; vez = (vez + 1) % pistas.size
+            var p = pistas[i]
+            if (p == null) {
+                @Suppress("DEPRECATION")
+                p = android.media.AudioTrack(android.media.AudioManager.STREAM_MUSIC, TAXA, android.media.AudioFormat.CHANNEL_OUT_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT, estalo.size * 2, android.media.AudioTrack.MODE_STATIC)
+                p.write(estalo, 0, estalo.size)
+                pistas[i] = p
+            } else {
+                p.stop(); p.reloadStaticData()
+            }
+            p.play()
+        } catch (e: Throwable) { }
+    }
+}
+
+/** O texto de uma barra de pesquisa com a barrinha de digitação (piscando) no fim, enquanto o teclado está aberto. A barrinha ocupa sempre o mesmo lugar, para o texto não pular. */
+fun comCursor(texto: String, teclado: Boolean, visivel: Boolean): CharSequence {
+    if (!teclado) return texto
+    return android.text.SpannableStringBuilder(texto).append("│").apply {
+        setSpan(android.text.style.ForegroundColorSpan(if (visivel) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT),
+            length - 1, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }

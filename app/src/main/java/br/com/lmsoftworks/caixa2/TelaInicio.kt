@@ -195,6 +195,8 @@ class BotaoInicio(c: Context, private val cor1: Int, private val cor2: Int, icon
  */
 class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) : FrameLayout(c) {
 
+    private companion object { const val LARGURA_FILEIRA = 592 }
+
     private val relogio = texto(c, "00:00", 208, Color.WHITE).apply {
         typeface = Tema.OUTFIT
         letterSpacing = -4f / 208f
@@ -232,17 +234,18 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     init {
         clipChildren = false
         clipToPadding = false
-        addView(relogio, LayoutParams(714.d(), -2).apply { leftMargin = 64.d(); topMargin = 78.d() })
-        addView(data, LayoutParams(714.d(), -2).apply { leftMargin = 64.d(); topMargin = 321.d() })
+        // a hora e a data ficam centralizadas sobre a fileira dos 5 botões (5 × 104 + 4 × 18 = 592)
+        addView(relogio, LayoutParams(LARGURA_FILEIRA.d(), -2).apply { leftMargin = 64.d(); topMargin = 78.d() })
+        addView(data, LayoutParams(LARGURA_FILEIRA.d(), -2).apply { leftMargin = 64.d(); topMargin = 321.d() })
 
         val fila = LinearLayout(c).apply { clipChildren = false; clipToPadding = false }
         val botoes = listOf(
             Triple("midia", "Mídia", "#FF7A5C" to "#D3264B"), Triple("led", "Luzes LED", "#FFC94D" to "#EE7A16"),
-            Triple("alarmes", "Alarmes", "#B48CFF" to "#6232E0"), Triple("wifi", "Wi-Fi", "#3DE6C6" to "#0B8E9E"),
-            Triple("bluetooth", "Bluetooth", "#6E9BFF" to "#2443D6"), Triple("config", "Configurações", "#9AA6BE" to "#46506A")
+            Triple("alarmes", "Alarmes", "#B48CFF" to "#6232E0"), Triple("receitas", "Receitas", "#8BE36B" to "#1E9E4A"),
+            Triple("config", "Configurações", "#9AA6BE" to "#46506A")
         )
-        val icones = mapOf("led" to R.drawable.ic_bulb, "alarmes" to R.drawable.ic_alarme, "wifi" to R.drawable.ic_wifi,
-            "bluetooth" to R.drawable.ic_bluetooth, "config" to R.drawable.ic_config)
+        val icones = mapOf("led" to R.drawable.ic_bulb, "alarmes" to R.drawable.ic_alarme,
+            "receitas" to R.drawable.ic_chef, "config" to R.drawable.ic_config)
         for ((i, b) in botoes.withIndex()) {
             val icone: View = if (b.first == "midia") IconeMidia(c) else ImageView(c).apply { setImageResource(icones.getValue(b.first)); setColorFilter(Color.WHITE) }
             val bt = BotaoInicio(c, Color.parseColor(b.third.first), Color.parseColor(b.third.second), icone, b.second)
@@ -251,7 +254,9 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
         }
         addView(fila, LayoutParams(-2, -2).apply { leftMargin = 64.d(); topMargin = (720 - 62 - 104).d() })
 
-        addView(cartao, LayoutParams(420.d(), (720 - 104 - 62).d()).apply { leftMargin = 804.d(); topMargin = 104.d() })
+        // o cartão ocupa todo o espaço que sobrou até a margem direita (1224)
+        val esquerdaCartao = 64 + LARGURA_FILEIRA + 48
+        addView(cartao, LayoutParams((1224 - esquerdaCartao).d(), (720 - 104 - 62).d()).apply { leftMargin = esquerdaCartao.d(); topMargin = 104.d() })
         atualizar()
         refazer()
     }

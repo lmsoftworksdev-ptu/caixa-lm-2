@@ -193,6 +193,8 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 opcoes.addView(linha("Volume", "O mesmo da barra de cima", deslizador(lerVolume() / 10f, { "${Math.round(it * 10)}" }) { f -> definirVolume(Math.round(f * 10)) }))
                 opcoes.addView(linha("Sons de resposta", "Toquinhos de quando a caixa começa e termina de ouvir",
                     interruptor(Ajustes.sonsResposta) { Ajustes.definirSons(it) }))
+                opcoes.addView(linha("Sons do teclado", "Um toquinho a cada tecla apertada",
+                    interruptor(Ajustes.sonsTeclado) { Ajustes.definirSonsTeclado(it) }))
                 opcoes.addView(linha("Aviso de volume máximo", "O \"plim\" ao apertar + no máximo (a música abaixa enquanto toca)",
                     interruptor(Ajustes.avisoVolumeMax) { Ajustes.definirAvisoVolumeMax(it) }))
                 opcoes.addView(linha("Volume do alarme", "O mínimo que o alarme garante ao tocar",
