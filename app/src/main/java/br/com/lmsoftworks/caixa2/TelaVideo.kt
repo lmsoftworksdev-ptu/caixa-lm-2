@@ -57,6 +57,9 @@ class TelaVideo(
     private var lateralAberta = false
     private val lateral = ListaProximas(c, "Próximos", 144, 81, { i -> player.irPara(i) }) { alternarLateral(false) }
     private var botaoLista: View? = null
+    private var linhaBotoesRef: LinearLayout? = null
+    private val tempoCanto = texto(c, "", 22, Color.WHITE)      // o tempo sozinho no canto de baixo, no player reduzido
+    private var espacador: View? = null
     private var botaoVoltar10: View? = null
     private var botaoAvancar10: View? = null
     private var iconeVolume: View? = null
@@ -80,7 +83,7 @@ class TelaVideo(
     private val handler = Handler(Looper.getMainLooper())
     private val esconder = Runnable { mostrarControles(false) }
     private val tique = object : Runnable {
-        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
+        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
     }
     private var controlesVisiveis = true
 
@@ -129,6 +132,7 @@ class TelaVideo(
         botaoAnterior = anterior; botaoProxima = proxima
         botaoVoltar10 = voltar10; botaoAvancar10 = avancar10
         val linhaBotoes = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
+        linhaBotoesRef = linhaBotoes
         val lp68 = { LinearLayout.LayoutParams(92.d(), 92.d()).apply { rightMargin = 20.d() } }
         linhaBotoes.addView(anterior, lp68())
         linhaBotoes.addView(voltar10, lp68())
@@ -140,7 +144,8 @@ class TelaVideo(
         linhaBotoes.addView(lista, lp68())
         linhaBotoes.addView(tempoAtual.apply { setPadding(10.d(), 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))
         linhaBotoes.addView(tempoTotal, LinearLayout.LayoutParams(-2, -2))
-        linhaBotoes.addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
+        espacador = View(c)
+        linhaBotoes.addView(espacador, LinearLayout.LayoutParams(0, 1, 1f))
         iconeVolume = icone(c, R.drawable.ic_volume_2, 34, Color.WHITE)
         linhaBotoes.addView(iconeVolume, LinearLayout.LayoutParams(34.d(), 34.d()).apply { rightMargin = 6.d() })
         linhaBotoes.addView(volume, LinearLayout.LayoutParams(200.d(), 60.d()))
@@ -157,6 +162,8 @@ class TelaVideo(
             addView(barra, LinearLayout.LayoutParams(-1, 60.d()))
             addView(linhaBotoes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 6.d() })
         }
+        tempoCanto.visibility = View.GONE
+        controles.addView(tempoCanto, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = 48.d(); bottomMargin = 74.d() })
         controles.addView(base, LayoutParams(-1, -2, Gravity.BOTTOM).apply { leftMargin = 30.d(); rightMargin = 40.d(); bottomMargin = 26.d() })
         addView(controles, LayoutParams(-1, -1))
         addView(lateral, LayoutParams(PROXIMAS_LARGURA.d(), -1, Gravity.END).apply { topMargin = 16.d(); bottomMargin = 16.d(); rightMargin = 16.d() })
@@ -193,6 +200,18 @@ class TelaVideo(
         botaoVoltar10?.visibility = if (abrir) View.GONE else View.VISIBLE
         botaoAvancar10?.visibility = if (abrir) View.GONE else View.VISIBLE
         lateral.visibility = if (abrir) View.VISIBLE else View.GONE
+        // o círculo de carregando e a mensagem de erro ficam no centro da imagem reduzida (não da tela inteira)
+        val desvio = if (abrir) -((1280 - (1280 - PROXIMAS_LARGURA - 32)) / 2).d().toFloat() else 0f
+        rodinha.translationX = desvio; mensagem.translationX = desvio
+        // com a lista aberta os botões ficam centralizados na largura do vídeo reduzido (sem o volume e sem o espaço que o empurrava para a esquerda)
+        espacador?.visibility = if (abrir) View.GONE else View.VISIBLE
+        // player reduzido: só anterior, play/pause e próximo; sem o botão da lista (tocar na tela fecha a lista) e com o tempo no canto
+        botaoLista?.visibility = if (abrir || player.fila.size <= 1) View.GONE else View.VISIBLE
+        tempoAtual.visibility = if (abrir) View.GONE else View.VISIBLE
+        tempoTotal.visibility = if (abrir) View.GONE else View.VISIBLE
+        tempoCanto.visibility = if (abrir) View.VISIBLE else View.GONE
+        if (abrir) atualizarTempo()
+        linhaBotoesRef?.gravity = if (abrir) Gravity.CENTER else Gravity.CENTER_VERTICAL
         volume.visibility = if (abrir) View.GONE else View.VISIBLE
         iconeVolume?.visibility = if (abrir) View.GONE else View.VISIBLE
         if (abrir) lateral.atualizar(player.fila, player.indice)
@@ -310,6 +329,7 @@ class TelaVideo(
     private fun atualizarTempo() {
         val dur = player.duracaoMs
         tempoAtual.text = formatar(player.posicaoMs)
+        if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "")
         tempoTotal.text = if (dur > 0) " / " + formatar(dur) else ""
         barra.fracao = if (dur > 0) player.posicaoMs.toFloat() / dur else 0f
         barra.ativa = dur > 0
@@ -329,7 +349,7 @@ class TelaVideo(
         textoErro.text = erro ?: ""
         botaoAnterior?.alpha = if (player.temAnterior || player.posicaoMs > 4000) 1f else .4f
         botaoProxima?.alpha = if (player.temProxima) 1f else .4f
-        botaoLista?.visibility = if (player.fila.size > 1) View.VISIBLE else View.GONE
+        botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE
         // vídeo muito longo (mais de 10 min) não é uma música: o botão da nota fica indisponível
         seletor.musicaDisponivel = player.duracaoMs <= 0 || player.duracaoMs <= 600_000L
         botaoPlay.visibility = View.VISIBLE      // sempre aparece: pausa/play enquanto toca; play no meio quando parado ou carregando

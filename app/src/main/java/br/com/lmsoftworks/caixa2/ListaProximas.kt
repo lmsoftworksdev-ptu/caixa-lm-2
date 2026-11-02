@@ -25,7 +25,6 @@ class ListaProximas(
 
     private val lista = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
     private val rolagem = ScrollView(c).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; addView(lista) }
-    private var chave = ""
 
     init {
         visibility = View.GONE
@@ -73,15 +72,26 @@ class ListaProximas(
         return true
     }
 
-    /** Refaz a lista só quando mudou (tamanho da fila, item atual): a fila é a do player; mostra o que está tocando e as próximas. */
+    private var itemAtual = ""      // índice|endereço do que toca: quando muda, a lista rola até ele
+    private var tamanho = -1
+
+    /**
+     * Mostra a fila inteira ao redor do que toca (até 30 anteriores e 40 próximas), com o atual destacado. Quando o item que toca muda,
+     * a lista rola sozinha até ele (os anteriores continuam ali, para voltar a um deles); quando só a fila cresce, fica onde a pessoa estava.
+     */
     fun atualizar(fila: List<Resultado>, indice: Int) {
-        val k = fila.size.toString() + "|" + indice + "|" + (fila.getOrNull(indice)?.url ?: "")
-        if (k == chave) return
-        chave = k
+        val item = indice.toString() + "|" + (fila.getOrNull(indice)?.url ?: "")
+        if (item == itemAtual && fila.size == tamanho) return
+        val mudouItem = item != itemAtual
+        itemAtual = item; tamanho = fila.size
+        val y = rolagem.scrollY
         lista.removeAllViews()
-        val de = maxOf(indice, 0)
-        for (i in de until minOf(fila.size, de + 41)) lista.addView(linha(fila[i], i, i == indice))
-        rolagem.scrollTo(0, 0)
+        val de = maxOf(indice - 30, 0)
+        for (i in de until minOf(fila.size, maxOf(indice, 0) + 41)) lista.addView(linha(fila[i], i, i == indice))
+        if (mudouItem) {
+            // rola até o atual, deixando o anterior à vista logo acima
+            rolagem.post { lista.getChildAt(indice - de)?.let { rolagem.smoothScrollTo(0, maxOf(it.top - 92.d(), 0)) } }
+        } else rolagem.post { rolagem.scrollTo(0, y) }
     }
 
     private fun linha(r: Resultado, i: Int, atual: Boolean): View = LinearLayout(c).apply {
