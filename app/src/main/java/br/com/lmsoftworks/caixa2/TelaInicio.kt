@@ -227,6 +227,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private var lembreteTxt: String? = null; private var lembreteQuando: String? = null
     private var musicaTxt: String? = null; private var musicaArtista: String? = null
     private var musicaCapa: Bitmap? = null; private var musicaTocando = false
+    private var semDadosModo = false      // o celular toca sem mandar os dados: o cartão mostra a arte do equalizador e só o nome do aparelho
     /** Toque no play/pause do cartão de música. */
     var aoPlayPause: (() -> Unit)? = null
     private var chave = ""
@@ -308,12 +309,14 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     }
 
     private fun linhaMusica(titulo: String): View {
-        val capa = CapaMini(c).apply { imagem = musicaCapa; semente = titulo + (musicaArtista ?: "") }
+        val capa: View = if (semDadosModo) ArteSemDados(c, 9, 18, 2, 14).apply { tocando = musicaTocando }
+        else CapaMini(c).apply { imagem = musicaCapa; semente = titulo + (musicaArtista ?: "") }
         val textos = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextoRolante(c, titulo, 25, Tema.TEXTO, true), LinearLayout.LayoutParams(-1, -2))
-            // o artista fica parado (se não couber, termina em "…")
-            addView(texto(c, musicaArtista ?: "Tocando agora", 18, Tema.TEXTO2).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextoRolante(c, titulo, if (semDadosModo) 30 else 25, Tema.TEXTO, true), LinearLayout.LayoutParams(-1, -2))
+            // o artista fica parado (se não couber, termina em "…"); sem os dados da música, só o nome do aparelho
+            if (!semDadosModo) addView(texto(c, musicaArtista ?: "Tocando agora", 18, Tema.TEXTO2).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
                 LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
         }
         val play = FrameLayout(c).apply {
@@ -375,7 +378,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
     /** Refaz o cartão só com os itens que existem; quem some libera o lugar e os de baixo sobem (sem buraco no meio). */
     private fun refazer() {
-        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista|$musicaTocando|${musicaCapa?.hashCode()}"
+        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista|$musicaTocando|${musicaCapa?.hashCode()}|$semDadosModo"
         if (nova == chave) return
         chave = nova
         cartao.removeAllViews()
@@ -409,6 +412,14 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     /** Tocando agora: [titulo] e [artista]; nulo some com o item. */
     fun definirMusica(titulo: String?, artista: String?, capa: Bitmap? = null, tocando: Boolean = false) {
         musicaTxt = titulo?.ifBlank { null }; musicaArtista = artista?.ifBlank { null }; musicaCapa = capa; musicaTocando = tocando
+        semDadosModo = false
+        refazer()
+    }
+
+    /** O celular toca mas não mandou os dados da música: o cartão mostra a arte do equalizador e só o nome do aparelho. */
+    fun definirMusicaSemDados(nome: String, tocando: Boolean) {
+        musicaTxt = nome; musicaArtista = null; musicaCapa = null; musicaTocando = tocando
+        semDadosModo = true
         refazer()
     }
 

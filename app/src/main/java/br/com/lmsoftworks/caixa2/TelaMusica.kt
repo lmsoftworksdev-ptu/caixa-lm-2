@@ -49,7 +49,7 @@ class CapaView(c: Context) : View(c) {
     /** Matiz (0..360) do degradê da capa sem imagem: o fundo da tela usa o mesmo. */
     companion object { fun matiz(semente: String) = ((semente.hashCode() and 0x7fffffff) % 360).toFloat() }
 
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(368.d(), 368.d())
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(TAM_BANNER.d(), TAM_BANNER.d())
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         // sombra "0 24 60 #73000000", desenhada uma vez
@@ -222,15 +222,10 @@ class TelaMusica(
     private val botaoPlay = FrameLayout(c)
     private val iconePlay = ImageView(c)
     private val conteudo = FrameLayout(c)
-    private val vazio = LinearLayout(c)
-    private val tituloVazio = texto(c, "", 40, Tema.TEXTO, true)
-    private val dicaVazio = texto(c, "", 22, Tema.TEXTO2).apply { gravity = Gravity.CENTER; setLineSpacing(0f, 1.15f) }
-    private val botaoBluetooth = botao(c, "Abrir Bluetooth", Cfg.AZUL) { aoAbrirBluetooth() }
-    private val botaoBuscar = botao(c, "Buscar músicas", Tema.BOTAO) { aoAbrirBusca() }
     private val seletor = SeletorMidia(c, {}, { aoAbrirVideo() })
     private var ultimoEstado = ""
     /** O celular toca mas não manda título nem capa: tela "Tocando em <celular>" com animação e controles. */
-    private val semDados = PainelSemDados(c, musica, bt)
+    val semDados = PainelSemDados(c, musica, bt)
     private var sessaoSemDados = false
 
     /** Fundo com a capa desfocada (fica atrás de todas as telas; quem monta é a InicioActivity). */
@@ -238,7 +233,7 @@ class TelaMusica(
 
     init {
         // posições em px de projeto; a tela fica 64 abaixo do topo, então y local = y do protótipo - 64
-        conteudo.addView(capa, LayoutParams(368.d(), 368.d()).apply { leftMargin = 64.d(); topMargin = (134 - 64).d() })
+        conteudo.addView(capa, LayoutParams(TAM_BANNER.d(), TAM_BANNER.d()).apply { leftMargin = 64.d(); topMargin = (BANNER_Y - 64).d() })
 
         val textos = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
         titulo.maxLines = 2; titulo.ellipsize = TextUtils.TruncateAt.END
@@ -248,13 +243,13 @@ class TelaMusica(
         textos.addView(titulo, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         textos.addView(artista, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         textos.addView(album, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 6.d() })
-        conteudo.addView(textos, LayoutParams(1040.d() - 480.d(), -2).apply { leftMargin = 480.d(); topMargin = (140 - 64).d() })
+        conteudo.addView(textos, LayoutParams(1072.d() - COLUNA_X.d(), -2).apply { leftMargin = COLUNA_X.d(); topMargin = (BANNER_Y - 64).d() })
 
         barra.aoArrastar = { f -> if (musica.duracaoMs > 0) tempoAtual.text = formatar((f * musica.duracaoMs).toLong()) }
         barra.aoSoltar = { f -> if (musica.duracaoMs > 0) musica.buscar((f * musica.duracaoMs).toLong()) }
-        conteudo.addView(barra, LayoutParams(1216.d() - 480.d() + 24.d(), 44.d()).apply { leftMargin = 480.d() - 12.d(); topMargin = (430 - 22 - 64).d() })
+        conteudo.addView(barra, LayoutParams(1216.d() - COLUNA_X.d() + 24.d(), 44.d()).apply { leftMargin = COLUNA_X.d() - 12.d(); topMargin = (BARRA_Y - 22 - 64).d() })
         val tempos = LinearLayout(c).apply { addView(tempoAtual, LinearLayout.LayoutParams(0, -2, 1f)); addView(tempoTotal) }
-        conteudo.addView(tempos, LayoutParams(1216.d() - 480.d(), -2).apply { leftMargin = 480.d(); topMargin = (430 + 20 - 64).d() })
+        conteudo.addView(tempos, LayoutParams(1216.d() - COLUNA_X.d(), -2).apply { leftMargin = COLUNA_X.d(); topMargin = (BARRA_Y + 24 - 64).d() })
 
         val controles = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
         controles.addView(botaoRedondo(R.drawable.ic_anterior, 76, 32, Color.parseColor("#26FFFFFF")) { musica.anterior() })
@@ -268,37 +263,28 @@ class TelaMusica(
         iconePlay.setColorFilter(Color.parseColor("#0A1020"))
         controles.addView(botaoPlay, LinearLayout.LayoutParams(96.d(), 96.d()).apply { leftMargin = 28.d(); rightMargin = 28.d() })
         controles.addView(botaoRedondo(R.drawable.ic_proxima, 76, 32, Color.parseColor("#26FFFFFF")) { musica.proxima() })
-        conteudo.addView(controles, LayoutParams(-2, 96.d()).apply { leftMargin = 480.d(); topMargin = (520 - 64).d() })
+        conteudo.addView(controles, LayoutParams(-2, 96.d()).apply { leftMargin = COLUNA_X.d(); topMargin = (CONTROLES_Y - 64).d() })
 
         addView(conteudo, LayoutParams(-1, -1))
         semDados.visibility = View.GONE
         addView(semDados, LayoutParams(-1, -1))      // por cima do conteúdo e por baixo do seletor e do Menu
 
         // seletor música <-> vídeo no canto superior direito (x 1216, y 132)
-        addView(seletor, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = 64.d(); topMargin = (132 - 64).d() })
+        addView(seletor, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = 64.d(); topMargin = (BANNER_Y - 2 - 64).d() })
 
         // botão no canto: vai para a busca de vídeos e músicas
-        val menu = texto(c, "Menu", 24, Tema.TEXTO, true).apply {
+        val menu = LinearLayout(c).apply {
             gravity = Gravity.CENTER
+            tag = "menuMidia"
             background = fundoArredondado(Tema.BOTAO, 30.d(), Tema.BOTAO_BORDA)
             isClickable = true
             setOnClickListener { aoAbrirBusca() }
             efeitoToque()
+            addView(icone(c, R.drawable.ic_midia, 28, Tema.TEXTO), LinearLayout.LayoutParams(28.d(), 28.d()))      // o ícone diz que é o menu da mídia
+            addView(texto(c, "Menu", 24, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 10.d() })
         }
-        addView(menu, LayoutParams(150.d(), 60.d(), Gravity.TOP or Gravity.END).apply { topMargin = (538 - 64).d(); rightMargin = 64.d() })      // centro em y 568, o mesmo dos controles
+        addView(menu, LayoutParams(194.d(), 60.d(), Gravity.TOP or Gravity.END).apply { topMargin = (CONTROLES_Y + 48 - 30 - 64).d(); rightMargin = 64.d() })      // o mesmo centro dos controles
 
-        // ----- Nada tocando -----
-        vazio.apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        vazio.addView(AnelIcone(c, R.drawable.ic_bluetooth, 132, Color.parseColor("#7FB4FF"), Color.parseColor("#263D8BFF"), Color.parseColor("#103D8BFF")))
-        vazio.addView(tituloVazio, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 16.d() })
-        vazio.addView(dicaVazio, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 12.d() })
-        val botoes = LinearLayout(c).apply {
-            gravity = Gravity.CENTER
-            addView(botaoBluetooth)
-            addView(botaoBuscar, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d() })
-        }
-        vazio.addView(botoes, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 30.d() })
-        addView(vazio, LayoutParams(-1, -1))
 
         atualizar(true)
     }
@@ -322,25 +308,17 @@ class TelaMusica(
     fun atualizar(forcar: Boolean = false) {
         val tem = musica.temMusica
         // o celular tocou sem mandar os dados: a tela "Tocando em ..." fica até o aparelho sair ou os dados chegarem
-        if (tem || !bt.algumConectado) sessaoSemDados = false else if (bt.celularTocando) sessaoSemDados = true
+        if (tem || !bt.algumConectado) sessaoSemDados = false else if (bt.celularTocando || musica.tocando) sessaoSemDados = true
         val painel = !tem && sessaoSemDados
         semDados.visibility = if (painel) View.VISIBLE else View.GONE
         if (painel) semDados.atualizar()
         fundoCapa?.definir(if (tem) musica.capa else null)
         conteudo.visibility = if (tem) View.VISIBLE else View.GONE
-        seletor.visibility = if (tem) View.VISIBLE else View.GONE
+        seletor.visibility = if (tem || painel) View.VISIBLE else View.GONE
+        if (painel) { seletor.ativo = "musica"; seletor.videoDisponivel = false }
         findMenu()?.visibility = if (tem || painel) View.VISIBLE else View.GONE
-        vazio.visibility = if (tem || painel) View.GONE else View.VISIBLE
         if (painel) return
-        if (!tem) {
-            // sem música: a mensagem depende de haver ou não um celular conectado
-            val celular = bt.algumConectado
-            tituloVazio.text = if (celular) "Nenhuma música tocando" else "Nada tocando"
-            dicaVazio.text = if (celular) "Abra o app de música no celular,\nescolha uma música e dê play."
-                             else "Conecte um celular pelo Bluetooth\ne toque uma música."
-            botaoBluetooth.visibility = if (celular) View.GONE else View.VISIBLE
-            return
-        }
+        if (!tem) return      // sem música e sem celular tocando não há tela: quem manda é a InicioActivity (volta ao início)
 
         val chave = "${musica.titulo}|${musica.artista}|${musica.album}|${musica.tocando}|${musica.capa?.hashCode()}|${Cfg.AZUL}|${musica.emLocal}"
         if (forcar || chave != ultimoEstado) {
@@ -370,5 +348,22 @@ class TelaMusica(
         }
     }
 
-    private fun findMenu(): View? = (0 until childCount).map { getChildAt(it) }.firstOrNull { it is TextView && (it as TextView).text == "Menu" }
+    /** O celular está tocando sem mandar os dados da música (a tela "Tocando de ..." é a que vale). Também liga a sessão, se ainda não estava. */
+    fun semDadosAtivo(): Boolean {
+        if (musica.temMusica || !bt.algumConectado) { sessaoSemDados = false; return false }
+        if (bt.celularTocando || musica.tocando) sessaoSemDados = true
+        return sessaoSemDados
+    }
+
+    private fun findMenu(): View? = (0 until childCount).map { getChildAt(it) }.firstOrNull { it.tag == "menuMidia" }
 }
+
+/**
+ * Medidas (em px de projeto, y da tela inteira) da tela "Tocando agora" e da "Tocando de ...": tudo cabe na altura do banner, do topo dele
+ * até a base: textos no alto, barra de progresso, tempos e, por último, os controles e o Menu alinhados com a base do banner.
+ */
+const val TAM_BANNER = 400
+const val BANNER_Y = 192                       // topo do banner: o conjunto (banner + textos + controles) fica no meio da área abaixo do cabeçalho (64 a 720)
+const val COLUNA_X = 64 + TAM_BANNER + 48      // onde começam os textos e os controles
+const val BARRA_Y = BANNER_Y + 254            // centro da barra de progresso
+const val CONTROLES_Y = BANNER_Y + TAM_BANNER - 96      // topo dos controles (96 de altura): a base deles é a base do banner

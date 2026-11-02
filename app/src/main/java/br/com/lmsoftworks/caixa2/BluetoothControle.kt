@@ -110,12 +110,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                 ACAO_TOCANDO -> {
                     val tocando = i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == A2DP_TOCANDO
                     Log.d(TAG, "áudio do celular: ${if (tocando) "tocando" else "parado"}")
-                    if (tocando != celularTocando) {
-                        celularTocando = tocando
-                        if (tocando) aoSincronizar?.invoke()
-                        if (tocando) handler.postDelayed({ if (celularTocando) { celularConfirmado = true; aoCelularTocando?.invoke() } }, 1200)
-                        else celularConfirmado = false
-                    }
+                    mudouTocando(tocando)
                 }
                 ACAO_SINK -> if (d != null) {
                     when (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)) {
@@ -227,12 +222,42 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                     perfilSink = proxy
                     proxy.connectedDevices.forEach { conectados.add(it.address) }
+                    sincronizarTocando()
                     aoMudar()
                 }
                 override fun onServiceDisconnected(profile: Int) { perfilSink = null }
             }, PERFIL_A2DP_SINK)
         }
         aoMudar()
+    }
+
+    /**
+     * O áudio do celular começou ou parou (pelo aviso do Bluetooth OU pela leitura periódica: o que chegar primeiro). Os dois passam por
+     * aqui para que quem assume a prioridade (o app pára quando o celular começa) rode sempre, e não só quando o aviso ganha a corrida.
+     */
+    private fun mudouTocando(tocando: Boolean) {
+        if (tocando == celularTocando) return
+        celularTocando = tocando
+        if (tocando) {
+            aoSincronizar?.invoke()
+            handler.postDelayed({ if (celularTocando) { celularConfirmado = true; aoCelularTocando?.invoke() } }, 1200)
+        } else celularConfirmado = false
+    }
+
+    /**
+     * Lê do perfil de áudio se o celular está tocando AGORA. O aviso de "começou a tocar" só vem na hora da mudança: se o app abriu depois
+     * (instalação, reinício), ele não sabia que o celular já estava tocando e a tela dizia "Nenhuma música tocando".
+     */
+    fun sincronizarTocando() {
+        val p = perfilSink ?: return
+        try {
+            val tocando = p.connectedDevices.any { d -> p.javaClass.getMethod("isA2dpPlaying", BluetoothDevice::class.java).invoke(p, d) as Boolean }
+            if (tocando != celularTocando) {
+                Log.d(TAG, "áudio do celular: ${if (tocando) "tocando" else "parado"} (lido do perfil)")
+                mudouTocando(tocando)
+                aoMudar()
+            }
+        } catch (e: Exception) { Log.w(TAG, "isA2dpPlaying indisponível", e) }
     }
 
     private fun estaConectado(d: BluetoothDevice): Boolean = try {

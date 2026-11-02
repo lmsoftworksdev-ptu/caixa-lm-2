@@ -26,8 +26,8 @@ import android.widget.TextView
 class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -> Unit) : FrameLayout(c) {
 
     companion object {
-        /** O amplificador da caixa distorce acima de 87% do volume do aparelho: o 100% do app é esse 87% real. */
-        const val LIMITE_REAL = 1.0f
+        /** O amplificador da caixa corta o último passo do volume do aparelho (15 de 15): o 100% do app é o passo 14. */
+        const val LIMITE_REAL = 14f / 15f      // o nível 10 da tela é o passo 14 (o antigo nível 9)
         const val NIVEL_ABAFADO = 2
         private const val LARGURA_DP = 540
         private const val ALTURA_DP = 76
@@ -89,7 +89,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     fun volumeDaVoz() {
         if (abafado >= 0) return
         val atual = audio.getStreamVolume(canal)
-        val daVoz = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+        val daVoz = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceIn(1, limite)
         abafado = atual; abafadoAlvo = daVoz
         ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
         audio.setStreamVolume(canal, daVoz, 0)
@@ -169,8 +169,6 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
             else handler.postDelayed({ if (abafado < 0) atualizar() }, 300)     // fade acabou: mostra o número final de uma vez
         }
     }
-    /** Quem apertou "+" (ou a tecla) já no volume máximo: o app toca o aviso. */
-    var aoNoLimite: (() -> Unit)? = null
     /** O controle abriu (por toque ou por mudança de fora): a tela sai do modo ocioso. */
     var aoMostrar: (() -> Unit)? = null
 
@@ -329,7 +327,6 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     /** Cada toque em + ou − (e cada tecla) muda um NÍVEL (de 0 a 10). */
     private fun passo(sentido: Int) {
-        if (sentido > 0 && nivel >= 10) aoNoLimite?.invoke()
         definir((nivel + sentido).coerceIn(0, 10) / 10f)
     }
 

@@ -201,8 +201,6 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     interruptor(Ajustes.nivelarAudio) { Ajustes.definirNivelarAudio(it) }))
                 opcoes.addView(linha("Sons do teclado", "Um toquinho a cada tecla apertada",
                     interruptor(Ajustes.sonsTeclado) { Ajustes.definirSonsTeclado(it) }))
-                opcoes.addView(linha("Aviso de volume máximo", "O \"plim\" ao apertar + no máximo (a música abaixa enquanto toca)",
-                    interruptor(Ajustes.avisoVolumeMax) { Ajustes.definirAvisoVolumeMax(it) }))
                 opcoes.addView(linha("Volume do alarme", "O mínimo que o alarme garante ao tocar",
                     escolhas(listOf("Suave", "Médio", "Alto"), Ajustes.volumeAlarme) { i -> Ajustes.definirVolumeAlarme(i); montar() }))
             }

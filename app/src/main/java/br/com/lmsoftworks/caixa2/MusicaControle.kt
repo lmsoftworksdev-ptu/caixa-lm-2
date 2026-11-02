@@ -71,6 +71,17 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /**
+     * O celular está tocando AGORA? O estado que o iPhone manda pelo controle (AVRCP) chega na hora e vale quando é "tocando" ou
+     * "pausado"; o áudio do Bluetooth ([audioTocando]) só muda uns 5 s depois de a música parar, então só serve quando o estado do
+     * controle não diz nada (parado/sem estado).
+     */
+    fun celularTocandoAgora(audioTocando: Boolean): Boolean = when (estado) {
+        PlaybackState.STATE_PLAYING, PlaybackState.STATE_BUFFERING -> true
+        PlaybackState.STATE_PAUSED -> false
+        else -> audioTocando
+    }
+
+    /**
      * Regra única: quem deu play por último manda. O app (vídeo ou música) começou a tocar → o celular pára. O celular que "voltar" logo
      * depois não foi a pessoa (é o Bluetooth devolvendo o som ao fim do assistente): é pausado de novo.
      */
