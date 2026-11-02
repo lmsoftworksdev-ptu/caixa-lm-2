@@ -21,10 +21,14 @@ class TecladoView(c: Context) : LinearLayout(c) {
 
     /** Rótulo da tecla de ação. */
     var acao: String = "OK"
-        set(v) { field = v; montar() }
+        set(v) { if (v != field || Cfg.AZUL != corMontada) { field = v; montar() } }      // só refaz se mudou o rótulo ou a cor do menu
 
     private var maiuscula = false
     private var simbolos = false
+    private var corMontada = Cfg.AZUL
+    /** As teclas de letra (e o ⇧): trocar entre maiúscula e minúscula só troca o texto delas, sem refazer o teclado inteiro. */
+    private val letras = ArrayList<Pair<TextView, Char>>()
+    private var teclaShift: TextView? = null
 
     init {
         orientation = VERTICAL
@@ -33,7 +37,7 @@ class TecladoView(c: Context) : LinearLayout(c) {
     }
 
     /** Liga o ⇧ (a próxima letra sai maiúscula): usado quando o texto está vazio. */
-    fun capitalizar(sim: Boolean) { if (maiuscula != sim) { maiuscula = sim; montar() } }
+    fun capitalizar(sim: Boolean) { if (maiuscula != sim) { maiuscula = sim; atualizarLetras() } }
 
     private fun tecla(rotulo: String, largura: Int, destaque: Boolean = false, ativa: Boolean = false, tamanho: Int = 30, repetir: Boolean = false, acao: () -> Unit): TextView =
         TextView(context).apply {
@@ -42,9 +46,10 @@ class TecladoView(c: Context) : LinearLayout(c) {
             setTextSize(TypedValue.COMPLEX_UNIT_PX, tamanho.d().toFloat())
             typeface = if (destaque) FONTE_MEDIA else FONTE_NORMAL
             gravity = Gravity.CENTER
-            val normal = fundoArredondado(if (destaque || ativa) Cfg.AZUL else Color.parseColor("#1AFFFFFF"), 18.d())
-            val premida = fundoArredondado(if (destaque || ativa) Cfg.AZUL else Color.parseColor("#47FFFFFF"), 18.d())
-            background = normal
+            tag = ativa      // tecla "ligada" (o ⇧): fica na cor de destaque
+            fun normal(v: View) = fundoArredondado(if (destaque || v.tag == true) Cfg.AZUL else Color.parseColor("#1AFFFFFF"), 18.d())
+            fun premida(v: View) = fundoArredondado(if (destaque || v.tag == true) Cfg.AZUL else Color.parseColor("#47FFFFFF"), 18.d())
+            background = normal(this)
             isClickable = true
             // tecla que repete (apagar): segurando, depois de um instante ela se repete sozinha e vai acelerando
             var repetiu = false
@@ -61,10 +66,10 @@ class TecladoView(c: Context) : LinearLayout(c) {
             setOnTouchListener { v, e ->
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        v.background = premida; SomTeclado.tocar()
+                        v.background = premida(v); SomTeclado.tocar()
                         if (repetir) { repetiu = false; intervalo = 90L; removeCallbacks(repeticao); postDelayed(repeticao, 420) }
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { v.background = normal; removeCallbacks(repeticao) }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { v.background = normal(v); removeCallbacks(repeticao) }
                 }
                 false
             }
@@ -82,13 +87,24 @@ class TecladoView(c: Context) : LinearLayout(c) {
     private fun caracteres(s: String): Array<View> =
         s.map { ch ->
             val mostrado = if (!simbolos && maiuscula) ch.uppercaseChar() else ch
-            tecla(mostrado.toString(), 100) {
-                aoDigitar?.invoke(mostrado.toString())
-                if (maiuscula) { maiuscula = false; montar() }
-            } as View
+            val t = tecla(mostrado.toString(), 100) {
+                val digitado = if (!simbolos && maiuscula) ch.uppercaseChar() else ch
+                aoDigitar?.invoke(digitado.toString())
+                if (maiuscula) { maiuscula = false; atualizarLetras() }
+            }
+            if (!simbolos) letras.add(t to ch)
+            t as View
         }.toTypedArray()
 
+    /** Maiúscula ligada ou desligada: só troca o texto das letras e a cor do ⇧ (bem mais leve que refazer o teclado). */
+    private fun atualizarLetras() {
+        for ((t, ch) in letras) t.text = (if (maiuscula) ch.uppercaseChar() else ch).toString()
+        teclaShift?.let { it.tag = maiuscula; it.background = fundoArredondado(if (maiuscula) Cfg.AZUL else Color.parseColor("#1AFFFFFF"), 18.d()) }
+    }
+
     private fun montar() {
+        corMontada = Cfg.AZUL
+        letras.clear(); teclaShift = null
         removeAllViews()
         val apagar = tecla("⌫", 150, repetir = true) { aoApagar?.invoke() }
         if (simbolos) {
@@ -100,7 +116,8 @@ class TecladoView(c: Context) : LinearLayout(c) {
             addView(linha(*caracteres("1234567890")))
             addView(linha(*caracteres("qwertyuiop")))
             addView(linha(*caracteres("asdfghjklç")))
-            val shift = tecla("⇧", 150, ativa = maiuscula) { maiuscula = !maiuscula; montar() }
+            val shift = tecla("⇧", 150, ativa = maiuscula) { maiuscula = !maiuscula; atualizarLetras() }
+            teclaShift = shift
             addView(linha(shift, *caracteres("zxcvbnm"), apagar))
         }
         val modo = tecla(if (simbolos) "abc" else "?123", 150, tamanho = 26) { simbolos = !simbolos; montar() }
@@ -143,11 +160,25 @@ object SomTeclado {
     }
 }
 
-/** O texto de uma barra de pesquisa com a barrinha de digitação (piscando) no fim, enquanto o teclado está aberto. A barrinha ocupa sempre o mesmo lugar, para o texto não pular. */
+/** Barrinha de digitação: um traço fino desenhado colado ao fim do texto (sem o espaço que o caractere "│" deixa dos dois lados). */
+private class BarraDigitacao(private val visivel: Boolean) : android.text.style.ReplacementSpan() {
+    private val largura = Math.max(2, 2.d())
+    override fun getSize(paint: android.graphics.Paint, text: CharSequence?, start: Int, end: Int, fm: android.graphics.Paint.FontMetricsInt?): Int {
+        fm?.let { val m = paint.fontMetricsInt; it.ascent = m.ascent; it.descent = m.descent; it.top = m.top; it.bottom = m.bottom }
+        return largura
+    }
+    override fun draw(canvas: android.graphics.Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: android.graphics.Paint) {
+        if (!visivel) return
+        val m = paint.fontMetrics
+        val p = android.graphics.Paint(paint).apply { color = Color.WHITE; style = android.graphics.Paint.Style.FILL }
+        canvas.drawRect(x, y + m.ascent * 0.92f, x + largura, y + m.descent * 0.9f, p)
+    }
+}
+
+/** O texto de uma barra de pesquisa com a barrinha de digitação (piscando) no fim, enquanto o teclado está aberto. */
 fun comCursor(texto: String, teclado: Boolean, visivel: Boolean): CharSequence {
     if (!teclado) return texto
-    return android.text.SpannableStringBuilder(texto).append("│").apply {
-        setSpan(android.text.style.ForegroundColorSpan(if (visivel) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT),
-            length - 1, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    return android.text.SpannableStringBuilder(texto).append("​").apply {
+        setSpan(BarraDigitacao(visivel), length - 1, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
