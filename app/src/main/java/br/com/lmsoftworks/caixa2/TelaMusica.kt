@@ -171,11 +171,11 @@ class SeletorMidia(c: Context, private val aoMusica: () -> Unit, private val aoV
         set(v) { field = v; pintar() }
 
     init {
-        setPadding(4.d(), 4.d(), 4.d(), 4.d())
-        background = fundoArredondado(Color.parseColor("#1AFFFFFF"), 28.d(), Color.parseColor("#1FFFFFFF"))
+        setPadding(5.d(), 5.d(), 5.d(), 5.d())
+        background = fundoArredondado(Color.parseColor("#1AFFFFFF"), 42.d(), Color.parseColor("#1FFFFFFF"))
         for ((b, i) in listOf(bMusica to iMusica, bVideo to iVideo)) {
-            b.addView(i, FrameLayout.LayoutParams(26.d(), 26.d(), Gravity.CENTER))
-            addView(b, LayoutParams(64.d(), 48.d()))
+            b.addView(i, FrameLayout.LayoutParams(38.d(), 38.d(), Gravity.CENTER))
+            addView(b, LayoutParams(100.d(), 72.d()))
             b.isClickable = true
             b.efeitoToque()
         }
@@ -188,7 +188,7 @@ class SeletorMidia(c: Context, private val aoMusica: () -> Unit, private val aoV
 
     private fun pintar() {
         fun estilo(b: FrameLayout, i: ImageView, ligado: Boolean) {
-            b.background = if (ligado) fundoArredondado(Color.WHITE, 24.d()) else null
+            b.background = if (ligado) fundoArredondado(Color.WHITE, 36.d()) else null
             i.setColorFilter(if (ligado) Color.parseColor("#0A1020") else Color.WHITE)
         }
         estilo(bMusica, iMusica, ativo == "musica")
@@ -214,6 +214,7 @@ class TelaMusica(
     private val capa = CapaView(c)
     private val rotulo = texto(c, "", 15, Color.parseColor("#C9D4EE"), true).apply { letterSpacing = 1.6f / 15f }
     private val titulo = texto(c, "", 46, Tema.TEXTO, true)
+    private val tituloBox = FrameLayout(c)      // o título é um texto rolante: se for maior que o espaço, desliza com as pontas em degradê
     private val artista = texto(c, "", 28, Color.parseColor("#E3EAFB"))
     private val album = texto(c, "", 21, Tema.TEXTO2)
     private val barra = BarraProgresso(c)
@@ -227,6 +228,10 @@ class TelaMusica(
     /** O celular toca mas não manda título nem capa: tela "Tocando em <celular>" com animação e controles. */
     val semDados = PainelSemDados(c, musica, bt)
     private var sessaoSemDados = false
+    private var proximasAbertas = false
+    private val proximas = ListaProximas(c, "Próximas", 76, 76, { i -> musica.irParaLocal(i) }) { alternarProximas(false) }
+    private val botaoProximas = LinearLayout(c)
+    private val fundoProximas = View(c)      // cobre a tela por trás da lista: tocar fora dela fecha
 
     /** Fundo com a capa desfocada (fica atrás de todas as telas; quem monta é a InicioActivity). */
     var fundoCapa: FundoCapa? = null
@@ -240,10 +245,10 @@ class TelaMusica(
         artista.maxLines = 1; artista.ellipsize = TextUtils.TruncateAt.END
         album.maxLines = 1; album.ellipsize = TextUtils.TruncateAt.END
         textos.addView(rotulo)
-        textos.addView(titulo, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
+        textos.addView(tituloBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         textos.addView(artista, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         textos.addView(album, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 6.d() })
-        conteudo.addView(textos, LayoutParams(1072.d() - COLUNA_X.d(), -2).apply { leftMargin = COLUNA_X.d(); topMargin = (BANNER_Y - 64).d() })
+        conteudo.addView(textos, LayoutParams((TEXTO_FIM - COLUNA_X).d(), -2).apply { leftMargin = COLUNA_X.d(); topMargin = (BANNER_Y - 64).d() })
 
         barra.aoArrastar = { f -> if (musica.duracaoMs > 0) tempoAtual.text = formatar((f * musica.duracaoMs).toLong()) }
         barra.aoSoltar = { f -> if (musica.duracaoMs > 0) musica.buscar((f * musica.duracaoMs).toLong()) }
@@ -284,6 +289,21 @@ class TelaMusica(
             addView(texto(c, "Menu", 24, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 10.d() })
         }
         addView(menu, LayoutParams(194.d(), 60.d(), Gravity.TOP or Gravity.END).apply { topMargin = (CONTROLES_Y + 48 - 30 - 64).d(); rightMargin = 64.d() })      // o mesmo centro dos controles
+        // "Próximas": a lista do que vem depois (só quando a caixa é quem toca); abre uma lista ao lado e comprime o resto da tela
+        botaoProximas.apply {
+            gravity = Gravity.CENTER
+            background = fundoArredondado(Tema.BOTAO, 30.d(), Tema.BOTAO_BORDA)
+            isClickable = true
+            visibility = View.GONE
+            setOnClickListener { alternarProximas(true) }
+            efeitoToque()
+            addView(icone(c, R.drawable.ic_lista, 26, Tema.TEXTO), LinearLayout.LayoutParams(26.d(), 26.d()))
+            addView(texto(c, "Próximas", 22, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 8.d() })
+        }
+        addView(botaoProximas, LayoutParams(184.d(), 60.d(), Gravity.TOP or Gravity.END).apply { topMargin = (CONTROLES_Y + 48 - 30 - 64).d(); rightMargin = (64 + 194 + 14).d() })
+        fundoProximas.apply { visibility = View.GONE; isClickable = true; setOnClickListener { alternarProximas(false) } }
+        addView(fundoProximas, LayoutParams(-1, -1))
+        addView(proximas, LayoutParams(PROXIMAS_LARGURA.d(), -1, Gravity.END).apply { topMargin = 36.d(); bottomMargin = 22.d(); rightMargin = 20.d() })
 
 
         atualizar(true)
@@ -314,16 +334,20 @@ class TelaMusica(
         if (painel) semDados.atualizar()
         fundoCapa?.definir(if (tem) musica.capa else null)
         conteudo.visibility = if (tem) View.VISIBLE else View.GONE
-        seletor.visibility = if (tem || painel) View.VISIBLE else View.GONE
+        seletor.visibility = if ((tem || painel) && !proximasAbertas) View.VISIBLE else View.GONE
         if (painel) { seletor.ativo = "musica"; seletor.videoDisponivel = false }
-        findMenu()?.visibility = if (tem || painel) View.VISIBLE else View.GONE
+        findMenu()?.visibility = if ((tem || painel) && !proximasAbertas) View.VISIBLE else View.GONE
+        val local = tem && musica.emLocal && musica.filaLocal.size > 1
+        if (!local && proximasAbertas) alternarProximas(false)
+        botaoProximas.visibility = if (local && !proximasAbertas) View.VISIBLE else View.GONE
+        if (proximasAbertas) proximas.atualizar(musica.filaLocal, musica.indiceLocal)
         if (painel) return
         if (!tem) return      // sem música e sem celular tocando não há tela: quem manda é a InicioActivity (volta ao início)
 
         val chave = "${musica.titulo}|${musica.artista}|${musica.album}|${musica.tocando}|${musica.capa?.hashCode()}|${Cfg.AZUL}|${musica.emLocal}"
         if (forcar || chave != ultimoEstado) {
             ultimoEstado = chave
-            titulo.text = musica.titulo
+            tituloBox.removeAllViews(); tituloBox.addView(TextoRolante(c, musica.titulo, 46, Tema.TEXTO, true))
             artista.text = musica.artista.ifEmpty { "Artista desconhecido" }
             album.text = musica.album
             album.visibility = if (musica.album.isEmpty()) View.GONE else View.VISIBLE
@@ -348,6 +372,20 @@ class TelaMusica(
         }
     }
 
+    /** Abre ou fecha a lista de próximas: a tela comprime para a esquerda e a lista ocupa o lado direito. */
+    private fun alternarProximas(abrir: Boolean) {
+        proximasAbertas = abrir
+        conteudo.pivotX = 0f; conteudo.pivotY = conteudo.height / 2f
+        val escala = if (abrir) 0.66f else 1f
+        conteudo.animate().scaleX(escala).scaleY(escala).setDuration(260).start()
+        proximas.visibility = if (abrir) View.VISIBLE else View.GONE
+        fundoProximas.visibility = if (abrir) View.VISIBLE else View.GONE
+        if (abrir) proximas.atualizar(musica.filaLocal, musica.indiceLocal)
+        botaoProximas.visibility = View.GONE
+        seletor.visibility = if (abrir) View.GONE else seletor.visibility
+        findMenu()?.visibility = if (abrir) View.GONE else findMenu()?.visibility ?: View.GONE
+    }
+
     /** O celular está tocando sem mandar os dados da música (a tela "Tocando de ..." é a que vale). Também liga a sessão, se ainda não estava. */
     fun semDadosAtivo(): Boolean {
         if (musica.temMusica || !bt.algumConectado) { sessaoSemDados = false; return false }
@@ -367,3 +405,9 @@ const val BANNER_Y = 192                       // topo do banner: o conjunto (ba
 const val COLUNA_X = 64 + TAM_BANNER + 48      // onde começam os textos e os controles
 const val BARRA_Y = BANNER_Y + 254            // centro da barra de progresso
 const val CONTROLES_Y = BANNER_Y + TAM_BANNER - 96      // topo dos controles (96 de altura): a base deles é a base do banner
+
+/** Largura da lista "Próximas" (a mesma na tela da música e no player de vídeo). */
+const val PROXIMAS_LARGURA = 440
+
+/** Onde terminam os textos (título, artista): antes do seletor música/vídeo, que fica no canto de cima à direita. */
+const val TEXTO_FIM = 990

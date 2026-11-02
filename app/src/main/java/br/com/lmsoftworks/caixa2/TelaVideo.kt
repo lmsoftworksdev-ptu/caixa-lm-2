@@ -54,6 +54,12 @@ class TelaVideo(
 ) : FrameLayout(c) {
 
     private val imagem = SurfaceView(c)
+    private var lateralAberta = false
+    private val lateral = ListaProximas(c, "Próximos", 144, 81, { i -> player.irPara(i) }) { alternarLateral(false) }
+    private var botaoLista: View? = null
+    private var botaoVoltar10: View? = null
+    private var botaoAvancar10: View? = null
+    private var iconeVolume: View? = null
     private val cortina = View(c).apply { setBackgroundColor(Color.BLACK) }
     private var cortinaForcada = false
     private val controles = FrameLayout(c)
@@ -74,7 +80,7 @@ class TelaVideo(
     private val handler = Handler(Looper.getMainLooper())
     private val esconder = Runnable { mostrarControles(false) }
     private val tique = object : Runnable {
-        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; handler.postDelayed(this, 500) }
+        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
     }
     private var controlesVisiveis = true
 
@@ -91,7 +97,7 @@ class TelaVideo(
         val degradeTopo = View(c).apply { background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT)) }
         val degradeBase = View(c).apply { background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.parseColor("#E6000000"), Color.TRANSPARENT)) }
         controles.addView(degradeTopo, LayoutParams(-1, 130.d(), Gravity.TOP))
-        controles.addView(degradeBase, LayoutParams(-1, 250.d(), Gravity.BOTTOM))
+        controles.addView(degradeBase, LayoutParams(-1, 300.d(), Gravity.BOTTOM))
 
         titulo.maxLines = 1; titulo.ellipsize = TextUtils.TruncateAt.END
         canal.maxLines = 1; canal.ellipsize = TextUtils.TruncateAt.END
@@ -108,31 +114,36 @@ class TelaVideo(
             addView(icone(c, recurso, icone, Color.WHITE), LayoutParams(icone.d(), icone.d(), Gravity.CENTER))
         }
         val vidro = Color.parseColor("#22FFFFFF")
-        val anterior = redondo(R.drawable.ic_anterior, 68, 30, vidro) { player.anterior() }
-        val voltar10 = redondo(R.drawable.ic_voltar10, 68, 30, vidro) { player.pular(-10_000) }
+        val anterior = redondo(R.drawable.ic_anterior, 92, 40, vidro) { player.anterior() }
+        val voltar10 = redondo(R.drawable.ic_voltar10, 92, 40, vidro) { player.pular(-10_000) }
         botaoPlay.apply {
-            background = fundoArredondado(Color.WHITE, 42.d())      // igual ao da música: fundo branco, ícone preto
+            background = fundoArredondado(Color.WHITE, 56.d())      // igual ao da música: fundo branco, ícone preto
             isClickable = true
             setOnClickListener { player.alternar(); agendarEsconder() }
             efeitoToque()
             iconePlay.setColorFilter(Color.BLACK)
-            addView(iconePlay, LayoutParams(40.d(), 40.d(), Gravity.CENTER))
+            addView(iconePlay, LayoutParams(54.d(), 54.d(), Gravity.CENTER))
         }
-        val avancar10 = redondo(R.drawable.ic_avancar10, 68, 30, vidro) { player.pular(10_000) }
-        val proxima = redondo(R.drawable.ic_proxima, 68, 30, vidro) { player.proxima() }
+        val avancar10 = redondo(R.drawable.ic_avancar10, 92, 40, vidro) { player.pular(10_000) }
+        val proxima = redondo(R.drawable.ic_proxima, 92, 40, vidro) { player.proxima() }
         botaoAnterior = anterior; botaoProxima = proxima
+        botaoVoltar10 = voltar10; botaoAvancar10 = avancar10
         val linhaBotoes = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
-        val lp68 = { LinearLayout.LayoutParams(68.d(), 68.d()).apply { rightMargin = 22.d() } }
+        val lp68 = { LinearLayout.LayoutParams(92.d(), 92.d()).apply { rightMargin = 20.d() } }
         linhaBotoes.addView(anterior, lp68())
         linhaBotoes.addView(voltar10, lp68())
-        linhaBotoes.addView(botaoPlay, LinearLayout.LayoutParams(84.d(), 84.d()).apply { rightMargin = 22.d() })
+        linhaBotoes.addView(botaoPlay, LinearLayout.LayoutParams(112.d(), 112.d()).apply { rightMargin = 20.d() })
         linhaBotoes.addView(avancar10, lp68())
         linhaBotoes.addView(proxima, lp68())
+        val lista = redondo(R.drawable.ic_lista, 92, 40, vidro) { alternarLateral(!lateralAberta) }
+        botaoLista = lista
+        linhaBotoes.addView(lista, lp68())
         linhaBotoes.addView(tempoAtual.apply { setPadding(10.d(), 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))
         linhaBotoes.addView(tempoTotal, LinearLayout.LayoutParams(-2, -2))
         linhaBotoes.addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
-        linhaBotoes.addView(icone(c, R.drawable.ic_volume_2, 34, Color.WHITE), LinearLayout.LayoutParams(34.d(), 34.d()).apply { rightMargin = 6.d() })
-        linhaBotoes.addView(volume, LinearLayout.LayoutParams(200.d(), 44.d()))
+        iconeVolume = icone(c, R.drawable.ic_volume_2, 34, Color.WHITE)
+        linhaBotoes.addView(iconeVolume, LinearLayout.LayoutParams(34.d(), 34.d()).apply { rightMargin = 6.d() })
+        linhaBotoes.addView(volume, LinearLayout.LayoutParams(200.d(), 60.d()))
 
         barra.aoArrastar = { f -> if (player.duracaoMs > 0) tempoAtual.text = formatar((f * player.duracaoMs).toLong()); agendarEsconder() }
         barra.aoSoltar = { f -> if (player.duracaoMs > 0) player.buscar((f * player.duracaoMs).toLong()) }
@@ -143,11 +154,12 @@ class TelaVideo(
 
         val base = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
-            addView(barra, LinearLayout.LayoutParams(-1, 44.d()))
+            addView(barra, LinearLayout.LayoutParams(-1, 60.d()))
             addView(linhaBotoes, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 6.d() })
         }
         controles.addView(base, LayoutParams(-1, -2, Gravity.BOTTOM).apply { leftMargin = 30.d(); rightMargin = 40.d(); bottomMargin = 26.d() })
         addView(controles, LayoutParams(-1, -1))
+        addView(lateral, LayoutParams(PROXIMAS_LARGURA.d(), -1, Gravity.END).apply { topMargin = 16.d(); bottomMargin = 16.d(); rightMargin = 16.d() })
 
         // ---- carregando / erro ----
         addView(rodinha, LayoutParams(70.d(), 70.d(), Gravity.CENTER))
@@ -162,8 +174,29 @@ class TelaVideo(
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.actionMasked == MotionEvent.ACTION_UP) mostrarControles(!controlesVisiveis)
+        if (e.actionMasked == MotionEvent.ACTION_UP) { if (lateralAberta) alternarLateral(false) else mostrarControles(!controlesVisiveis) }      // tocar fora da lista fecha a lista
         return true
+    }
+
+    /**
+     * Botão da lista: comprime o vídeo (sempre em 16:9) para a esquerda e abre a barra lateral com os próximos. Os controles ficam do
+     * mesmo tamanho do vídeo e o volume sai deles para caberem.
+     */
+    private fun alternarLateral(abrir: Boolean) {
+        lateralAberta = abrir
+        val largura = if (abrir) (1280 - PROXIMAS_LARGURA - 32).d() else -1      // o vídeo continua em 16:9
+        val altura = if (abrir) ((1280 - PROXIMAS_LARGURA - 32) * 9 / 16).d() else -1
+        val g = Gravity.START or Gravity.CENTER_VERTICAL
+        imagem.layoutParams = LayoutParams(largura, altura, g)
+        cortina.layoutParams = LayoutParams(largura, altura, g)
+        controles.layoutParams = LayoutParams(if (abrir) (1280 - PROXIMAS_LARGURA - 24).d() else -1, -1, Gravity.START)
+        botaoVoltar10?.visibility = if (abrir) View.GONE else View.VISIBLE
+        botaoAvancar10?.visibility = if (abrir) View.GONE else View.VISIBLE
+        lateral.visibility = if (abrir) View.VISIBLE else View.GONE
+        volume.visibility = if (abrir) View.GONE else View.VISIBLE
+        iconeVolume?.visibility = if (abrir) View.GONE else View.VISIBLE
+        if (abrir) lateral.atualizar(player.fila, player.indice)
+        agendarEsconder()
     }
 
     /** Só aparece quando o vídeo veio de uma música (Tocando agora). */
@@ -192,6 +225,7 @@ class TelaVideo(
      */
     fun abrir(esmaecendo: Boolean = false) {
         esperando = false
+        if (lateralAberta) alternarLateral(false)
         visibility = View.VISIBLE
         if (esmaecendo) {
             imagem.visibility = View.GONE; cortinaForcada = true; cortina.visibility = View.VISIBLE
@@ -295,6 +329,7 @@ class TelaVideo(
         textoErro.text = erro ?: ""
         botaoAnterior?.alpha = if (player.temAnterior || player.posicaoMs > 4000) 1f else .4f
         botaoProxima?.alpha = if (player.temProxima) 1f else .4f
+        botaoLista?.visibility = if (player.fila.size > 1) View.VISIBLE else View.GONE
         // vídeo muito longo (mais de 10 min) não é uma música: o botão da nota fica indisponível
         seletor.musicaDisponivel = player.duracaoMs <= 0 || player.duracaoMs <= 600_000L
         botaoPlay.visibility = View.VISIBLE      // sempre aparece: pausa/play enquanto toca; play no meio quando parado ou carregando

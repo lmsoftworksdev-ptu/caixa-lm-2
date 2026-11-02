@@ -67,6 +67,17 @@ object YouTube {
         }
     }
 
+    /**
+     * O "Mix" do YouTube para um vídeo (a lista de "Mix - <artista>" que aparece ao lado no site): playlist automática com o endereço
+     * do vídeo mais list=RD<código>. Funciona sem conta. Bloqueante: chame fora da thread principal. Vazio se não vier.
+     */
+    fun mix(urlVideo: String, musica: Boolean): List<Resultado> {
+        garantirInicio()
+        val id = Regex("[?&]v=([\\w-]{11})").find(urlVideo)?.groupValues?.get(1) ?: return emptyList()
+        val info = PlaylistInfo.getInfo(service, "https://www.youtube.com/watch?v=$id&list=RD$id")
+        return info.relatedItems.filter { it.duration > 0 && (!musica || it.duration in 60..900) }.map { paraResultado(it) }
+    }
+
     private fun semAcento(s: String): String =
         java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
 
@@ -152,14 +163,27 @@ object YouTube {
         return Regex("""\S+ [-–|] \S+""").containsMatchIn(t)      // "Artista - Música"
     }
 
-    /** "Em alta": o YouTube não tem mais a página de tendências, então usamos buscas que trazem o que está mais visto. */
+    /**
+     * "Em alta": as paradas do próprio YouTube (YouTube Charts, Brasil), sem plano B montado por buscas: se o serviço não responder, a
+     * tela avisa em vez de mostrar uma lista inventada. Vídeos = "Em alta" nos videoclipes; músicas = as mais ouvidas da semana.
+     */
     fun emAlta(musica: Boolean): List<Resultado> {
-        // O "em alta" de verdade: as paradas do próprio YouTube (YouTube Charts, Brasil). Se estiverem fora do ar, cai para buscas.
-        try {
-            val r = parada(musica)
-            if (r.size >= 4) return r
-        } catch (e: Exception) { Log.w("Midia", "parada do YouTube falhou: $e") }
-        return emAltaPorBusca(musica)
+        val r = parada(musica)
+        if (r.size < 4) throw java.io.IOException("parada vazia")
+        return r
+    }
+
+    /**
+     * Uma fileira de gênero ("Sertanejo em alta"): o que o YouTube traz primeiro para o gênero deste ano, só músicas (ou só clipes).
+     * Bloqueante: chame fora da thread principal.
+     */
+    fun generoEmAlta(termo: String, musica: Boolean): List<Resultado> {
+        val consulta = if (musica) "$termo mais tocadas 2026" else "$termo clipe oficial 2026"
+        val vistos = HashSet<String>()
+        return buscar(consulta, musica)
+            .filter { if (musica) it.duracaoSeg in 60..600 else it.duracaoSeg in 90..720 }
+            .filter { vistos.add(it.titulo.lowercase() + "|" + it.canal.lowercase()) }
+            .take(20)
     }
 
     /**
@@ -216,23 +240,6 @@ object YouTube {
         return saida
     }
 
-    private fun emAltaPorBusca(musica: Boolean): List<Resultado> {
-        if (musica) return buscar("músicas mais tocadas do brasil", true)
-        val consultas = listOf("clipe oficial 2026", "clipe oficial sertanejo", "clipe oficial funk", "clipe oficial pagode", "clipe oficial pop brasil", "clipe oficial forró")
-        val listas = arrayOfNulls<List<Resultado>>(consultas.size)
-        consultas.mapIndexed { i, q -> Thread { listas[i] = try { buscar(q, false) } catch (e: Exception) { null } }.also { it.start() } }.forEach { it.join() }
-        val filtradas = listas.map { l -> l.orEmpty().filter { it.duracaoSeg in 90..600 } }
-        if (filtradas.all { it.isEmpty() }) throw java.io.IOException("sem clipes")
-        val vistos = HashSet<String>()
-        val saida = ArrayList<Resultado>()
-        var k = 0
-        while (saida.size < 14 && filtradas.any { k < it.size }) {
-            for (l in filtradas) l.getOrNull(k)?.let { if (vistos.add(it.url)) saida.add(it) }
-            k++
-        }
-        return saida
-    }
-
     private fun executarBusca(consulta: String, filtro: String): List<Resultado> {
         val handler = service.searchQHFactory.fromQuery(consulta, listOf(filtro), "")
         val info = SearchInfo.getInfo(service, handler)
@@ -263,6 +270,32 @@ object YouTube {
                 val itens = PlaylistInfo.getInfo(service, p.url).relatedItems
                     .filter { it.duration > 0 }.take(50).map { paraResultado(it) }
                 if (itens.size >= 3) return (p.name ?: consulta) to itens
+            } catch (e: Exception) { Log.w("Midia", "playlist ${p.url} falhou: $e") }
+        }
+        return null
+    }
+
+    /**
+     * Bloqueante: uma playlist de [consulta] que ainda não foi usada ([usadas] guarda os endereços): (nome, endereço, itens com duração).
+     * Serve para emendar playlists do mesmo tema; null se nenhuma nova servir.
+     */
+    fun playlistNova(consulta: String, usadas: Set<String>, exigirArtista: String? = null): Triple<String, String, List<Resultado>>? {
+        garantirInicio()
+        val handler = service.searchQHFactory.fromQuery(consulta, listOf(YoutubeSearchQueryHandlerFactory.PLAYLISTS), "")
+        val achadas = SearchInfo.getInfo(service, handler).relatedItems.filterIsInstance<PlaylistInfoItem>()
+        for (p in achadas.take(8)) {
+            if (p.url in usadas) continue
+            try {
+                var itens = PlaylistInfo.getInfo(service, p.url).relatedItems.filter { it.duration > 0 }.take(50).map { paraResultado(it) }
+                if (exigirArtista != null) {
+                    // playlist DO artista: o nome dela traz o artista e a maioria das faixas também (nada de playlist misturada)
+                    val a = semAcento(exigirArtista)
+                    if (!semAcento(p.name ?: "").contains(a)) continue
+                    val dele = itens.filter { semAcento(it.titulo + " " + it.canal).contains(a) }
+                    if (dele.size < 5 || dele.size * 100 < itens.size * 60) continue
+                    itens = dele
+                }
+                if (itens.size >= 5) return Triple(p.name ?: consulta, p.url, itens)
             } catch (e: Exception) { Log.w("Midia", "playlist ${p.url} falhou: $e") }
         }
         return null

@@ -155,6 +155,17 @@ class InicioActivity : Activity() {
             if (atual == "musica" && !musica.temMusica && !musica.emLocal && !telaMusica.semDadosAtivo()) {
                 if (vazioDesde == 0L) vazioDesde = agoraMs else if (agoraMs - vazioDesde > 400L && !girando) ir("inicio")
             } else vazioDesde = 0L
+            vigiarNicho()
+            // Proteção: só a tela atual pode ficar visível. Se outra continuar por cima (um giro interrompido, uma troca rápida), some em meio segundo.
+            if (apareceu && !girando && !ocioso && !telaVideo.aberto) {
+                val atualView = tela(atual)
+                var sobrando = false
+                for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "led", "alarmes", "config", "clima")) {
+                    val v = tela(nome)
+                    if (v !== atualView && v.visibility == View.VISIBLE) { sobrando = true; if (agoraMs - sobreposicaoDesde > 600L) { v.visibility = View.INVISIBLE; Cubo.limpar(v) } }
+                }
+                if (!sobrando) sobreposicaoDesde = agoraMs
+            } else sobreposicaoDesde = agoraMs
             if (agoraMs - ultimaSincBt > 3000L) { ultimaSincBt = agoraMs; bluetooth.sincronizarTocando() }      // o aviso de "tocando" pode ter saído antes de o app abrir
             val semDados = !musica.temMusica && bluetooth.algumConectado && (bluetooth.celularTocando || musica.tocando) && !playerMidia.ativo && !telaVideo.aberto
             if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
@@ -245,9 +256,10 @@ class InicioActivity : Activity() {
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
         playerMidia.celularTocando = { bluetooth.celularConfirmado }
         musica.local = playerMidia
-        telaMidia = TelaMidia(this, { lista, i -> abrirVideo(listOf(lista[i]), 0) }, { lista, i -> tocarMusicaDoYoutube(listOf(lista[i]), 0) }, { e -> Atualizador.aoFalhar(this, e) })
+        telaMidia = TelaMidia(this, { lista, i, n -> iniciarNicho(n, false, lista[i]); abrirVideo(listOf(lista[i]), 0) }, { lista, i, n -> iniciarNicho(n, true, lista[i]); tocarMusicaDoYoutube(listOf(lista[i]), 0) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.aoAbrirWifi = { ir("wifi") }
         telaMidia.visibility = View.GONE
+        relogio.postDelayed({ telaMidia.preCarregar() }, 4_000L)      // a Mídia já abre pronta (e fica montada até a caixa reiniciar)
         telaReceitas = TelaReceitas(this)
         telaReceitas.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
@@ -436,6 +448,7 @@ class InicioActivity : Activity() {
     private var semAbrirMusicaAte = 0L
     private var ultimaSincBt = 0L
     private var vazioDesde = 0L
+    private var sobreposicaoDesde = 0L
     private var cartaoSemDados = false          // o cartão do Início com o nome do aparelho (celular tocando sem mandar os dados) está valendo
     private var semDadosVistoEm = 0L
     private var abriuSemDados = false        // a tela "Tocando em ..." (celular tocando sem mandar os dados) já abriu nesta vez
@@ -1150,8 +1163,8 @@ class InicioActivity : Activity() {
             voltarMusica && playerMidia.item != null && playerMidia.ehVideo && playerMidia.item?.url != clipeAbertoUrl ->
                 musicaDoVideo(playerMidia.item!!, pos, estavaTocando, irParaMusica = false)
             // o clipe ainda nem tinha começado: a música segue de onde parou
-            voltarMusica && faixa != null && !playerMidia.ehVideo -> if (musicaTocavaAntes) musica.tocar()
-            voltarMusica && filaDaMusica.isNotEmpty() -> musica.tocarDoYoutube(filaDaMusica, indiceDaMusica, pos, estavaTocando)
+            voltarMusica && faixa != null && !playerMidia.ehVideo -> { if (musicaTocavaAntes) musica.tocar(); retomarNichoDaMusica() }
+            voltarMusica && filaDaMusica.isNotEmpty() -> { musica.tocarDoYoutube(filaDaMusica, indiceDaMusica, pos, estavaTocando); retomarNichoDaMusica() }
             else -> playerMidia.parar()
         }
     }
@@ -1221,6 +1234,12 @@ class InicioActivity : Activity() {
     }
 
     /** Seletor da tela Tocando agora: abre o clipe da mesma faixa no mesmo segundo; a música para. */
+    /** Voltou do vídeo para a música: a fila da música volta e o Mix dela segue enchendo (o tema do vídeo foi só para a lista dele). */
+    private fun retomarNichoDaMusica() {
+        val f = faixaDaMusica ?: filaDaMusica.getOrNull(indiceDaMusica) ?: return
+        iniciarNicho(f.canal.removeSuffix(" - Topic").ifBlank { f.titulo }, true, f)
+    }
+
     private fun videoDaMusica() {
         if (!musica.emLocal || buscandoClipe || telaVideo.aberto) return
         val faixa = playerMidia.item ?: return
@@ -1240,6 +1259,7 @@ class InicioActivity : Activity() {
             if (meuPedido != pedidoClipe || !telaVideo.aberto) return
             clipeAbertoUrl = achado.url
             abrirVideo(listOf(achado.copy(titulo = titulo, canal = "$artista · Clipe oficial")), 0, pos)
+            iniciarNicho(artista.ifBlank { titulo }, false, achado)      // a lista de próximos do vídeo: o Mix do clipe
             videoDeMusica = true
             telaVideo.mostrarSeletor(true)
         }
@@ -1267,6 +1287,89 @@ class InicioActivity : Activity() {
         girando = true
         tela(origemVideo).visibility = View.VISIBLE
         telaVideo.esmaecerSaida { girando = false; fecharVideo() }
+    }
+
+    /**
+     * O que toca segue um TEMA ("sertanejo", a pesquisa...): enquanto o item escolhido toca, o app procura uma playlist pronta desse tema
+     * e a põe na fila; quando a playlist está acabando, emenda outra do mesmo tema. Assim não aparece nada fora do assunto.
+     */
+    private class Nicho(val termo: String, val musica: Boolean, val artista: String, val primeiroUrl: String) {
+        val usadas = HashSet<String>(); val urls = HashSet<String>(); val sementes = HashSet<String>()
+        var buscando = false; var tentativas = 0; var rodada = 0
+        val desde = android.os.SystemClock.uptimeMillis()
+    }
+    private var nicho: Nicho? = null
+
+    /** O artista (ou canal) do item escolhido, limpo para pesquisar: sem " - Topic", sem "VEVO", só o primeiro de vários. Vazio se for igual ao tema. */
+    private fun nomeDoArtista(canal: String, termo: String): String {
+        val limpo = canal.substringBefore(",").substringBefore(" feat").removeSuffix(" - Topic").replace(Regex("(?i)\\s*(vevo|official)$"), "").trim()
+        if (limpo.length < 3) return ""
+        val a = limpo.lowercase(); val t = termo.lowercase()
+        return if (a == t || a.contains(t) || t.contains(a)) "" else limpo
+    }
+
+    private fun iniciarNicho(termo: String, musica: Boolean, primeiro: Resultado) {
+        nicho = Nicho(termo, musica, nomeDoArtista(primeiro.canal, termo), primeiro.url).also { it.urls.add(primeiro.url) }
+        carregarPlaylistDoNicho()
+    }
+
+    private fun carregarPlaylistDoNicho() {
+        val n = nicho ?: return
+        if (n.buscando) return
+        n.buscando = true
+        val doTema = if (n.musica) listOf("${n.termo} mais tocadas", "${n.termo} top hits 2026", "${n.termo} as melhores", "${n.termo} lançamentos 2026", "${n.termo} para ouvir")
+            else listOf("${n.termo} clipes oficiais", "${n.termo} clipes mais vistos", "${n.termo} melhores clipes 2026", "${n.termo} ao vivo", "${n.termo} lançamentos 2026")
+        // o que vem depois do item escolhido tem que ser parecido com ELE: primeiro playlists DO artista dele (exigindo o nome do artista na
+        // playlist e na maioria das faixas), só depois as do gênero
+        val doArtista = if (n.artista.isEmpty()) emptyList() else if (n.musica)
+            listOf("As melhores do ${n.artista}", "${n.artista} mais tocadas", "${n.artista} essentials", "${n.artista} top 50", "${n.artista} playlist")
+            else listOf("${n.artista} clipes oficiais", "As melhores do ${n.artista}", "${n.artista} melhores clipes", "${n.artista} ao vivo")
+        val consultas = doArtista.map { it to n.artista } + doTema.map { it to null }
+        // 1) O MIX do YouTube: do item escolhido e, depois, do último da fila (como o autoplay do site: nunca sai do assunto)
+        // sementes, em ordem: o primeiro item; depois o último da fila, o que toca agora e um do meio (se o Mix de uma só trouxe repetidos)
+        val f = playerMidia.fila
+        val candidatas = if (n.sementes.isEmpty()) listOf(n.primeiroUrl) else listOfNotNull(f.lastOrNull()?.url, f.getOrNull(playerMidia.indice)?.url, f.getOrNull(f.size / 2)?.url)
+        val semente = candidatas.firstOrNull { it !in n.sementes } ?: n.primeiroUrl
+        val tentarMix = n.sementes.add(semente)
+        val (q, exigir) = consultas[n.rodada % consultas.size]
+        val t0 = android.os.SystemClock.uptimeMillis()
+        Thread {
+            val mix = if (tentarMix) try { YouTube.mix(semente, n.musica) } catch (e: Exception) { emptyList() } else emptyList()
+            if (mix.size >= 5) {
+                android.util.Log.d("Nicho", "mix do YouTube de " + semente.takeLast(11) + " (" + (if (n.musica) "música" else "vídeo") + "): " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + mix.size + " itens")
+                relogio.post {
+                    n.buscando = false
+                    if (nicho !== n) return@post
+                    val entraram = playerMidia.anexarFila(mix); n.urls.addAll(mix.map { it.url })
+                    android.util.Log.d("Nicho", "fila agora " + playerMidia.fila.size + " (" + entraram + " novos)")
+                    if (entraram < 3 && ++n.tentativas < 10) carregarPlaylistDoNicho() else if (entraram >= 3) n.tentativas = 0      // quase tudo repetido: tenta outra semente/playlist
+                }
+                return@Thread
+            }
+            // 2) plano B: playlists achadas por busca (do artista e, depois, do gênero)
+            n.rodada++
+            val r = try { YouTube.playlistNova(q, n.usadas, exigir) } catch (e: Exception) { null }
+            android.util.Log.d("Nicho", "mix indisponível; busca de playlist '" + q + "': " + (android.os.SystemClock.uptimeMillis() - t0) + " ms -> " + (r?.first ?: "nenhuma"))
+            relogio.post {
+                n.buscando = false
+                if (nicho !== n) return@post
+                if (r != null) {
+                    n.usadas.add(r.second)
+                    val itens = if (n.musica) r.third.filter { YouTube.pareceMusica(it.titulo, it.canal, it.duracaoSeg, "") } else r.third
+                    val entraram = playerMidia.anexarFila(itens); n.urls.addAll(itens.map { it.url })
+                    if (entraram == 0) { if (++n.tentativas < 10) carregarPlaylistDoNicho() } else n.tentativas = 0      // nada novo: tenta outra playlist
+                } else if (++n.tentativas < 10) carregarPlaylistDoNicho()
+            }
+        }.start()
+    }
+
+    /** A cada meio segundo: largou o tema se tocou algo de fora dele; pede outra playlist quando a fila está acabando. */
+    private fun vigiarNicho() {
+        val n = nicho ?: return
+        val agora = android.os.SystemClock.uptimeMillis()
+        val atualUrl = playerMidia.item?.url
+        if (agora - n.desde > 8000L && playerMidia.ativo && atualUrl != null && atualUrl !in n.urls) { nicho = null; return }
+        if (!n.buscando && playerMidia.ativo && playerMidia.fila.size - playerMidia.indice <= 4) carregarPlaylistDoNicho()
     }
 
     private fun tocarMusicaDoYoutube(lista: List<Resultado>, i: Int) {

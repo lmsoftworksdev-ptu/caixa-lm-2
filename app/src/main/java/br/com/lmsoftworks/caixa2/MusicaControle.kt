@@ -362,6 +362,11 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     // ---- música do YouTube (menu Mídia) ----
 
     /** Toca uma música do YouTube; a do celular, se estiver tocando, é pausada. */
+    /** A fila do player da caixa (a do YouTube) e a posição atual nela; vazia quando quem toca é o celular. */
+    val filaLocal: List<Resultado> get() = local?.takeIf { it.ativo && !it.ehVideo }?.fila.orEmpty()
+    val indiceLocal: Int get() = local?.indice ?: -1
+    fun irParaLocal(i: Int) { local?.irPara(i) }
+
     fun tocarDoYoutube(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
         iniciouLocalEm = SystemClock.uptimeMillis()
         controle?.transportControls?.pause()

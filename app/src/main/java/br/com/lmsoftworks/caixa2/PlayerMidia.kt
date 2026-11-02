@@ -371,6 +371,19 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     /** O que está tocando é música: as sugestões também têm que ser (nada de reação, entrevista, aula...). Outros assuntos seguem livres. */
     private var modoMusica = true
 
+    /** Pula para o item [i] da fila (toque na lista de próximas). */
+    fun irPara(i: Int) {
+        if (i !in fila.indices || i == indice) return
+        trocarSuave { indice = i; iniciarItem(fila[i], ehVideo) }
+    }
+
+    /** Põe no fim da fila os itens de uma playlist do mesmo tema, sem o que já está na fila nem outra versão do que já tocou. */
+    fun anexarFila(itens: List<Resultado>): Int {
+        val novos = itens.filter { n -> fila.none { it.url == n.url } && !repetida(n) }
+        if (novos.isNotEmpty()) fila = fila + novos
+        return novos.size
+    }
+
     val temProxima: Boolean get() = indice + 1 < fila.size || relacionadosNovos().isNotEmpty()
     val temAnterior: Boolean get() = indice > 0
 

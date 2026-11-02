@@ -20,6 +20,8 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import java.net.URL
 import java.util.concurrent.Executors
@@ -30,8 +32,11 @@ object Miniaturas {
     private val fila = Executors.newFixedThreadPool(3)
     private val principal = Handler(Looper.getMainLooper())
 
-    /** Tenta cada endereço da lista, do melhor para o pior, até um funcionar. */
-    fun carregar(urls: List<String>, alvo: ImageView) {
+    /**
+     * Tenta cada endereço da lista, do melhor para o pior, até um funcionar. [ladoMax] é a largura a partir da qual a imagem ainda é
+     * reduzida pela metade ao decodificar: cartões pequenos (Mídia) usam um valor baixo, para não estourar a memória do Moto G3.
+     */
+    fun carregar(urls: List<String>, alvo: ImageView, ladoMax: Int = 480) {
         val url = urls.firstOrNull()
         alvo.tag = url
         alvo.setImageDrawable(null)
@@ -47,7 +52,7 @@ object Miniaturas {
                 val limites = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, limites)
                 var amostra = 1
-                while (limites.outWidth / (amostra * 2) >= 480) amostra *= 2
+                while (limites.outWidth / (amostra * 2) >= ladoMax) amostra *= 2
                 val opcoes = BitmapFactory.Options().apply { inSampleSize = amostra; inPreferredConfig = Bitmap.Config.RGB_565 }
                 val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opcoes) ?: return@execute
                 cache.put(url, b)
@@ -58,13 +63,14 @@ object Miniaturas {
 }
 
 /**
- * Menu Mídia: barra de pesquisa e duas fileiras que rolam só para os lados (vídeos em cima, músicas embaixo). Sem pesquisa
- * mostra o que está em alta. A tela não rola para baixo. Tocar num vídeo ou numa música chama [aoVideo] e [aoMusica].
+ * Menu Mídia: barra de pesquisa com as etiquetas Música e Vídeo ao lado (o foco da caixa é música) e fileiras que rolam para os lados,
+ * numa coluna que rola para baixo. Sem pesquisa mostra o que está em alta e, abaixo, uma fileira por gênero; com pesquisa, só o tipo
+ * escolhido. Tocar num vídeo ou numa música chama [aoVideo] e [aoMusica] (a música toca a partir da fileira, só aquele nicho).
  */
 class TelaMidia(
     private val c: Context,
-    private val aoVideo: (List<Resultado>, Int) -> Unit,
-    private val aoMusica: (List<Resultado>, Int) -> Unit,
+    private val aoVideo: (List<Resultado>, Int, String) -> Unit,
+    private val aoMusica: (List<Resultado>, Int, String) -> Unit,
     private val aoFalha: (Exception) -> Unit
 ) : FrameLayout(c) {
 
@@ -73,6 +79,12 @@ class TelaMidia(
         private const val LARGURA_VIDEO = 236
         private const val LADO_MUSICA = 128
         private const val VALIDADE_ALTA_MS = 30 * 60 * 1000L
+        private const val LIMITE_GENERO = 20
+        /** Gêneros das fileiras "em alta": nome na tela e o que se pesquisa para ele. */
+        private val GENEROS = listOf(
+            "Sertanejo" to "sertanejo", "Forró" to "forró", "Funk" to "funk", "Pagode" to "pagode",
+            "Hip-hop" to "rap hip hop brasil", "Pop" to "pop brasil", "Rock" to "rock nacional", "Gospel" to "gospel"
+        )
     }
 
     private val principal = Handler(Looper.getMainLooper())
@@ -81,14 +93,38 @@ class TelaMidia(
     private var altaV: List<Resultado>? = null
     private var altaM: List<Resultado>? = null
     private var altaEm = 0L
-    private var resV: List<Resultado>? = null
-    private var resM: List<Resultado>? = null
+    private var res: List<Resultado>? = null      // resultado da pesquisa (só do tipo escolhido)
+    private var falhaAltaV = false
+    private var falhaAltaM = false
+    /** Música (padrão: é o foco da caixa) ou Vídeo: decide o em alta, os gêneros e a pesquisa. */
+    private var modoMusica = true
+    private val prefs = c.getSharedPreferences("caixa_midia", Context.MODE_PRIVATE)
+    private val generos = HashMap<String, List<Resultado>>()      // "m|Sertanejo" ou "v|Sertanejo"
+    private val generosPedidos = HashSet<String>()
+    private val rolagemM = ScrollView(c)
+    private val rolagemV = ScrollView(c)
+    private val areaM = LinearLayout(c)
+    private val areaV = LinearLayout(c)
+    private val fileirasM = ArrayList<HorizontalScrollView>()
+    private val fileirasV = ArrayList<HorizontalScrollView>()
+    private val slotsM = ArrayList<Pair<String, FrameLayout>>()
+    private val slotsV = ArrayList<Pair<String, FrameLayout>>()
+    private val prontoUmaVez = BooleanArray(2)      // a primeira carga de cada tipo terminou: dali em diante a troca de tipo é imediata
+    private val carregandoTela = FrameLayout(c)
+    private val mostrandoBusca = BooleanArray(2)      // [0] música, [1] vídeo: a coluna guardada está mostrando resultado de pesquisa
+    // as telas de Música e de Vídeo ficam montadas e guardadas: trocar de tipo só mostra uma e esconde a outra (sem recarregar)
+    private val rolagem: ScrollView get() = if (modoMusica) rolagemM else rolagemV
+    private val area: LinearLayout get() = if (modoMusica) areaM else areaV
+    private val fileiras: ArrayList<HorizontalScrollView> get() = if (modoMusica) fileirasM else fileirasV
+    private val slots: ArrayList<Pair<String, FrameLayout>> get() = if (modoMusica) slotsM else slotsV
+    private val falhaGenero = HashSet<String>()
+    private val pilulas = ArrayList<Triple<FrameLayout, ImageView, TextView>>()      // (tem que vir antes do init, que monta as etiquetas)
     private var carregando = false
     private var erro: String? = null
     private var piscar: ValueAnimator? = null
 
     private val textoBusca = texto(c, "", 23, Tema.TEXTO).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-    private val dica = texto(c, "Pesquisar vídeos e músicas", 23, Tema.TEXTO3)
+    private val dica = texto(c, "Pesquisar músicas", 23, Tema.TEXTO3)
     private val botaoLimpar = FrameLayout(c)
     private val microfone = FrameLayout(c)
     /** O microfone que aparece em cima do teclado (centralizado acima do 5 e do 6) quando o teclado está aberto. */
@@ -99,10 +135,8 @@ class TelaMidia(
     var aoMicrofone: (() -> Unit)? = null
     private var pulsoMic: ValueAnimator? = null
     private val barra = FrameLayout(c)
-    private val area = LinearLayout(c)
     private val teclado = FrameLayout(c)
     private val tecladoV3 = TecladoView(c)
-    private val fileiras = ArrayList<HorizontalScrollView>()
     private var tecladoAberto = false
 
     private var cursorVisivel = true
@@ -114,7 +148,7 @@ class TelaMidia(
     init {
         // ---- barra de pesquisa ----
         barra.apply {
-            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 32.d(), Cfg.LINHA)
+            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 42.d(), Cfg.LINHA)
             isClickable = true
             setOnClickListener { abrirTeclado() }
             efeitoToque()
@@ -139,15 +173,40 @@ class TelaMidia(
         }
 
         // ---- conteúdo ----
-        area.orientation = LinearLayout.VERTICAL
+        for ((r, a) in listOf(rolagemM to areaM, rolagemV to areaV)) {
+            a.orientation = LinearLayout.VERTICAL
+            r.apply {
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                isFillViewport = true
+                addView(a, LayoutParams(-1, -2))
+                setOnScrollChangeListener { _, _, _, _, _ -> verificarVisiveis() }      // as fileiras de gênero só carregam quando chegam perto
+            }
+        }
+        modoMusica = true      // a Mídia sempre abre em Música (o foco da caixa), nunca no Vídeo que ficou da última vez
+        dica.text = textoDica()
+        val topo = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
+        topo.addView(barra, LinearLayout.LayoutParams(0, 84.d(), 1f))
+        topo.addView(montarEtiquetas(), LinearLayout.LayoutParams(-2, 84.d()).apply { leftMargin = 16.d() })
         val coluna = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        coluna.addView(barra, LinearLayout.LayoutParams(-1, 64.d()).apply { leftMargin = 48.d(); rightMargin = 48.d() })
-        coluna.addView(area, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 8.d() })
+        coluna.addView(topo, LinearLayout.LayoutParams(-1, 84.d()).apply { leftMargin = 48.d(); rightMargin = 48.d() })
+        coluna.addView(rolagemM, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 8.d() })
+        coluna.addView(rolagemV, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 8.d() })
+        rolagemM.visibility = if (modoMusica) View.VISIBLE else View.GONE
+        rolagemV.visibility = if (modoMusica) View.GONE else View.VISIBLE
         addView(coluna, LayoutParams(-1, -1).apply { topMargin = 32.d(); bottomMargin = 6.d() })      // a barra de busca fica em y 96 (a tela começa em 64)
 
+        carregandoTela.apply {
+            isClickable = true      // enquanto carrega, nada embaixo recebe toque: a navegação só libera quando está tudo pronto
+            val caixa = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            caixa.addView(ProgressBar(c).apply { isIndeterminate = true; indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE) }, LinearLayout.LayoutParams(60.d(), 60.d()))
+            caixa.addView(texto(c, "Carregando", 26, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 18.d() })
+            addView(caixa, LayoutParams(-2, -2, Gravity.CENTER))
+        }
         montarTeclado()
-        addView(teclado, LayoutParams(-1, (720 - 166).d(), Gravity.BOTTOM))
+        addView(teclado, LayoutParams(-1, (720 - 192).d(), Gravity.BOTTOM))      // começa abaixo da barra e das etiquetas (que terminam em y 180)
         teclado.visibility = View.GONE
+        addView(carregandoTela, LayoutParams(-1, -1))
         renderizar()
     }
 
@@ -156,28 +215,37 @@ class TelaMidia(
     /** Chamada quando o menu aparece: carrega o "em alta" na primeira vez e de tempos em tempos. */
     fun aoMostrar() {
         val velho = System.currentTimeMillis() - altaEm > VALIDADE_ALTA_MS
-        if (altaV == null || altaM == null || velho || erro != null) carregarAlta()
+        if (velho) { generos.clear(); generosPedidos.clear() }      // depois de um tempo, os gêneros também se renovam
+        if (altaDoModo() == null || velho || erro != null) carregarAlta()
     }
+
+    private fun altaDoModo() = if (modoMusica) altaM else altaV
 
     private fun temInternet(): Boolean {
         val n = (c.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).activeNetworkInfo
         return n != null && n.isConnected
     }
 
+    /** O "em alta" do tipo escolhido: as paradas do próprio YouTube (sem plano B montado por buscas: se não vier, a fileira avisa). */
     private fun carregarAlta() {
         val minha = ++seq
+        val musica = modoMusica
         carregando = true; erro = null
         renderizar()
-        var v: List<Resultado>? = null; var m: List<Resultado>? = null; var falha: Exception? = null
-        val tv = Thread { try { v = YouTube.emAlta(false) } catch (e: Exception) { falha = e } }
-        val tm = Thread { try { m = YouTube.emAlta(true) } catch (e: Exception) { falha = e } }
+        var r: List<Resultado>? = null; var falha: Exception? = null
+        val t0 = android.os.SystemClock.uptimeMillis()
         Thread {
-            tv.start(); tm.start(); tv.join(); tm.join()
+            try { r = YouTube.emAlta(musica) } catch (e: Exception) { falha = e }
+            android.util.Log.d("MidiaTempo", "em alta " + (if (musica) "música" else "vídeo") + ": " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
             principal.post {
                 if (minha != seq) return@post
                 carregando = false
-                if (v == null && m == null) { falhou(falha) }
-                else { altaV = v.orEmpty().take(LIMITE); altaM = m.orEmpty().take(LIMITE); altaEm = System.currentTimeMillis() }
+                if (r == null && !temInternet()) { falhou(falha) }
+                else {
+                    if (musica) { altaM = r.orEmpty().take(LIMITE); falhaAltaM = r == null } else { altaV = r.orEmpty().take(LIMITE); falhaAltaV = r == null }
+                    altaEm = System.currentTimeMillis()
+                    if (r == null && falha != null) aoFalha(falha!!)
+                }
                 renderizar()
             }
         }.start()
@@ -191,40 +259,118 @@ class TelaMidia(
     private fun buscar() {
         val q = consulta.trim()
         val minha = ++seq
+        rolagem.scrollTo(0, 0)
         if (q.isEmpty()) {
-            resV = null; resM = null; carregando = false; erro = null
-            if (altaV == null) carregarAlta() else renderizar()
+            res = null; carregando = false; erro = null
+            if (altaDoModo() == null) carregarAlta() else renderizar()
             return
         }
+        val musica = modoMusica
         carregando = true; erro = null
         renderizar()
-        var v: List<Resultado>? = null; var m: List<Resultado>? = null; var falha: Exception? = null
-        val tv = Thread { try { v = YouTube.buscar(q, false) } catch (e: Exception) { falha = e } }
-        val tm = Thread { try { m = YouTube.buscar(q, true) } catch (e: Exception) { falha = e } }
+        var r: List<Resultado>? = null; var falha: Exception? = null
+        val t0 = android.os.SystemClock.uptimeMillis()
         Thread {
-            tv.start(); tm.start(); tv.join(); tm.join()
+            try { r = YouTube.buscar(q, musica) } catch (e: Exception) { falha = e }
+            android.util.Log.d("MidiaTempo", "pesquisa de " + (if (musica) "músicas" else "vídeos") + " '" + q + "': " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
             principal.post {
                 if (minha != seq) return@post
                 carregando = false
-                if (v == null && m == null) { falhou(falha); resV = null; resM = null }
-                else { resV = v.orEmpty().take(LIMITE); resM = m.orEmpty().take(LIMITE) }
+                if (r == null) { falhou(falha); res = null }
+                else res = r.orEmpty().take(LIMITE_GENERO)
                 renderizar()
+            }
+        }.start()
+    }
+
+    // ------------------------------------------------------------------ etiquetas Música / Vídeo
+
+    private fun montarEtiquetas(): View {
+        val caixa = LinearLayout(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 42.d(), Cfg.LINHA)
+            setPadding(6.d(), 6.d(), 6.d(), 6.d())
+        }
+        for ((rotulo, recurso, musica) in listOf(Triple("Música", R.drawable.ic_music, true), Triple("Vídeo", R.drawable.ic_video, false))) {
+            val pilula = FrameLayout(c).apply { isClickable = true; setOnClickListener { trocarTipo(musica) } }
+            val linha = LinearLayout(c).apply { gravity = Gravity.CENTER }
+            val ic = icone(c, recurso, 28, Color.WHITE)
+            val tx = texto(c, rotulo, 24, Color.WHITE, true)
+            linha.addView(ic, LinearLayout.LayoutParams(28.d(), 28.d()))
+            linha.addView(tx, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 8.d() })
+            pilula.addView(linha, FrameLayout.LayoutParams(-2, -1, Gravity.CENTER))
+            pilulas.add(Triple(pilula, ic, tx))
+            caixa.addView(pilula, LinearLayout.LayoutParams(-2, -1).apply { if (!musica) leftMargin = 2.d() })
+            pilula.setPadding(26.d(), 0, 26.d(), 0)
+        }
+        pintarEtiquetas()
+        return caixa
+    }
+
+    private fun pintarEtiquetas() {
+        pilulas.forEachIndexed { i, (pilula, ic, tx) ->
+            val ativa = (i == 0) == modoMusica
+            pilula.background = if (ativa) fundoArredondado(Color.WHITE, 36.d()) else null
+            val cor = if (ativa) Color.parseColor("#0A1020") else Color.parseColor("#CCFFFFFF")
+            ic.setColorFilter(cor); tx.setTextColor(cor)
+        }
+    }
+
+    /** Música ou Vídeo: o em alta, os gêneros e a pesquisa passam a ser só desse tipo. */
+    private fun trocarTipo(musica: Boolean) {
+        if (musica == modoMusica) return
+        modoMusica = musica
+        pintarEtiquetas()
+        dica.text = textoDica()
+        rolagemM.visibility = if (musica) View.VISIBLE else View.GONE
+        rolagemV.visibility = if (musica) View.GONE else View.VISIBLE
+        res = null
+        carregando = false
+        if (consulta.isNotBlank()) { buscar(); return }
+        if (altaDoModo() == null) { carregarAlta(); return }
+        // a tela deste tipo já está montada e guardada: só reconstrói se estava mostrando uma pesquisa ou ainda está vazia
+        if (area.childCount == 0 || mostrandoBusca[if (musica) 0 else 1]) renderizar() else { rolagem.post { verificarVisiveis() }; atualizarProntidao() }
+    }
+
+    /** Chamada logo que o app abre: deixa o em alta do tipo escolhido pronto antes de a pessoa abrir a Mídia. */
+    fun preCarregar() {
+        // as três primeiras linhas de cada tipo: o em alta e os dois primeiros gêneros, de Música E de Vídeo (ficam guardados na memória)
+        precarregarAlta(true); precarregarAlta(false)
+        for ((nome, termo) in GENEROS.take(2)) {
+            carregarGenero("m|$nome", termo, true)
+            carregarGenero("v|$nome", termo, false)
+        }
+    }
+
+    /** Busca o em alta de um tipo sem mexer na tela: guarda o resultado e só desenha se for o tipo que está na tela. */
+    private fun precarregarAlta(musica: Boolean) {
+        if ((if (musica) altaM else altaV) != null) return
+        Thread {
+            val r = try { YouTube.emAlta(musica) } catch (e: Exception) { null }
+            principal.post {
+                if (r == null) return@post
+                if (musica) altaM = r.take(LIMITE) else altaV = r.take(LIMITE)
+                altaEm = System.currentTimeMillis()
+                if (modoMusica == musica && !carregando && consulta.isBlank()) renderizar()
             }
         }.start()
     }
 
     // ------------------------------------------------------------------ desenho das fileiras
 
+    /** [nicho] é o tema da fileira ("sertanejo", a pesquisa...): quem toca monta a fila com playlists desse tema. */
+    private fun cartoes(lista: List<Resultado>, musica: Boolean, nicho: String): List<View> =
+        lista.mapIndexed { i, r -> if (musica) cartaoMusica(r) { aoMusica(lista, i, nicho) } else cartaoVideo(r) { aoVideo(lista, i, nicho) } }
+
     private fun renderizar() {
         piscar?.cancel(); piscar = null
-        area.removeAllViews(); fileiras.clear()
+        area.removeAllViews(); fileiras.clear(); slots.clear()
         val q = consulta.trim()
-        erro?.let { mostrarErro(it); return }
+        erro?.let { mostrarErro(it); atualizarProntidao(); return }
+        val musica = modoMusica
         if (carregando) {
-            area.addView(cabecalho(if (q.isEmpty()) "Vídeos em alta" else "Vídeos", ""), cabLp())
-            area.addView(fileira(List(6) { esqueleto(true) }), fileiraLp())
-            area.addView(cabecalho(if (q.isEmpty()) "Músicas em alta" else "Músicas", ""), cabLp())
-            area.addView(fileira(List(8) { esqueleto(false) }), fileiraLp())
+            area.addView(cabecalho(if (q.isEmpty()) (if (musica) "Músicas em alta" else "Vídeos em alta") else (if (musica) "Músicas" else "Vídeos"), ""), cabLp())
+            area.addView(fileira(List(if (musica) 8 else 6) { esqueleto(true) }), fileiraLp())
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
                 duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
                 addUpdateListener { v -> fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
@@ -232,26 +378,79 @@ class TelaMidia(
             }
             return
         }
-        val v: List<Resultado>; val m: List<Resultado>
-        val tituloV: String; val tituloM: String; val contaV: String; val contaM: String
-        if (q.isEmpty()) {
-            v = altaV.orEmpty(); m = altaM.orEmpty()
-            tituloV = "Vídeos em alta"; tituloM = "Músicas em alta"; contaV = ""; contaM = ""
-        } else if (resV.isNullOrEmpty() && resM.isNullOrEmpty()) {
-            v = altaV.orEmpty(); m = altaM.orEmpty()
-            tituloV = "Vídeos em alta"; tituloM = "Músicas em alta"; contaV = "Nada encontrado para “$q”"; contaM = ""
-        } else {
-            v = resV.orEmpty(); m = resM.orEmpty()
-            tituloV = "Vídeos"; tituloM = "Músicas"
-            contaV = ""
-            contaM = ""
+        // pesquisa com resultado: só o tipo escolhido
+        val achados = res
+        mostrandoBusca[if (musica) 0 else 1] = q.isNotEmpty() && !achados.isNullOrEmpty()
+        if (q.isNotEmpty() && !achados.isNullOrEmpty()) {
+            area.addView(cabecalho(if (musica) "Músicas" else "Vídeos", ""), cabLp())
+            area.addView(fileira(cartoes(achados, musica, q)), fileiraLp())
+            return
         }
-        val vv = if (v.isEmpty() && q.isNotEmpty()) altaV.orEmpty() else v
-        val mm = if (m.isEmpty() && q.isNotEmpty()) altaM.orEmpty() else m
-        area.addView(cabecalho(tituloV, contaV), cabLp())
-        area.addView(fileira(vv.mapIndexed { i, r -> cartaoVideo(r) { aoVideo(vv, i) } }), fileiraLp())
-        area.addView(cabecalho(tituloM, contaM), cabLp())
-        area.addView(fileira(mm.mapIndexed { i, r -> cartaoMusica(r) { aoMusica(mm, i) } }), fileiraLp())
+        // sem pesquisa (ou sem resultado): o em alta do tipo escolhido e, abaixo, uma fileira por gênero
+        val alta = altaDoModo().orEmpty()
+        area.addView(cabecalho(if (musica) "Músicas em alta" else "Vídeos em alta", if (q.isNotEmpty()) "Nada encontrado para “$q”" else ""), cabLp())
+        if (alta.isEmpty()) area.addView(avisoLinha("Não consegui carregar o em alta agora. Toque para tentar de novo.") { if (musica) altaM = null else altaV = null; carregarAlta() })
+        else area.addView(fileira(cartoes(alta, musica, if (musica) "músicas mais tocadas brasil" else "clipes mais vistos brasil")), fileiraLp())
+        for ((nome, _) in GENEROS) {
+            val chave = (if (musica) "m|" else "v|") + nome
+            area.addView(cabecalho(nome, ""), cabLp().apply { topMargin = 36.d() })      // só o nome do gênero, com mais espaço entre eles
+            val slot = FrameLayout(c)
+            area.addView(slot, fileiraLp())
+            slots.add(chave to slot)
+            preencherSlot(chave)
+        }
+        area.addView(View(c), LinearLayout.LayoutParams(-1, 28.d()))      // folga no fim da coluna
+        area.post { area.post { verificarVisiveis() } }
+        atualizarProntidao()
+    }
+
+    /** Nada trava a Mídia enquanto carrega: os cartões de espera aparecem e o conteúdo entra conforme chega (sem tela de bloqueio). */
+    private fun atualizarProntidao() {
+        carregandoTela.visibility = View.GONE
+        rolagem.alpha = 1f
+    }
+
+    private fun avisoLinha(msg: String, aoToque: () -> Unit): View = texto(c, msg, 20, Tema.TEXTO3).apply {
+        setPadding(52.d(), 10.d(), 48.d(), 22.d()); isClickable = true; setOnClickListener { aoToque() }
+    }
+
+    /** Põe no espaço do gênero o que ele tem agora: as músicas ou vídeos, o aviso de falha ou o esqueleto de espera. */
+    private fun preencherSlot(chave: String) {
+        val slot = slots.firstOrNull { it.first == chave }?.second ?: return
+        slot.removeAllViews()
+        val musica = chave.startsWith("m|")
+        val lista = generos[chave]
+        when {
+            lista != null -> slot.addView(fileira(cartoes(lista, musica, GENEROS.firstOrNull { it.first == chave.substringAfter('|') }?.second ?: chave.substringAfter('|'))))
+            chave in falhaGenero -> slot.addView(avisoLinha("Não carregou. Toque para tentar de novo.") { falhaGenero.remove(chave); generosPedidos.remove(chave); verificarVisiveis() })
+            else -> slot.addView(fileira(List(8) { esqueleto(true) }, registrar = false).apply { alpha = .5f })
+        }
+    }
+
+    /** Pede os gêneros que estão perto da tela (a coluna rola para baixo; os de baixo só carregam quando chegam perto). */
+    private fun verificarVisiveis() {
+        if (carregando || erro != null || rolagem.height == 0) return      // tela escondida (sem medida): nada perto de aparecer
+        val limite = rolagem.scrollY + rolagem.height + 500.d()
+        for ((chave, slot) in slots.toList()) {
+            if (generos[chave] != null || chave in generosPedidos || chave in falhaGenero || slot.top > limite) continue
+            val nome = chave.substringAfter('|')
+            val termo = GENEROS.firstOrNull { it.first == nome }?.second ?: continue
+            carregarGenero(chave, termo, chave.startsWith("m|"))
+        }
+    }
+
+    private fun carregarGenero(chave: String, termo: String, musica: Boolean) {
+        if (!generosPedidos.add(chave)) return
+        val t0 = android.os.SystemClock.uptimeMillis()
+        Thread {
+            val r = try { YouTube.generoEmAlta(termo, musica) } catch (e: Exception) { null }
+            android.util.Log.d("MidiaTempo", "gênero " + chave + ": " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
+            principal.post {
+                if (r.isNullOrEmpty()) falhaGenero.add(chave) else generos[chave] = r
+                preencherSlot(chave)
+                atualizarProntidao()
+            }
+        }.start()
     }
 
     private fun cabLp() = LinearLayout.LayoutParams(-1, -2).apply { leftMargin = 52.d(); rightMargin = 48.d(); topMargin = 18.d(); bottomMargin = 10.d() }
@@ -263,7 +462,7 @@ class TelaMidia(
         if (conta.isNotEmpty()) addView(texto(c, conta, 19, Color.parseColor("#FFB3BC")), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 14.d(); bottomMargin = 2.d() })
     }
 
-    private fun fileira(cartoes: List<View>): HorizontalScrollView {
+    private fun fileira(cartoes: List<View>, registrar: Boolean = true): HorizontalScrollView {
         val linha = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; setPadding(48.d(), 0, 30.d(), 0) }
         cartoes.forEach { linha.addView(it) }
         return HorizontalScrollView(c).apply {
@@ -271,7 +470,7 @@ class TelaMidia(
             overScrollMode = View.OVER_SCROLL_NEVER
             isFillViewport = false
             addView(linha, LayoutParams(-2, -2))
-            fileiras.add(this)
+            if (registrar) fileiras.add(this)
         }
     }
 
@@ -303,7 +502,7 @@ class TelaMidia(
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         arredondar(quadro, 18)
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
-        Miniaturas.carregar(r.miniaturas, imagem)
+        Miniaturas.carregar(r.miniaturas, imagem, 240)
         quadro.addView(texto(c, r.duracaoTexto, 15, Color.WHITE, true).apply {
             background = fundoArredondado(Color.parseColor("#B8000000"), 7.d())
             setPadding(8.d(), 3.d(), 8.d(), 3.d())
@@ -324,15 +523,10 @@ class TelaMidia(
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         arredondar(quadro, 18)
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
-        Miniaturas.carregar(r.miniaturas, imagem)
-        val play = FrameLayout(c).apply {
-            background = fundoArredondado(Color.WHITE, 20.d())
-            addView(icone(c, R.drawable.ic_tocar, 20, Color.parseColor("#0A1020")), LayoutParams(20.d(), 20.d(), Gravity.CENTER))
-        }
-        quadro.addView(play, FrameLayout.LayoutParams(40.d(), 40.d(), Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
-        addView(quadro, LinearLayout.LayoutParams(LADO_MUSICA.d(), LADO_MUSICA.d()))
-        addView(texto(c, r.titulo, 18, Color.WHITE, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 9.d() })
-        addView(texto(c, r.canal.removeSuffix(" - Topic"), 16, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LADO_MUSICA.d(), -2).apply { topMargin = 3.d() })
+        Miniaturas.carregar(r.miniaturas, imagem, 240)
+        addView(quadro, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), 133.d()))      // o mesmo tamanho do cartão de vídeo
+        addView(texto(c, r.titulo, 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 9.d() })
+        addView(texto(c, r.canal.removeSuffix(" - Topic"), 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 3.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
@@ -438,7 +632,8 @@ class TelaMidia(
         principal.removeCallbacks(restaurarDica)
         principal.postDelayed(restaurarDica, 2200)
     }
-    private val restaurarDica = Runnable { dica.text = "Pesquisar vídeos e músicas"; atualizarBarra() }
+    private val restaurarDica = Runnable { dica.text = textoDica(); atualizarBarra() }
+    private fun textoDica() = if (modoMusica) "Pesquisar músicas" else "Pesquisar vídeos"
 
     private fun digitar(s: String) { consulta += s; mudouTexto() }
     private fun apagar() { if (consulta.isNotEmpty()) { consulta = consulta.dropLast(1); mudouTexto() } }
@@ -463,7 +658,7 @@ class TelaMidia(
             efeitoToque()
             addView(icone(c, R.drawable.ic_mic, 30, Color.WHITE), LayoutParams(30.d(), 30.d(), Gravity.CENTER))
         }
-        teclado.addView(microfoneTeclado, LayoutParams(64.d(), 64.d(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 16.d() })
+        teclado.addView(microfoneTeclado, LayoutParams(56.d(), 56.d(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 8.d() })
         teclado.addView(tecladoV3, LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = 12.d() })
     }
 
@@ -478,14 +673,14 @@ class TelaMidia(
             teclado.translationY = teclado.height.toFloat()
             teclado.animate().translationY(0f).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).start()
         }
-        barra.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 33.d(), Color.parseColor("#88FFFFFF"))
+        barra.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 42.d(), Color.parseColor("#88FFFFFF"))
     }
 
     fun fecharTeclado() {
         if (!tecladoAberto) return
         tecladoAberto = false
         principal.removeCallbacks(piscarCursor); escreverBusca()
-        barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 33.d(), Cfg.LINHA)
+        barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 42.d(), Cfg.LINHA)
         teclado.animate().translationY(teclado.height.toFloat()).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
     }
 
