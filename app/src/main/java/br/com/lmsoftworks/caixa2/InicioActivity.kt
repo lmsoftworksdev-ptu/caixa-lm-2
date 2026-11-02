@@ -657,11 +657,52 @@ class InicioActivity : Activity() {
             return "Pronto, vou te lembrar de $texto ${LembreteControle.quando(quandoMs)}"
         }
 
-        override fun abafar(sim: Boolean) {
-            // música do celular (Bluetooth): baixa o volume do aparelho; vídeo/música do app: baixa o player
-            if (sim && !playerMidia.ativo && bluetooth.celularTocando) painelVolume.abafarSistema(true)
-            else if (!sim) painelVolume.abafarSistema(false)
+        private val focoVoz = android.media.AudioManager.OnAudioFocusChangeListener { }
+        private var focoPedido = false
+        private var modoPausa = false
+        private var geracaoPausa = 0
+        private var geracaoFimPausa = 0
+
+        override fun abafar(sim: Boolean): Long {
+            // música do celular (Bluetooth): fade-out, pausa e voz no volume dela; vídeo/música do app: baixa o player
+            // o aviso de "celular tocando" do Bluetooth só chega quando o estado muda: se o app abriu com a música já tocando, ele não
+            // veio. Por isso também vale o aparelho dizer que há música saindo agora.
+            val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+            val celular = bluetooth.celularTocando || (bluetooth.algumConectado && audio.isMusicActive)
+            var espera = 0L
+            if (sim) {
+                if (!playerMidia.ativo && celular) {
+                    geracaoFimPausa++       // chamou de novo antes de a música voltar: cancela o fechamento pendente
+                    if (!modoPausa) {
+                        modoPausa = true
+                        val g = ++geracaoPausa
+                        espera = (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) - 1).coerceAtLeast(0) * 60L + 100L + 800L
+                        painelVolume.pausaInicio {
+                            if (g == geracaoPausa) {
+                                // foco exclusivo e passageiro: o receptor Bluetooth da caixa pausa o celular
+                                val r = audio.requestAudioFocus(focoVoz, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                                focoPedido = r == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                                android.util.Log.d("CaixaBt", "foco para pausar a musica do celular: ${if (focoPedido) "concedido" else "negado"}")
+                                if (!focoPedido) painelVolume.pausaMeio(2)
+                                else relogio.postDelayed({ if (g == geracaoPausa) painelVolume.pausaMeio() }, 800)
+                            }
+                        }
+                    }
+                }
+            } else if (modoPausa) {
+                // espera o toquinho de fim tocar no volume da voz; depois a música volta e o volume sobe em fade
+                val g = ++geracaoFimPausa
+                relogio.postDelayed({
+                    if (g == geracaoFimPausa && modoPausa) {
+                        geracaoPausa++
+                        modoPausa = false
+                        if (focoPedido) { audio.abandonAudioFocus(focoVoz); focoPedido = false }
+                        painelVolume.pausaFim()
+                    }
+                }, 350)
+            } else painelVolume.abafarSistema(false)
             playerMidia.volume(if (sim) 0.2f else 1f)
+            return espera
         }
 
         override fun videoAberto() = telaVideo.aberto

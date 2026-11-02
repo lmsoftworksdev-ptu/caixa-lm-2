@@ -28,6 +28,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     companion object {
         /** O amplificador da caixa distorce acima de 87% do volume do aparelho: o 100% do app é esse 87% real. */
         const val LIMITE_REAL = 1.0f
+        const val NIVEL_ABAFADO = 2
         private const val LARGURA_DP = 540
         private const val ALTURA_DP = 76
     }
@@ -59,16 +60,69 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         if (sim) {
             if (abafado >= 0) return
             val atual = audio.getStreamVolume(canal)
-            if (atual <= 1) return
+            if (atual <= NIVEL_ABAFADO) return
             abafado = atual
-            abafadoAlvo = Math.max(1, Math.round(atual * 0.3f))
-            ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
-            audio.setStreamVolume(canal, abafadoAlvo, 0)
+            abafadoAlvo = NIVEL_ABAFADO
+            degrau(atual, NIVEL_ABAFADO)
         } else if (abafado >= 0) {
-            ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
-            if (audio.getStreamVolume(canal) == abafadoAlvo) audio.setStreamVolume(canal, abafado, 0)
+            val volta = abafado
             abafado = -1
+            // só devolve se ninguém mexeu no volume durante o abafado
+            if (audio.getStreamVolume(canal) <= NIVEL_ABAFADO) degrau(audio.getStreamVolume(canal), volta)
             handler.postDelayed({ atualizar() }, 200)
+        }
+    }
+
+    /**
+     * Música do celular pausada pelo assistente: (1) fade-out do volume até quase zero e [aoSilencio] (aí o app pede a pausa);
+     * (2) [pausaMeio] devolve o volume do sistema, já com a música parada, para a voz sair nele; (3) [pausaFim] a música volta
+     * e o volume sobe em fade até o que estava.
+     */
+    fun pausaInicio(aoSilencio: () -> Unit) {
+        val atual = audio.getStreamVolume(canal)
+        if (abafado >= 0 || atual <= 1) { aoSilencio(); return }
+        abafado = atual; abafadoAlvo = 1
+        degrau(atual, 1, 60L)
+        handler.postDelayed({ aoSilencio() }, (atual - 1) * 60L + 100L)
+    }
+
+    /** [nivel] só quando a pausa não foi concedida: a música segue tocando, então fica abaixada nesse nível. */
+    fun pausaMeio(nivel: Int = -1) {
+        if (abafado < 0) return
+        handler.removeCallbacks(passoFade)
+        ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+        // com a música parada a voz (e os toquinhos) saem no "Volume da voz" de Configurações
+        val daVoz = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+        audio.setStreamVolume(canal, if (nivel >= 0) Math.min(nivel, abafado) else daVoz, 0)
+        if (nivel >= 0) abafadoAlvo = Math.min(nivel, abafado)
+    }
+
+    fun pausaFim() {
+        if (abafado < 0) return
+        val volta = abafado
+        abafado = -1
+        handler.removeCallbacks(passoFade)
+        ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+        audio.setStreamVolume(canal, 1, 0)
+        degrau(1, volta, 150L)
+        handler.postDelayed({ atualizar() }, 200)
+    }
+
+    /** Fade do volume do aparelho: um nível a cada 120 ms, sem abrir a pílula. */
+    private fun degrau(de: Int, para: Int, passoMs: Long = 120L) {
+        handler.removeCallbacks(passoFade)
+        fadeAtual = de; fadeAlvo = para; fadeMs = passoMs
+        passoFade.run()
+    }
+    private var fadeAtual = 0
+    private var fadeAlvo = 0
+    private var fadeMs = 120L
+    private val passoFade = object : Runnable {
+        override fun run() {
+            ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+            if (fadeAtual != fadeAlvo) fadeAtual += if (fadeAlvo > fadeAtual) 1 else -1
+            audio.setStreamVolume(canal, fadeAtual, 0)
+            if (fadeAtual != fadeAlvo) handler.postDelayed(this, fadeMs)
         }
     }
     /** Quem apertou "+" (ou a tecla) já no volume máximo: o app toca o aviso. */

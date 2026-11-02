@@ -87,7 +87,7 @@ interface AcoesAssistente {
     /** Tem um vídeo aberto agora? (um pedido sem "música" ou "vídeo" vale para o que já está na tela) */
     fun videoAberto(): Boolean
     /** Abaixa (true) ou volta (false) o volume do que estiver tocando enquanto o assistente escuta e fala. */
-    fun abafar(sim: Boolean)
+    fun abafar(sim: Boolean): Long
     /** Alguém chamou a caixa: tira a tela do modo ocioso. */
     fun acordarTela()
     /** O que a caixa fala no fim das rotinas: lembretes de hoje (só de manhã) e o próximo alarme. Vazio se não há nada a dizer. */
@@ -296,8 +296,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         val minha = ++geracao
         Fala.parar()
         acoes.acordarTela()
-        acoes.abafar(true)
-        TonsVoz.ativacao()
+        // o toquinho espera a música do celular parar (fade-out), para sair no volume da voz
+        val atraso = acoes.abafar(true)
+        if (atraso > 0) main.postDelayed({ if (minha == geracao) TonsVoz.ativacao() }, atraso) else TonsVoz.ativacao()
         estado = EstadoVoz.OUVINDO_COMANDO
         if (destinoBusca == null) { e.textoAoVivo = false; faixa.ouvindo() } else aoOuvirBusca?.invoke()
         resolvido = false
@@ -569,7 +570,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     private fun fim(esperaMs: Long) {
-        acoes.abafar(false)
+        // a música só volta quando a tela do assistente sai (e só se ele não foi chamado de novo nesse meio-tempo)
+        val g = geracao
+        Handler(Looper.getMainLooper()).postDelayed({ if (g == geracao) acoes.abafar(false) }, esperaMs)
         faixa.fecharEm(esperaMs)
         if (ativo && escuta != null) estado = EstadoVoz.ESPERANDO_CHAMADA
     }
