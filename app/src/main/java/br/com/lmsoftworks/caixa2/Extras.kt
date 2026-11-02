@@ -85,18 +85,27 @@ object CorCapa {
 }
 
 /**
- * Troca de tela da v2: deslize lateral. [dir] = -1 avançar (a tela nova entra da direita por cima e a antiga recua 30% para a
- * esquerda, escurecendo até 60%); +1 voltar (a atual sai pela direita e a anterior vem de -30%, clareando). O nome "Cubo" ficou
- * para não mexer nos chamadores.
+ * Troca de tela em formato de caixa (cubo 3D): a tela de saída e a de destino são duas faces vizinhas de um cubo que gira.
+ * [dir] = +1 voltar (a atual sai pela direita e a anterior entra pela esquerda), -1 avançar (ao contrário).
+ * Cada face fica escura quando está de lado e some/aparece suavemente nas pontas, para não sobrar uma tirinha da outra tela.
  */
 object Cubo {
+    /** Ajuste do sentido da rotação no Android (testado por captura de tela). */
+    private const val SINAL = 1f
+
     private val tintaA = Paint()
     private val tintaB = Paint()
 
-    /** Cada tela vira uma "camada de hardware": o conteúdo é desenhado UMA vez numa textura e o deslize é feito pela placa de vídeo. */
+    private fun suave(x: Float): Float { val t = x.coerceIn(0f, 1f); return t * t * (3f - 2f * t) }
+
+    /**
+     * Cada face vira uma "camada de hardware": o conteúdo é desenhado UMA vez numa textura e o giro, a transparência e o
+     * escurecimento são aplicados pela placa de vídeo, sem redesenhar a tela a cada quadro (era o que travava).
+     */
     fun preparar(a: View, b: View) {
         for (v in listOf(a, b)) {
             v.visibility = View.VISIBLE
+            v.cameraDistance = 8000f
             v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         }
     }
@@ -106,26 +115,36 @@ object Cubo {
         v.setLayerPaint(tinta)
     }
 
-    /** [grau] de 0 a 90 (o progresso do deslize); [metade] = metade da largura da tela, em pixels. */
+    /**
+     * [grau] de 0 a 90; [metade] = metade da largura da tela, em pixels. As duas faces giram em volta da PRÓPRIA ARESTA que têm em
+     * comum (a da tela que sai e a da que entra ficam no mesmo ponto), então as bordas ficam coladas em qualquer ângulo e com qualquer
+     * perspectiva. A aresta se move como a quina de um cubo de verdade: x = L/2 + dir·(L/2)·(sen − cos).
+     */
     fun aplicar(a: View, b: View, grau: Float, dir: Int, metade: Float) {
-        val f = grau.coerceIn(0f, 90f) / 90f
+        val g = grau.coerceIn(0f, 90f)
+        val r = Math.toRadians(g.toDouble())
         val l = metade * 2f
-        a.alpha = 1f; b.alpha = 1f; a.rotationY = 0f; b.rotationY = 0f
-        if (dir < 0) {
-            a.translationX = -0.3f * l * f
-            b.translationX = l * (1f - f)
-            a.translationZ = 0f; b.translationZ = 4f
-            escurecer(a, tintaA, .6f * f); escurecer(b, tintaB, 0f)
-        } else {
-            a.translationX = l * f
-            b.translationX = -0.3f * l * (1f - f)
-            a.translationZ = 4f; b.translationZ = 0f
-            escurecer(a, tintaA, 0f); escurecer(b, tintaB, .6f * (1f - f))
-        }
+        val aresta = metade + dir * metade * (sin(r) - cos(r)).toFloat()
+        val f = min(1f, g / 90f)
+        val h = a.height / 2f
+        // a que sai: a aresta é a borda dela do lado para onde ela vai (esquerda se voltar, direita se avançar)
+        a.pivotX = if (dir > 0) 0f else l; a.pivotY = h
+        a.translationX = aresta - a.pivotX
+        a.rotationY = SINAL * dir * g
+        // a que entra: a aresta é a borda do lado de onde ela vem
+        b.pivotX = if (dir > 0) l else 0f; b.pivotY = h
+        b.translationX = aresta - b.pivotX
+        b.rotationY = SINAL * dir * (g - 90f)
+        // (sem translationZ de propósito: Z negativo fazia o fundo animado ser desenhado POR CIMA das telas, e elas sumiam no giro)
+        a.alpha = 1f - suave((f - .72f) / .28f)        // a que sai some nos últimos 28% do giro
+        b.alpha = suave(f / .22f)                       // a que entra só aparece depois de 22% do giro
+        escurecer(a, tintaA, .55f * f)                  // a que sai escurece até 45% do brilho
+        escurecer(b, tintaB, .55f * (1f - f))           // a que entra clareia de 45% a 100%
     }
 
     fun limpar(v: View) {
         v.translationX = 0f; v.translationZ = 0f; v.rotationY = 0f; v.alpha = 1f
+        v.pivotX = v.width / 2f; v.pivotY = v.height / 2f
         v.setLayerPaint(null)
         v.setLayerType(View.LAYER_TYPE_NONE, null)
     }
