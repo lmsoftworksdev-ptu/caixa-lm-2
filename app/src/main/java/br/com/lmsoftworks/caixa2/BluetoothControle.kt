@@ -113,7 +113,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                     if (tocando != celularTocando) {
                         celularTocando = tocando
                         if (tocando) aoSincronizar?.invoke()
-                        if (tocando) handler.postDelayed({ if (celularTocando) { celularConfirmado = true; aoCelularTocando?.invoke() } }, 6000)
+                        if (tocando) handler.postDelayed({ if (celularTocando) { celularConfirmado = true; aoCelularTocando?.invoke() } }, 1200)
                         else celularConfirmado = false
                     }
                 }
@@ -351,41 +351,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
     var aoDesconectado: (() -> Unit)? = null
 
     private fun perdeu(endereco: String) {
-        if (conectados.remove(endereco) && conectados.isEmpty()) {
-            aoDesconectado?.invoke()
-            renovarPilha()
-        }
-    }
-
-    /** A tela diz se agora pode reiniciar o Bluetooth (não durante o desligamento ou a restauração das redes). */
-    var podeRenovarPilha: () -> Boolean = { true }
-    private var renovando = false
-    private var ultimaRenovacao = 0L
-
-    /**
-     * O AVRCP do Android 7.1 só funciona na PRIMEIRA conexão depois que o Bluetooth inicia: nas reconexões seguintes o iPhone toca, mas
-     * título, capa e estado nunca chegam (medido: 10 de 11 boas na primeira, 23 de 24 ruins nas reconexões). Então, quando o último
-     * aparelho sai, o Bluetooth reinicia com a caixa vazia, e a próxima conexão (do aparelho, que volta sozinho, ou da pessoa) já
-     * encontra tudo novo. Custo: a fita de LED reconecta uma vez.
-     */
-    private fun renovarPilha() {
-        val a = adaptador ?: return
-        if (renovando) return
-        renovando = true
-        // sem pular: se acabou de reiniciar, espera o tempo que falta (reiniciar muito seguido já travou o serviço do Android)
-        val espera = maxOf(1500L, 12_000L - (System.currentTimeMillis() - ultimaRenovacao))
-        handler.postDelayed({
-            val ok = conectados.isEmpty() && podeRenovarPilha() && try { a.state == BluetoothAdapter.STATE_ON } catch (e: Exception) { false }
-            if (!ok) { renovando = false; return@postDelayed }
-            Log.d(TAG, "último aparelho saiu: reiniciando o Bluetooth para a próxima conexão encontrar a pilha nova")
-            ultimaRenovacao = System.currentTimeMillis()
-            desligarLimpo {
-                handler.postDelayed({
-                    if (podeRenovarPilha()) definirLigado(true)
-                    renovando = false
-                }, 1500)
-            }
-        }, espera)
+        if (conectados.remove(endereco) && conectados.isEmpty()) aoDesconectado?.invoke()
     }
 
     /** Aparelhos que a própria pessoa (ou o desligamento da caixa) desconectou de propósito: a caixa não corre atrás deles. */

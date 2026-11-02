@@ -229,6 +229,12 @@ class TelaMusica(
     private val botaoBuscar = botao(c, "Buscar músicas", Tema.BOTAO) { aoAbrirBusca() }
     private val seletor = SeletorMidia(c, {}, { aoAbrirVideo() })
     private var ultimoEstado = ""
+    /** O celular toca mas não manda título nem capa: tela "Tocando em <celular>" com animação e controles. */
+    private val semDados = PainelSemDados(c, musica, bt)
+    private var sessaoSemDados = false
+
+    /** Fundo com a capa desfocada (fica atrás de todas as telas; quem monta é a InicioActivity). */
+    var fundoCapa: FundoCapa? = null
 
     init {
         // posições em px de projeto; a tela fica 64 abaixo do topo, então y local = y do protótipo - 64
@@ -265,6 +271,8 @@ class TelaMusica(
         conteudo.addView(controles, LayoutParams(-2, 96.d()).apply { leftMargin = 480.d(); topMargin = (520 - 64).d() })
 
         addView(conteudo, LayoutParams(-1, -1))
+        semDados.visibility = View.GONE
+        addView(semDados, LayoutParams(-1, -1))      // por cima do conteúdo e por baixo do seletor e do Menu
 
         // seletor música <-> vídeo no canto superior direito (x 1216, y 132)
         addView(seletor, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = 64.d(); topMargin = (132 - 64).d() })
@@ -313,10 +321,17 @@ class TelaMusica(
     /** Chamada quando algo muda e também a cada meio segundo para o tempo andar. */
     fun atualizar(forcar: Boolean = false) {
         val tem = musica.temMusica
+        // o celular tocou sem mandar os dados: a tela "Tocando em ..." fica até o aparelho sair ou os dados chegarem
+        if (tem || !bt.algumConectado) sessaoSemDados = false else if (bt.celularTocando) sessaoSemDados = true
+        val painel = !tem && sessaoSemDados
+        semDados.visibility = if (painel) View.VISIBLE else View.GONE
+        if (painel) semDados.atualizar()
+        fundoCapa?.definir(if (tem) musica.capa else null)
         conteudo.visibility = if (tem) View.VISIBLE else View.GONE
         seletor.visibility = if (tem) View.VISIBLE else View.GONE
-        findMenu()?.visibility = if (tem) View.VISIBLE else View.GONE
-        vazio.visibility = if (tem) View.GONE else View.VISIBLE
+        findMenu()?.visibility = if (tem || painel) View.VISIBLE else View.GONE
+        vazio.visibility = if (tem || painel) View.GONE else View.VISIBLE
+        if (painel) return
         if (!tem) {
             // sem música: a mensagem depende de haver ou não um celular conectado
             val celular = bt.algumConectado

@@ -19,6 +19,7 @@ class InicioActivity : Activity() {
 
     private lateinit var conteudo: FrameLayout
     private lateinit var fundo: FundoView
+    private lateinit var fundoCapa: FundoCapa      // capa desfocada da tela Tocando agora, por cima do fundo
     private lateinit var barra: BarraTopo
     private lateinit var painelVolume: PainelVolume
     private lateinit var modalEnergia: ModalEnergia
@@ -30,7 +31,7 @@ class InicioActivity : Activity() {
 
     /** O celular acabou de conectar ou de começar a tocar: reafirma o volume da caixa depois que ele manda o dele. */
     private fun impor() {
-        painelVolume.imporPor(12000L)      // por alguns segundos o volume que o celular manda de partida não vale: o da caixa prevalece
+        painelVolume.imporPor(3000L)      // por 3 segundos o volume que o celular manda de partida não vale: o da caixa prevalece
     }
     private lateinit var musica: MusicaControle
     private lateinit var led: LedControle
@@ -151,6 +152,12 @@ class InicioActivity : Activity() {
             val semDados = !musica.temMusica && bluetooth.algumConectado && bluetooth.celularTocando && !playerMidia.ativo && !telaVideo.aberto
             if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
             val genericoVisivel = semDadosDesde != 0L && agoraMs - semDadosDesde > 2500L && !dispensada
+            // Sem os dados da música, a tela "Tocando em <celular>" abre sozinha ao dar play, como a de "Tocando agora" abriria.
+            if (genericoVisivel && !abriuSemDados) {
+                abriuSemDados = true
+                if (atual == "inicio" && agoraMs > semAbrirMusicaAte) ir("musica")
+            }
+            if (semDados) semDadosVistoEm = agoraMs else if (agoraMs - semDadosVistoEm > 8000L) abriuSemDados = false      // o áudio do iPhone cai e volta: só conta como outra vez depois de 8 s parado
             if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
             else if (genericoVisivel) inicio.definirMusica("Tocando do celular", bluetooth.nomeConectado() ?: "Bluetooth", null, true)
             else inicio.definirMusica(null, null)
@@ -184,6 +191,7 @@ class InicioActivity : Activity() {
 
         wifi = WifiControle(this) { aoMudarWifi() }
         fundo = FundoView(this)
+        fundoCapa = FundoCapa(this).also { it.aoCobrir = { cobre -> fundo.sobreCapa = cobre } }
         bluetooth = BluetoothControle(this) { aoMudarBluetooth() }
         // Bluetooth desligando ou desligado: o app solta o serviço dele. Ligou de novo: volta a ler a música do celular.
         bluetooth.aoSincronizar = { impor() }
@@ -227,6 +235,7 @@ class InicioActivity : Activity() {
         telaBluetooth = TelaBluetooth(this, bluetooth)
         telaBluetooth.visibility = View.GONE
         telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") }) { videoDaMusica() }
+        telaMusica.fundoCapa = fundoCapa
         telaMusica.visibility = View.GONE
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
         playerMidia.celularTocando = { bluetooth.celularConfirmado }
@@ -263,18 +272,15 @@ class InicioActivity : Activity() {
         telaConfig.aoEnergia = { modalEnergia.abrir() }
         // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
         bluetooth.aoCelularTocando = {
-            if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() }
+            if (!musica.appRecente()) celularAssumiu()
             impor()
         }
         // o estado "tocando" do celular (AVRCP) vale mesmo quando o áudio dele fica caindo e voltando (o iPhone faz isso): pausa o vídeo
         musica.celularSomTocando = { bluetooth.celularTocando }
         playerMidia.aoComecou = { musica.appComecou() }
-        musica.aoCelularComecou = {
-            if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() }
-        }
+        musica.aoCelularComecou = { celularAssumiu() }
         // o volume da caixa prevalece: o celular manda o dele ao conectar e ao começar a tocar, e logo depois o da caixa volta
-        bluetooth.aoConectado = { painelVolume.imporPor(20000L) }
-        bluetooth.podeRenovarPilha = { !Ajustes.restaurarRedes && !modalEnergia.aberto }
+        bluetooth.aoConectado = { painelVolume.imporPor(3000L) }
         bluetooth.aoDesconectado = {
             // o aparelho saiu (a pessoa desligou o Bluetooth do celular ou se afastou): o cartão de música some e a tela de música volta a
             // pedir para conectar um celular. Não muda de tela.
@@ -309,6 +315,7 @@ class InicioActivity : Activity() {
 
         conteudo = FrameLayout(this).apply {
             alpha = 0f
+            addView(fundoCapa, FrameLayout.LayoutParams(-1, -1))      // a capa desfocada fica ATRÁS das manchas de luz
             addView(fundo, FrameLayout.LayoutParams(-1, -1))
             addView(inicio, FrameLayout.LayoutParams(-1, -1))      // a v2 posiciona tudo no quadro inteiro de 1280x720
             addView(telaWifi, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
@@ -418,6 +425,8 @@ class InicioActivity : Activity() {
 
     /** Até esse instante a música que começar a tocar NÃO abre sozinha a tela Tocando agora (foi o play do cartão do Início). */
     private var semAbrirMusicaAte = 0L
+    private var semDadosVistoEm = 0L
+    private var abriuSemDados = false        // a tela "Tocando em ..." (celular tocando sem mandar os dados) já abriu nesta vez
     private var semDadosDesde = 0L          // desde quando o som sai pelo Bluetooth sem o celular mandar os dados da música
     private var musicaDispensada = ""          // faixa fechada com o gesto no cartão do Início: o cartão só volta quando ela tocar de novo
     private var musicaDispensadaAte = 0L
@@ -523,6 +532,8 @@ class InicioActivity : Activity() {
 
     private fun mudarEstado(destino: String) {
         atual = destino
+        if (destino == "musica") fundoCapa.definir(if (musica.temMusica) musica.capa else null)
+        fundoCapa.exibir(destino == "musica")
         aplicarTema(destino)
         preencher(destino)
         gesto.ativo = destino != "inicio"
@@ -538,7 +549,7 @@ class InicioActivity : Activity() {
         var cor: Int? = if (atual == "led") null else corFundoMenu
         if (atual == "musica" && musica.temMusica) {
             val tema = temaMusica()
-            cor = if (corCapa != null) corCapaFiel ?: Color.parseColor(tema.first) else Color.parseColor(tema.first)      // música sempre tem cor (sem capa colorida, a do banner padrão); a fita só apaga em vídeo de tela preta
+            cor = Color.parseColor(tema.third)      // a fita segue a MESMA cor da barra de progresso (Cfg.AZUL); sem capa colorida, a do banner padrão. No vídeo ela segue as cores da tela (ver [tique])
         }
         if (!telaVideo.aberto) led.definirCorAmbiente(cor)
     }
@@ -746,6 +757,7 @@ class InicioActivity : Activity() {
         override fun videoAberto() = telaVideo.aberto
 
         override fun tocar(lista: List<Resultado>, soAudio: Boolean) {
+            musica.marcarPorVoz()      // o Bluetooth devolve o som ao celular no fim da fala: o app não cede a isso
             if (soAudio) { videoDeMusica = false; if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
         }
 
@@ -1050,6 +1062,35 @@ class InicioActivity : Activity() {
         }?.value
     } catch (e: Exception) { null }
 
+    /**
+     * Quem deu play por último manda: o celular começou a tocar de verdade enquanto o app tocava (música ou vídeo). O app pára e a tela
+     * vai para o Tocando agora do celular (se o vídeo estava aberto, ele esmaece e sai; da Mídia ou do Início, abre a música).
+     */
+    private fun celularAssumiu() {
+        if (!(playerMidia.ativo && playerMidia.tocando)) return
+        val noVideo = telaVideo.aberto
+        if (musica.emLocal) playerMidia.parar() else playerMidia.pausar()
+        if (girando) return
+        if (noVideo) {
+            val de = tela(atual)
+            relogio.removeCallbacks(amostradorVideo)
+            telaVideo.esmaecerSaida {
+                videoDeMusica = false
+                telaVideo.mostrarSeletor(false)
+                telaVideo.fechar()
+                playerMidia.parar()
+                if (de !== telaMusica) de.visibility = View.GONE
+            }
+            if (de !== telaMusica) de.visibility = View.INVISIBLE
+            telaMusica.visibility = View.VISIBLE
+            mudarEstado("musica")
+            telaMusica.atualizar()
+            relogio.postDelayed({ aoChegar("musica") }, 420)
+        } else if (atual == "midia" || atual == "inicio") {
+            ir("musica")
+        }
+    }
+
     /** Música do app tocando: já deixa o clipe achado e o endereço dele resolvido, para o seletor abrir sem demora. */
     private fun adiantarClipe() {
         val faixa = playerMidia.item ?: return
@@ -1071,6 +1112,7 @@ class InicioActivity : Activity() {
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
         musica.pausarCelular()      // o celular que estiver tocando pára (mesmo que ele não avise que está tocando)
+        musica.appVaiTocar()        // e o que ele devolver enquanto o vídeo carrega é eco do Bluetooth
         val entrando = !telaVideo.aberto && apareceu
         playerMidia.tocarVideo(lista, i, inicioMs)
         telaVideo.abrir(esmaecendo = entrando)

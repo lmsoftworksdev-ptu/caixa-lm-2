@@ -50,6 +50,10 @@ class FundoView(c: Context) : View(c) {
     private var rodando = false
     private val inicio = SystemClock.elapsedRealtime()
 
+    /** A capa desfocada da tela de música está atrás: o fundo de cor some aos poucos e só as manchas de luz ficam, por cima da capa. */
+    var sobreCapa = false
+    private var baseOpaca = 1f
+
     private val passo = object : Runnable {
         override fun run() {
             if (!rodando) return
@@ -96,10 +100,13 @@ class FundoView(c: Context) : View(c) {
         val c2 = Color.rgb(atual[3].toInt(), atual[4].toInt(), atual[5].toInt())
         if (shader1 == null || c1 != cor1Shader) { shader1 = gradienteUnitario(c1); cor1Shader = c1 }
         if (shader2 == null || c2 != cor2Shader) { shader2 = gradienteUnitario(c2); cor2Shader = c2 }
-        val brilho = atual[6]
+        // por cima da capa as manchas ficam bem mais transparentes: só tingem o fundo, que já tem as cores da capa
+        val brilho = atual[6] * (1f - .62f * (1f - baseOpaca))
         val t = (SystemClock.elapsedRealtime() - inicio).toFloat()
 
-        img.eraseColor(Tema.FUNDO)
+        baseOpaca += ((if (sobreCapa) 0f else 1f) - baseOpaca) * .06f
+        if (Math.abs(baseOpaca - (if (sobreCapa) 0f else 1f)) < .004f) baseOpaca = if (sobreCapa) 0f else 1f
+        img.eraseColor((Tema.FUNDO and 0xFFFFFF) or ((baseOpaca * 255f).toInt() shl 24))
         tela.save()
         tela.scale(.4f, .4f)
         for (i in 0 until 6) {

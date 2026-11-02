@@ -66,7 +66,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     var aoCelularComecou: (() -> Unit)? = null
     private val confirmarCelular = Runnable {
         if (!foneTocando(controle?.playbackState)) return@Runnable
-        if (SystemClock.uptimeMillis() - iniciouLocalEm < JANELA_APP_MS) controle?.transportControls?.pause()      // foi o eco do app começando a tocar
+        if (appRecente()) controle?.transportControls?.pause()      // foi o eco do app começando a tocar
         else aoCelularComecou?.invoke()
     }
 
@@ -77,6 +77,27 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     fun appComecou() {
         iniciouLocalEm = SystemClock.uptimeMillis()
         if (celularAtivo(controle?.playbackState)) controle?.transportControls?.pause()
+    }
+
+    /** O app vai tocar (vídeo ou música, ainda carregando): o celular pára já e o que ele "devolver" nos próximos segundos é eco do Bluetooth. */
+    fun appVaiTocar() {
+        iniciouLocalEm = SystemClock.uptimeMillis()
+        controle?.transportControls?.pause()
+    }
+
+    private var porVozAte = 0L
+    /** O assistente de voz vai mandar o app tocar: aí o Bluetooth devolve o som ao celular no fim da fala, e isso não é a pessoa dando play. */
+    fun marcarPorVoz() { porVozAte = SystemClock.uptimeMillis() + 25_000L }
+
+    /**
+     * O que o celular "devolver" agora é eco, e não a pessoa dando play? Se o app começou por toque, só vale o instante em que o estado
+     * velho do celular ainda chega (play no celular é imediato). Se começou por voz, vale até o som do app estar de pé.
+     */
+    fun appRecente(): Boolean {
+        val agora = SystemClock.uptimeMillis()
+        val desde = agora - iniciouLocalEm
+        if (agora > porVozAte) return desde < 800L
+        return desde < JANELA_APP_MS || local?.carregando == true
     }
     /** O celular desconectou: o título, a capa e o estado dele não valem mais (o cartão de música sumia só muito depois). */
     fun celularDesconectou() {
@@ -125,11 +146,12 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
             if (emLocal) {
                 // o celular voltou a tocar de verdade: ele passa a mandar de novo e a música do YouTube para
                 if (!foneTocando(s)) return
-                if (SystemClock.uptimeMillis() - iniciouLocalEm < JANELA_APP_MS) {
-                    // acabou de começar a música do app e o celular "voltou": não foi a pessoa dando play, então o celular é pausado de novo
+                if (appRecente()) {
+                    // acabou de começar (ou ainda está carregando) a música do app e o celular "voltou": não foi a pessoa dando play, então o celular é pausado de novo
                     controle?.transportControls?.pause()
                     return
                 }
+                aoCelularComecou?.invoke()      // o app pára e a tela vai para a música do celular, na hora
                 local?.parar()
                 origem = Origem.CELULAR
                 lerMetadados(controle?.metadata)
@@ -137,7 +159,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
                 return
             }
             handler.removeCallbacks(confirmarCelular)
-            if (foneTocando(s)) handler.postDelayed(confirmarCelular, 1500)
+            if (foneTocando(s)) handler.postDelayed(confirmarCelular, 250)      // só filtra um "tocando" que some em seguida
             if (celularAtivo(s) && origem != Origem.CELULAR) { origem = Origem.CELULAR; lerMetadados(controle?.metadata) }
             if (origem == Origem.CELULAR) lerEstado(s)
             aoMudar()

@@ -18,15 +18,16 @@ Conexão **boa**: a caixa e o iPhone trocam ~12 pacotes AVRCP (`LCB lcb=1 event=
 
 Hipóteses testadas e **refutadas**: o `AVRC_Open role` (o `role: 1` aparece ao fechar a conexão anterior); o iPhone abrir o AVRCP (5 de 5 conexões iniciadas pelo iPhone vieram ruins); refazer só A2DP/AVRCP do aparelho (`BluetoothAvrcpController` não tem `disconnect(BluetoothDevice)`); quem inicia a conexão.
 
-## Solução (em `BluetoothControle.renovarPilha`)
+## Solução atual (2026-11-02): tela "Tocando em <celular>"
 
-Quando o **último aparelho desconecta**, a caixa reinicia o adaptador (`desligarLimpo` + `definirLigado(true)`). A próxima conexão (o iPhone volta sozinho ou a pessoa conecta no celular) encontra a pilha nova.
+O reinício do Bluetooth para "renovar a pilha" foi TESTADO e REMOVIDO: funcionava na maioria das vezes, mas derrubava a fita de LED (ela demora a reconectar e pisca), e mesmo logo depois do reinício uma primeira tentativa abortada do iPhone já "queimava" a pilha nova. Também foi refutado que a fita de LED atrapalhe: com a conexão da fita desligada por completo, as reconexões seguiram ruins (3 de 3).
 
-- Espera mínima de 12 s entre reinícios (adia, não pula). Reiniciar muito seguido já travou o serviço do Android neste aparelho.
-- Não roda no desligamento/restauração de redes (`podeRenovarPilha`) nem se o Bluetooth foi desligado pelo usuário.
-- Custo aceito: a fita de LED reconecta uma vez por desconexão.
-- Sem modal, sem ciclo na conexão, sem reconexão automática, sem áudio mudo (tudo isso foi removido). A caixa só chama o celular quando a pessoa conecta pelo menu ou pelo `garantirPerfil` (perfil de áudio ausente depois do ACL).
-- Ao desconectar, o cartão de música some (`MusicaControle.celularDesconectou`) e a tela de música volta a pedir para conectar um celular. Não muda de tela.
+Agora a caixa aceita que a conexão às vezes vem sem dados e trata isso na tela:
+
+- Conexão boa (o iPhone manda título/capa): a tela "Tocando agora" de sempre.
+- Conexão sem dados (o som toca, o Android ignora o título: `Metadata is not broadcasted, ignoring` no logcat): `PainelSemDados.kt`, uma tela "Tocando em <nome do aparelho>" com barras de música animadas, fundo que muda de cor sozinho e botões anterior, play/pause e próxima (`MusicaControle.anterior/alternar/proxima`, que mandam AVRCP passthrough e funcionam mesmo sem metadados).
+- Quem decide: `TelaMusica.atualizar` mostra o painel quando há celular conectado, `bt.celularTocando` e nenhum título; ele fica até o aparelho sair ou os dados chegarem. A `InicioActivity` abre a tela de música sozinha quando o celular toca sem dados por 2,5 s (`abriuSemDados`, com 8 s de pausa antes de contar como outra vez).
+- Ao desconectar: `MusicaControle.celularDesconectou()` limpa o cartão; a tela de música volta a pedir para conectar um celular. Não muda de tela.
 
 ## Volume (também corrigido em 2026-11-02)
 
@@ -47,4 +48,4 @@ O volume da caixa prevalece sobre o do iPhone na janela de nivelamento (`PainelV
 
 ## Mapa dos arquivos
 
-`BluetoothControle.kt` (adaptador, A2DP, `renovarPilha`, `garantirPerfil`), `MusicaControle.kt` (MediaBrowser/MediaController, `celularDesconectou`), `InicioActivity.kt` (orquestra; hooks `aoConectado`/`aoDesconectado`/`podeRenovarPilha`), `PainelVolume.kt` (nivelamento de volume).
+`BluetoothControle.kt` (adaptador, A2DP, `garantirPerfil`), `MusicaControle.kt` (MediaBrowser/MediaController, `celularDesconectou`), `InicioActivity.kt` (orquestra; hooks `aoConectado`/`aoDesconectado`, abertura da tela sem dados), `PainelVolume.kt` (nivelamento de volume), `PainelSemDados.kt` e `TelaMusica.kt` (tela sem dados).

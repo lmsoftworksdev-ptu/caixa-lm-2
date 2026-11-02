@@ -240,8 +240,8 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
         val fila = LinearLayout(c).apply { clipChildren = false; clipToPadding = false }
         val botoes = listOf(
-            Triple("midia", "Mídia", "#FF7A5C" to "#D3264B"), Triple("led", "Luzes LED", "#FFC94D" to "#EE7A16"),
-            Triple("alarmes", "Alarmes", "#B48CFF" to "#6232E0"), Triple("receitas", "Receitas", "#8BE36B" to "#1E9E4A"),
+            Triple("midia", "Mídia", "#FF7A5C" to "#D3264B"), Triple("led", "Luzes LED", "#8BE36B" to "#1E9E4A"),
+            Triple("alarmes", "Alarmes", "#B48CFF" to "#6232E0"), Triple("receitas", "Receitas", "#FF9A3D" to "#E8731F"),
             Triple("config", "Configurações", "#9AA6BE" to "#46506A")
         )
         val icones = mapOf("led" to R.drawable.ic_bulb, "alarmes" to R.drawable.ic_alarme,

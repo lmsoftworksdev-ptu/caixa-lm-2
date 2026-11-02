@@ -59,7 +59,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     fun imporPor(ms: Long) {
         val agora = android.os.SystemClock.uptimeMillis()
         janelaImporAte = agora + ms
-        janelaTeto = agora + ms + 20_000L
+        janelaTeto = agora + ms      // sem prolongar: passou o tempo, o que o celular mandar vale
         android.util.Log.d("CaixaVol", "nivelando o celular pelo volume da caixa (${Ajustes.volumeCaixa}%)")
         imporVolumeDaCaixa()
     }
@@ -195,6 +195,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
                 // fora dessa hora, uma mudança vinda do celular é a pessoa mexendo no volume do iPhone: vale, para cima ou para baixo
                 Ajustes.definirVolumeCaixa(porcento)
                 atualizar()
+                if (!suspenso) mostrarTemporario()      // a barra aparece também quando o volume muda pelo celular
             }
         }
     }
@@ -245,7 +246,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     }
 
     fun iniciar() {
-        if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento) else imporPor(7000L)      // ao abrir, por alguns segundos o volume da caixa vale sobre o que o celular mandar
+        if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento) else imporPor(3000L)      // ao abrir, por 3 segundos o volume da caixa vale sobre o que o celular mandar
         if (!registrado) {
             registrado = true
             c.registerReceiver(receptor, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
