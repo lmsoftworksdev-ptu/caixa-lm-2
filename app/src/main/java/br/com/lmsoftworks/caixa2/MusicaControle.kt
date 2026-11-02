@@ -52,8 +52,46 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     private val esperarBusca = Runnable { buscarPendente() }
     private var pendente: Array<String>? = null
 
+    /** De onde vem o que a tela mostra: a última música que TOCOU na caixa, seja pelo celular ou pelo player do app. */
+    private enum class Origem { NENHUMA, CELULAR, LOCAL }
+    private var origem = Origem.NENHUMA
+    private var ultimaFila: List<Resultado> = emptyList()
+    private var ultimoIndice = 0
+
+    private fun foneTocando(s: PlaybackState?) = s?.state == PlaybackState.STATE_PLAYING || s?.state == PlaybackState.STATE_BUFFERING
+
+    /** O áudio do celular está chegando (aviso do A2DP, que vem antes e sem depender do estado da música): também vale como "o celular está tocando". */
+    var celularSomTocando: () -> Boolean = { false }
+    /** O celular passou a tocar de verdade (o estado dele continua "tocando" depois de um instante): o que o app toca (vídeo) tem que pausar. */
+    var aoCelularComecou: (() -> Unit)? = null
+    private val confirmarCelular = Runnable {
+        if (!foneTocando(controle?.playbackState)) return@Runnable
+        if (SystemClock.uptimeMillis() - iniciouLocalEm < JANELA_APP_MS) controle?.transportControls?.pause()      // foi o eco do app começando a tocar
+        else aoCelularComecou?.invoke()
+    }
+
+    /**
+     * Regra única: quem deu play por último manda. O app (vídeo ou música) começou a tocar → o celular pára. O celular que "voltar" logo
+     * depois não foi a pessoa (é o Bluetooth devolvendo o som ao fim do assistente): é pausado de novo.
+     */
+    fun appComecou() {
+        iniciouLocalEm = SystemClock.uptimeMillis()
+        if (celularAtivo(controle?.playbackState)) controle?.transportControls?.pause()
+    }
+    /**
+     * O iPhone não passou nenhum estado (nem "pausado")? Conectado direito, ele manda "pausado" na hora; com o registro de avisos do
+     * Bluetooth do Android incompleto o estado fica "parado" até o fim. Serve para detectar a falha antes mesmo de dar play.
+     */
+    val semEstadoDoCelular: Boolean get() = controle?.playbackState?.state.let { it == null || it == PlaybackState.STATE_NONE || it == PlaybackState.STATE_STOPPED }
+    private fun celularAtivo(s: PlaybackState?) = foneTocando(s) || celularSomTocando()
+
     /** O player do YouTube (menu Mídia). Quando ele está tocando uma música, ele manda no lugar do celular. */
     var local: PlayerMidia? = null
+    /** Quando o app começou a tocar uma música dele (o celular que voltar a tocar logo depois não foi a pessoa: foi o fim do assistente). */
+    private var iniciouLocalEm = 0L
+    private val JANELA_APP_MS = 8_000L
+    /** O Bluetooth está ligado? Com ele desligando ou desligado o app NÃO deve ficar tentando ligar ao serviço dele (isso trava o Android daqui). */
+    var bluetoothLigado: () -> Boolean = { true }
     val emLocal: Boolean get() = local?.let { it.ativo && !it.ehVideo } == true
 
     val temMusica: Boolean get() = titulo.isNotEmpty()
@@ -69,17 +107,33 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     private val retorno = object : MediaController.Callback() {
-        override fun onMetadataChanged(m: MediaMetadata?) { if (emLocal) return; lerMetadados(m); aoMudar() }
+        override fun onMetadataChanged(m: MediaMetadata?) {
+            if (emLocal) return
+            // o celular manda título e capa também quando só é desbloqueado: isso não é "tocar". Só vale quando ele está tocando.
+            if (origem == Origem.CELULAR || celularAtivo(controle?.playbackState)) { origem = Origem.CELULAR; lerMetadados(m); aoMudar() }
+        }
         override fun onPlaybackStateChanged(s: PlaybackState?) {
             if (emLocal) {
-                // o celular voltou a tocar: ele passa a mandar de novo e a música do YouTube para
-                if (s?.state != PlaybackState.STATE_PLAYING) return
+                // o celular voltou a tocar de verdade: ele passa a mandar de novo e a música do YouTube para
+                if (!foneTocando(s)) return
+                if (SystemClock.uptimeMillis() - iniciouLocalEm < JANELA_APP_MS) {
+                    // acabou de começar a música do app e o celular "voltou": não foi a pessoa dando play, então o celular é pausado de novo
+                    controle?.transportControls?.pause()
+                    return
+                }
                 local?.parar()
+                origem = Origem.CELULAR
                 lerMetadados(controle?.metadata)
+                lerEstado(s); aoMudar()
+                return
             }
-            lerEstado(s); aoMudar()
+            handler.removeCallbacks(confirmarCelular)
+            if (foneTocando(s)) handler.postDelayed(confirmarCelular, 1500)
+            if (celularAtivo(s) && origem != Origem.CELULAR) { origem = Origem.CELULAR; lerMetadados(controle?.metadata) }
+            if (origem == Origem.CELULAR) lerEstado(s)
+            aoMudar()
         }
-        override fun onSessionDestroyed() { desligar(); iniciar() }
+        override fun onSessionDestroyed() { desligar(); if (bluetoothLigado()) iniciar() }
     }
 
     private val conexao = object : MediaBrowser.ConnectionCallback() {
@@ -88,16 +142,16 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
                 val c = MediaController(ctx, navegador!!.sessionToken)
                 controle = c
                 c.registerCallback(retorno, handler)
-                lerMetadados(c.metadata)
-                lerEstado(c.playbackState)
+                if (celularAtivo(c.playbackState) && !emLocal) { origem = Origem.CELULAR; lerMetadados(c.metadata); lerEstado(c.playbackState) }
             } catch (e: Exception) { Log.w(TAG, "nao foi possivel abrir a sessao", e) }
             aoMudar()
         }
         override fun onConnectionFailed() {
             Log.w(TAG, "falha ao conectar na sessao de midia do Bluetooth")
-            handler.postDelayed({ iniciar() }, 5000)
+            desligar()      // limpa a tentativa que falhou: sem isso o iniciar() seguinte achava que já havia uma ligação e não tentava mais
+            handler.postDelayed({ if (bluetoothLigado()) iniciar() }, 5000)
         }
-        override fun onConnectionSuspended() { desligar(); handler.postDelayed({ iniciar() }, 2000) }
+        override fun onConnectionSuspended() { desligar(); handler.postDelayed({ if (bluetoothLigado()) iniciar() }, 2000) }
     }
 
     /** Aquece DNS e conexão segura para a primeira capa chegar mais rápido. */
@@ -113,6 +167,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun iniciar() {
         if (navegador != null) return
+        if (!bluetoothLigado()) return      // com o Bluetooth desligado não se liga ao serviço dele; o aviso de "ligou" chama de novo
         aquecer()
         try {
             navegador = MediaBrowser(ctx, SERVICO, conexao, null).also { it.connect() }
@@ -120,6 +175,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     fun desligar() {
+        handler.removeCallbacksAndMessages(null)
         try { controle?.unregisterCallback(retorno) } catch (e: Exception) { }
         try { navegador?.disconnect() } catch (e: Exception) { }
         controle = null
@@ -265,6 +321,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Toca uma música do YouTube; a do celular, se estiver tocando, é pausada. */
     fun tocarDoYoutube(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
+        iniciouLocalEm = SystemClock.uptimeMillis()
         controle?.transportControls?.pause()
         local?.tocarMusica(lista, i, inicioMs, tocar)
     }
@@ -289,22 +346,27 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
             atualizadoEm = SystemClock.elapsedRealtime()
             velocidade = 1f
             chaveCapa = "yt|" + r.url
-        } else if (chaveCapa.startsWith("yt|")) {
-            // acabou a música do YouTube: volta a mostrar o que o celular estiver tocando
-            chaveCapa = ""
-            lerMetadados(controle?.metadata)
-            lerEstado(controle?.playbackState)
+            origem = Origem.LOCAL
+            ultimaFila = l.fila; ultimoIndice = l.indice
+        } else if (origem == Origem.LOCAL) {
+            // a música do app parou: continua na tela a última que tocou (pausada), e não o que o celular tiver
+            estado = PlaybackState.STATE_PAUSED
         }
         aoMudar()
     }
 
     // ---- botões ----
-    fun tocar() { if (emLocal) { if (!local!!.tocando) local!!.alternar() } else controle?.transportControls?.play() }
+    fun tocar() {
+        if (emLocal) { if (!local!!.tocando) local!!.alternar() }
+        else if (origem == Origem.LOCAL && ultimaFila.isNotEmpty()) tocarDoYoutube(ultimaFila, ultimoIndice, posicaoBase)      // a última foi a do app: volta nela
+        else controle?.transportControls?.play()
+    }
     /** Manda "pausar" ao celular sem checar o estado (ele pode estar tocando sem avisar). */
     fun pausarCelular() { controle?.transportControls?.pause() }
 
     fun pausar() { if (emLocal) { if (local!!.tocando) local!!.alternar() } else controle?.transportControls?.pause() }
-    fun alternar() { if (emLocal) local!!.alternar() else if (tocando) pausar() else tocar() }
+    /** O celular manda som mas não avisou o estado (o iPhone às vezes não manda): pausa mesmo assim, em vez de "dar play" por cima. */
+    fun alternar() { if (emLocal) local!!.alternar() else if (tocando || celularSomTocando()) pausarCelular() else tocar() }
     fun proxima() { if (emLocal) local!!.proxima() else controle?.transportControls?.skipToNext() }
     fun anterior() { if (emLocal) local!!.anterior() else controle?.transportControls?.skipToPrevious() }
 

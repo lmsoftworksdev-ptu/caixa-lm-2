@@ -49,23 +49,66 @@ class TelaOciosa(c: Context) : FrameLayout(c) {
  * (a tela usa o azul padrão). Devolve a cor principal (hsl(h, 82%, 48%)) e a secundária (hsl(h+35, 72%, 32%)).
  */
 object CorCapa {
-    fun analisar(capa: Bitmap): Pair<Int, Int>? {
-        val p = Bitmap.createScaledBitmap(capa, 32, 32, true)
-        val soma = FloatArray(12); val somaMatiz = FloatArray(12)
+    /**
+     * A cor que vai para a fita (Ambilight): a cor mais forte da capa como ela é, sem realce. O fundo da tela é que fica mais claro e
+     * vivo; a fita tem que ser fiel à capa. Só sobe o brilho se a cor for tão escura que a fita não mostraria nada.
+     */
+    fun analisarFiel(capa: Bitmap): Int? {
+        val c = analisar(capa, fiel = true) ?: return null
         val hsv = FloatArray(3)
-        for (y in 0 until 32) for (x in 0 until 32) {
-            Color.colorToHSV(p.getPixel(x, y), hsv)
-            if (hsv[1] < 0.22f || hsv[2] < 0.2f || (hsv[2] > 0.95f && hsv[1] < 0.35f)) continue
-            val faixa = (hsv[0] / 30f).toInt().coerceIn(0, 11)
-            soma[faixa] += hsv[1]
-            somaMatiz[faixa] += hsv[0] * hsv[1]
+        Color.colorToHSV(c.first, hsv)
+        if (hsv[2] < 0.35f) hsv[2] = 0.35f
+        return Color.HSVToColor(hsv)
+    }
+
+    fun analisar(capa: Bitmap): Pair<Int, Int>? = analisar(capa, fiel = false)
+
+    private fun analisar(capa: Bitmap, fiel: Boolean): Pair<Int, Int>? {
+        // Lê três pontos da capa: o centro e os cantos de cima (esquerdo e direito). Cada ponto é a média de um quadradinho.
+        val lado = Math.min(capa.width, capa.height)
+        val q = Math.max(2, lado / 7)
+        fun ponto(fx: Float, fy: Float): Int {
+            val cx = (capa.width * fx).toInt(); val cy = (capa.height * fy).toInt()
+            var r = 0L; var g = 0L; var bl = 0L; var n = 0
+            var y = cy - q / 2
+            while (y < cy + q / 2) {
+                var x = cx - q / 2
+                while (x < cx + q / 2) {
+                    val px = capa.getPixel(x.coerceIn(0, capa.width - 1), y.coerceIn(0, capa.height - 1))
+                    r += Color.red(px); g += Color.green(px); bl += Color.blue(px); n++
+                    x += 2
+                }
+                y += 2
+            }
+            return Color.rgb((r / n).toInt(), (g / n).toInt(), (bl / n).toInt())
         }
-        if (p !== capa) p.recycle()
-        var melhor = 0
-        for (i in 1..11) if (soma[i] > soma[melhor]) melhor = i
-        if (soma[melhor] < 6f) return null       // quase toda cinza, preta ou branca
-        val h = somaMatiz[melhor] / soma[melhor]
-        return hsl(h, 0.82f, 0.48f) to hsl(h + 35f, 0.72f, 0.32f)
+        val pontos = listOf(ponto(.5f, .5f), ponto(.2f, .2f), ponto(.8f, .2f))
+        val hsv = FloatArray(3)
+        // quanto mais saturada e clara, mais "forte" é a cor
+        fun forca(c: Int): Float { Color.colorToHSV(c, hsv); return hsv[1] * Math.min(1f, hsv[2] * 1.4f) }
+        val ordenados = pontos.sortedByDescending { forca(it) }
+        if (forca(ordenados[0]) < 0.12f) return null          // capa quase toda cinza, preta ou branca
+        val c1 = ordenados[0]
+        Color.colorToHSV(c1, hsv); val h1 = hsv[0]; val s1 = hsv[1]
+        // a segunda cor é a mais forte das outras que seja de OUTRO matiz; se todas forem do mesmo matiz (capa de uma cor só), o degradê
+        // é do próprio matiz, mais fundo. Nunca se inventa um matiz que a capa não tem (antes o vermelho ganhava laranja).
+        val outra = ordenados.drop(1).firstOrNull { c ->
+            Color.colorToHSV(c, hsv)
+            val dif = Math.min(Math.abs(hsv[0] - h1), 360f - Math.abs(hsv[0] - h1))
+            forca(c) >= 0.18f && dif >= 22f
+        }
+        val c2 = if (outra != null) realcar(outra) else Color.HSVToColor(floatArrayOf(h1, Math.min(1f, s1.coerceAtLeast(0.62f) + 0.1f), 0.62f))
+        if (fiel) return c1 to c1
+        return realcar(c1) to c2
+    }
+
+    /** Deixa a cor viva e clara (o fundo antes ficava escuro demais): saturação e brilho sobem, mantendo o matiz da capa. */
+    private fun realcar(c: Int): Int {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(c, hsv)
+        hsv[1] = hsv[1].coerceAtLeast(0.62f)
+        hsv[2] = hsv[2].coerceAtLeast(0.88f)
+        return Color.HSVToColor(hsv)
     }
 
     fun hsl(h0: Float, s: Float, l: Float): Int {

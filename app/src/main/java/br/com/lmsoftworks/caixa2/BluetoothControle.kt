@@ -59,8 +59,18 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** O celular está mandando áudio agora (estado do A2DP, que chega mesmo quando título e capa não chegam). */
     @Volatile var celularTocando = false; private set
+    /** O celular está tocando há mais de 6 s seguidos: sons curtos (o clique de bloquear a tela do iPhone, por exemplo) não contam. */
+    @Volatile var celularConfirmado = false; private set
     /** O celular começou a tocar: quem estiver tocando na própria caixa (YouTube) deve parar. */
     var aoCelularTocando: (() -> Unit)? = null
+    /** O celular começou a mandar áudio (na hora, sem esperar a confirmação): ele manda também o volume dele de partida. */
+    var aoSincronizar: (() -> Unit)? = null
+    /** O estado do adaptador mudou (BluetoothAdapter.STATE_*): a tela solta ou retoma o que prende o serviço de Bluetooth do Android. */
+    var aoEstadoAdaptador: ((Int) -> Unit)? = null
+    /** Antes de desligar o Bluetooth: solta tudo o que o app mantém ligado ao serviço dele (sem isso o Android daqui pode travar). */
+    var aoAntesDeDesligar: (() -> Unit)? = null
+    /** O Bluetooth não voltou depois de ligado: o serviço dele do Android travou e só reiniciar a caixa resolve. */
+    var aoTravado: (() -> Unit)? = null
 
     fun nomeConectado(): String? =
         conectados.firstNotNullOfOrNull { end -> adaptador?.bondedDevices?.firstOrNull { it.address == end }?.let(::nomeDe) }
@@ -70,6 +80,11 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
             val d = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
             when (i.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    aoEstadoAdaptador?.invoke(i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1))
+                    if (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_OFF && ligarPendente) {
+                        ligarPendente = false
+                        handler.postDelayed({ adaptador?.let { if (!it.isEnabled) { it.enable(); vigiarLigamento() } } }, 2500)      // um respiro antes da nova conexão
+                    }
                     when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
                         BluetoothAdapter.STATE_ON -> aoLigar()
                         BluetoothAdapter.STATE_OFF -> { achados.clear(); conectados.clear(); pareandoCom = null }
@@ -91,17 +106,22 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
                     }
                 }
                 BluetoothDevice.ACTION_ACL_CONNECTED -> if (d != null && d.bondState == BluetoothDevice.BOND_BONDED) { conectados.add(d.address); garantirPerfil(d) }
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (d != null) conectados.remove(d.address)
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (d != null) { conectados.remove(d.address); aoPerderConexao(d.address) }
                 ACAO_TOCANDO -> {
                     val tocando = i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == A2DP_TOCANDO
                     Log.d(TAG, "áudio do celular: ${if (tocando) "tocando" else "parado"}")
-                    if (tocando != celularTocando) { celularTocando = tocando; if (tocando) aoCelularTocando?.invoke() }
+                    if (tocando != celularTocando) {
+                        celularTocando = tocando
+                        if (tocando) aoSincronizar?.invoke()
+                        if (tocando) handler.postDelayed({ if (celularTocando) { celularConfirmado = true; aoCelularTocando?.invoke() } }, 6000)
+                        else celularConfirmado = false
+                    }
                 }
                 ACAO_SINK -> if (d != null) {
                     when (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)) {
                         BluetoothProfile.STATE_CONNECTING -> aoConectando?.invoke()
-                        BluetoothProfile.STATE_CONNECTED -> { if (conectados.add(d.address)) aoConectado?.invoke() }
-                        BluetoothProfile.STATE_DISCONNECTED -> conectados.remove(d.address)
+                        BluetoothProfile.STATE_CONNECTED -> { ultimoEndereco = d.address; desconectadosPorMim.remove(d.address); pararReconexao(); if (conectados.add(d.address)) aoConectado?.invoke() }
+                        BluetoothProfile.STATE_DISCONNECTED -> { conectados.remove(d.address); aoPerderConexao(d.address) }
                     }
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED, BluetoothAdapter.ACTION_DISCOVERY_STARTED,
@@ -148,8 +168,17 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         }
         ctx.registerReceiver(receptor, f)
         ctx.registerReceiver(receptorPareamento, IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
-        if (!a.isEnabled) a.enable() else aoLigar()
+        if (!a.isEnabled) { a.enable(); vigiarLigamento() } else aoLigar()
         aoMudar()
+    }
+
+    /** Se 15 s depois de pedir para ligar o Bluetooth ele nem está ligando, o serviço dele travou. */
+    private fun vigiarLigamento() {
+        handler.postDelayed({
+            val a = adaptador ?: return@postDelayed
+            val st = try { a.state } catch (e: Exception) { BluetoothAdapter.STATE_OFF }
+            if (st != BluetoothAdapter.STATE_ON && st != BluetoothAdapter.STATE_TURNING_ON) { Log.w(TAG, "Bluetooth não ligou: serviço travado"); aoTravado?.invoke() }
+        }, 15000)
     }
 
     fun parar() {
@@ -192,7 +221,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         val a = adaptador ?: return
         if (a.name != Ajustes.nomeAparelho) a.name = Ajustes.nomeAparelho
         // aparelhos já ligados e pareados
-        a.bondedDevices?.forEach { if (estaConectado(it)) { conectados.add(it.address); garantirPerfil(it) } }
+        a.bondedDevices?.forEach { if (estaConectado(it)) { conectados.add(it.address); ultimoEndereco = it.address; garantirPerfil(it) } }
         if (perfilSink == null) {
             a.getProfileProxy(ctx, object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
@@ -206,13 +235,88 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         aoMudar()
     }
 
+    /**
+     * O celular está conectado mas o canal de mídia veio mudo (sem título, capa nem estado). Desligar e ligar o Bluetooth DA CAIXA, do
+     * jeito limpo, sobe o serviço de novo e o celular reconecta sozinho com tudo funcionando.
+     */
+    fun reiniciarPorFalhaDeMidia() {
+        Log.d(TAG, "canal de mídia mudo: reiniciando o Bluetooth da caixa")
+        val alvo = ultimoEndereco
+        desligarLimpo {
+            if (alvo != null) desconectadosPorMim.remove(alvo)      // essa desconexão foi só do reinício: a caixa volta ao aparelho
+            handler.postDelayed({
+                definirLigado(true)
+                if (alvo != null) handler.postDelayed({ iniciarReconexao(alvo) }, 3500)      // se o celular não voltar sozinho, a caixa chama
+            }, 1500)
+        }
+    }
+
+    /**
+     * Pergunta ao serviço de Bluetooth o que ele sabe do celular AGORA: o estado de reprodução (2 = pausado, 3 = tocando, 1 = nada) e
+     * se chegaram as configurações do player. Quando o registro de avisos veio completo os dois existem; quando veio pela metade, não.
+     */
+    fun consultarAvrcp(aoResultado: (Int, Boolean) -> Unit) {
+        val a = adaptador ?: return
+        if (!a.isEnabled) return
+        a.getProfileProxy(ctx, object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                var estado = -1
+                var config = false
+                try {
+                    val d = proxy.connectedDevices.firstOrNull()
+                    if (d != null) {
+                        estado = (proxy.javaClass.getMethod("getPlaybackState", BluetoothDevice::class.java).invoke(proxy, d) as? android.media.session.PlaybackState)?.state ?: -1
+                        config = proxy.javaClass.getMethod("getPlayerSettings", BluetoothDevice::class.java).invoke(proxy, d) != null
+                    }
+                } catch (e: Exception) { Log.w(TAG, "consulta AVRCP falhou", e) }
+                try { a.closeProfileProxy(profile, proxy) } catch (e: Exception) { }
+                aoResultado(estado, config)
+            }
+            override fun onServiceDisconnected(profile: Int) { }
+        }, 12)
+    }
+
     private fun estaConectado(d: BluetoothDevice): Boolean = try {
         BluetoothDevice::class.java.getMethod("isConnected").invoke(d) as Boolean
     } catch (e: Exception) { false }
 
+    /** Pediram para ligar enquanto ele ainda estava desligando: liga só depois que desligar de vez e passar um tempo (nova conexão limpa). */
+    private var ligarPendente = false
+
+    /**
+     * Desliga o Bluetooth do jeito limpo e só chama [aoFim] quando ele está de fato desligado (ou depois de 8 s): desconecta os
+     * aparelhos, solta tudo o que o app mantém ligado ao serviço dele e só então manda desligar.
+     */
+    fun desligarLimpo(aoFim: () -> Unit) {
+        val a = adaptador
+        if (a == null || !a.isEnabled) { aoFim(); return }
+        aoAntesDeDesligar?.invoke()
+        desconectarTodos {
+            handler.postDelayed({
+                try { a.disable() } catch (e: Exception) { Log.w(TAG, "disable falhou", e) }
+                val inicio = System.currentTimeMillis()
+                val espera = object : Runnable {
+                    override fun run() {
+                        val st = try { a.state } catch (e: Exception) { BluetoothAdapter.STATE_OFF }
+                        if (st == BluetoothAdapter.STATE_OFF || System.currentTimeMillis() - inicio > 8000) aoFim() else handler.postDelayed(this, 200)
+                    }
+                }
+                handler.postDelayed(espera, 300)
+            }, 500)
+        }
+    }
+
     fun definirLigado(v: Boolean) {
         val a = adaptador ?: return
-        if (v) a.enable() else a.disable()
+        val st = try { a.state } catch (e: Exception) { BluetoothAdapter.STATE_OFF }
+        if (v && st == BluetoothAdapter.STATE_TURNING_OFF) { ligarPendente = true; return }      // ainda desligando: espera acabar
+        if (v && (st == BluetoothAdapter.STATE_ON || st == BluetoothAdapter.STATE_TURNING_ON)) return
+        if (v) { a.enable(); vigiarLigamento() }
+        else {
+            // solta a ligação do app com o serviço de Bluetooth e só então manda desligar
+            aoAntesDeDesligar?.invoke()
+            handler.postDelayed({ try { a.disable() } catch (e: Exception) { Log.w(TAG, "disable falhou", e) } }, 700)
+        }
         aoMudar()
     }
 
@@ -284,7 +388,46 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
         aoMudar()
     }
 
+    // ---- reconexão: se o celular cair (saiu do alcance, Bluetooth dele desligado e ligado), a caixa tenta voltar a ele sozinha ----
+    private var ultimoEndereco: String? = null
+    private var reconectandoEm: String? = null
+    private var inicioReconexao = 0L
+    private val tentativaReconexao = object : Runnable {
+        override fun run() {
+            val end = reconectandoEm ?: return
+            val a = adaptador
+            val decorrido = System.currentTimeMillis() - inicioReconexao
+            if (a == null || !a.isEnabled || conectados.isNotEmpty() || decorrido > 10 * 60_000L) { pararReconexao(); return }
+            if (pareandoCom == null) {
+                Log.d(TAG, "reconexão: tentando voltar ao aparelho")
+                try {
+                    val d = a.getRemoteDevice(end)
+                    if (d.bondState == BluetoothDevice.BOND_BONDED) perfilSink?.javaClass?.getMethod("connect", BluetoothDevice::class.java)?.invoke(perfilSink, d)
+                } catch (e: Exception) { Log.w(TAG, "reconexão falhou", e) }
+            }
+            handler.postDelayed(this, if (decorrido < 30_000L) 6000L else 20_000L)
+        }
+    }
+
+    private fun aoPerderConexao(endereco: String) {
+        if (endereco != ultimoEndereco || endereco in desconectadosPorMim) return
+        iniciarReconexao(endereco)
+    }
+
+    private fun iniciarReconexao(endereco: String) {
+        val a = adaptador ?: return
+        if (!a.isEnabled || conectados.isNotEmpty() || reconectandoEm != null) return
+        reconectandoEm = endereco; inicioReconexao = System.currentTimeMillis()
+        handler.postDelayed(tentativaReconexao, 4000)
+    }
+
+    private fun pararReconexao() { reconectandoEm = null; handler.removeCallbacks(tentativaReconexao) }
+
+    /** Aparelhos que a própria pessoa (ou o desligamento da caixa) desconectou de propósito: a caixa não corre atrás deles. */
+    private val desconectadosPorMim = HashSet<String>()
+
     fun conectar(endereco: String) {
+        desconectadosPorMim.remove(endereco)
         val d = achar(endereco) ?: return
         try {
             perfilSink?.javaClass?.getMethod("connect", BluetoothDevice::class.java)?.invoke(perfilSink, d)
@@ -293,6 +436,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     fun desconectar(endereco: String) {
+        desconectadosPorMim.add(endereco); pararReconexao()
         val d = achar(endereco) ?: return
         try {
             perfilSink?.javaClass?.getMethod("disconnect", BluetoothDevice::class.java)?.invoke(perfilSink, d)
@@ -321,6 +465,7 @@ class BluetoothControle(contexto: Context, private val aoMudar: () -> Unit) {
             BluetoothDevice::class.java.getMethod("removeBond").invoke(d)
         } catch (e: Exception) { Log.w(TAG, "falha ao esquecer", e); erro = "Não foi possível esquecer o aparelho" }
         conectados.remove(endereco)
+        desconectadosPorMim.add(endereco); pararReconexao()
         aoMudar()
     }
 

@@ -47,6 +47,33 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private var abrindo = false
     /** Toques seguidos fora da pílula (zera quando se mexe no volume ou ela abre de novo). */
     private var toquesFora = 0
+    /** Enquanto verdadeiro (alarme tocando), o volume pode ser mexido pelo app sem a caixa "corrigir". */
+    @Volatile private var suspenso = false
+    fun suspender(sim: Boolean) { suspenso = sim; if (!sim) ignorarAte = android.os.SystemClock.uptimeMillis() + 1500 }
+
+    /** Até esse instante, o volume que o celular manda é o "de partida" e não vale (o da caixa volta). */
+    @Volatile private var janelaImporAte = 0L
+    @Volatile private var janelaTeto = 0L
+
+    /** O celular acabou de conectar ou de começar a tocar: por [ms] o volume dele não vale; o da caixa é o que vale. */
+    fun imporPor(ms: Long) {
+        val agora = android.os.SystemClock.uptimeMillis()
+        janelaImporAte = agora + ms
+        janelaTeto = agora + ms + 20_000L
+        android.util.Log.d("CaixaVol", "nivelando o celular pelo volume da caixa (${Ajustes.volumeCaixa}%)")
+        imporVolumeDaCaixa()
+    }
+
+    private val restaurarDoCelular = Runnable {
+        val alvo = Ajustes.volumeCaixa
+        if (alvo < 0 || abafado >= 0 || suspenso || android.os.SystemClock.uptimeMillis() < ignorarAte) return@Runnable
+        val idx = Math.round(alvo / 100f * limite)
+        val atual = audio.getStreamVolume(canal)
+        if (atual == idx || atual == 0) return@Runnable          // 0 = mudo, que é escolha da caixa
+        ignorarAte = android.os.SystemClock.uptimeMillis() + 800
+        audio.setStreamVolume(canal, idx, 0)
+        atualizar()
+    }
     private var abafado = -1
     private var abafadoAlvo = -1
     private var ignorarAte = 0L
@@ -155,8 +182,20 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
             if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", canal) != canal) return
             // mudanças do próprio app (assistente abaixando/voltando o volume) não aparecem na tela
             if (abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) return
-            // mudou por fora (celular que toca): só atualiza o número; a pílula abre apenas quando se toca no volume ou numa tecla
-            atualizar()
+            val agora = android.os.SystemClock.uptimeMillis()
+            android.util.Log.d("CaixaVol", "volume do sistema ${audio.getStreamVolume(canal)} (caixa ${Ajustes.volumeCaixa}%) " + if (agora < janelaImporAte) "na janela de nivelamento" else "mudança da pessoa")
+            if (agora < janelaImporAte) {
+                // acabou de conectar ou de começar a tocar: o celular manda o volume dele de partida (maior OU menor) e a caixa o iguala ao
+                // dela. Enquanto o celular continuar mandando o dele, a janela se estende (até um teto), para não depender de acertar o tempo.
+                janelaImporAte = Math.min(janelaTeto, Math.max(janelaImporAte, agora + 3000))
+                atualizar()
+                handler.removeCallbacks(restaurarDoCelular)
+                handler.postDelayed(restaurarDoCelular, 250)
+            } else {
+                // fora dessa hora, uma mudança vinda do celular é a pessoa mexendo no volume do iPhone: vale, para cima ou para baixo
+                Ajustes.definirVolumeCaixa(porcento)
+                atualizar()
+            }
         }
     }
 
@@ -206,7 +245,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     }
 
     fun iniciar() {
-        if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento)
+        if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento) else imporPor(7000L)      // ao abrir, por alguns segundos o volume da caixa vale sobre o que o celular mandar
         if (!registrado) {
             registrado = true
             c.registerReceiver(receptor, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
@@ -262,6 +301,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     private fun definir(fracao: Float, guardar: Boolean = true) {
         val idx = Math.round(fracao * limite).coerceIn(0, limite)
+        if (!guardar) ignorarAte = android.os.SystemClock.uptimeMillis() + 1500      // fade de sono e afins: não são "mudança do celular"
         // volume pedido com o assistente na tela (por voz): é o volume que vale quando ele fecha, e não o que estava antes
         if (abafado >= 0 && guardar) { abafado = idx; abafadoAlvo = idx }
         audio.setStreamVolume(canal, idx, 0)

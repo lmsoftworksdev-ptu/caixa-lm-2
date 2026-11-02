@@ -23,6 +23,8 @@ object Ajustes {
     @Volatile var sonsTeclado = true; private set
     /** Nivelamento de áudio: as faixas mais baixas sobem até o nível das mais fortes. */
     @Volatile var nivelarAudio = true; private set
+    /** A caixa foi desligada/reiniciada pelo app com Wi-Fi e Bluetooth desligados de propósito: ao ligar, eles voltam sozinhos. */
+    @Volatile var restaurarRedes = false; private set
     /** Fuso horário: automático (pela internet) ou manual. As diferenças para Greenwich são em minutos (-180 = UTC−3). */
     @Volatile var fusoAuto = true; private set
     @Volatile var fusoManualMin = -180; private set
@@ -61,6 +63,7 @@ object Ajustes {
         sonsResposta = p.getBoolean("sonsResposta", true)
         sonsTeclado = p.getBoolean("sonsTeclado", true)
         nivelarAudio = p.getBoolean("nivelarAudio", true)
+        restaurarRedes = p.getBoolean("restaurarRedes", false)
         fusoAuto = p.getBoolean("fusoAuto", true)
         fusoManualMin = p.getInt("fusoManualMin", -180)
         fusoAutoMin = p.getInt("fusoAutoMin", 99999)
@@ -84,6 +87,7 @@ object Ajustes {
     fun definirFusoAuto(v: Boolean) { fusoAuto = v; guardar { putBoolean("fusoAuto", v) } }
     fun definirFusoManual(min: Int) { fusoManualMin = min.coerceIn(-12 * 60, 14 * 60); guardar { putInt("fusoManualMin", fusoManualMin) } }
     fun definirFusoAutoMin(min: Int) { fusoAutoMin = min; guardar { putInt("fusoAutoMin", min) } }
+    fun definirRestaurarRedes(v: Boolean) { restaurarRedes = v; prefs?.edit()?.putBoolean("restaurarRedes", v)?.commit() }      // commit: tem que estar gravado antes de desligar
     fun definirNivelarAudio(v: Boolean) { nivelarAudio = v; guardar { putBoolean("nivelarAudio", v) } }
     fun definirSonsTeclado(v: Boolean) { sonsTeclado = v; guardar { putBoolean("sonsTeclado", v) } }
     fun definirSons(v: Boolean) { sonsResposta = v; guardar { putBoolean("sonsResposta", v) } }

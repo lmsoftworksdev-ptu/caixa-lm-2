@@ -116,7 +116,24 @@ class WifiControle(contexto: Context, private val aoMudar: () -> Unit) {
         handler.removeCallbacksAndMessages(null)
     }
 
+    /** Desliga o Wi-Fi do jeito limpo: solta a rede e só chama [aoFim] quando ele está de fato desligado (ou depois de 4 s). */
+    fun desligarLimpo(aoFim: () -> Unit) {
+        if (!wm.isWifiEnabled) { aoFim(); return }
+        try { wm.disconnect() } catch (e: Exception) { }
+        conectadoSsid = null; conectando = null; redes = emptyList()
+        wm.isWifiEnabled = false
+        val inicio = System.currentTimeMillis()
+        val espera = object : Runnable {
+            override fun run() {
+                if (wm.wifiState == WifiManager.WIFI_STATE_DISABLED || System.currentTimeMillis() - inicio > 4000) aoFim() else handler.postDelayed(this, 200)
+            }
+        }
+        handler.postDelayed(espera, 300)
+    }
+
     fun definirLigado(v: Boolean) {
+        // ainda desligando: espera acabar antes de ligar de novo (nova conexão limpa)
+        if (v && wm.wifiState == WifiManager.WIFI_STATE_DISABLING) { handler.postDelayed({ definirLigado(true) }, 1500); return }
         wm.isWifiEnabled = v
         if (!v) { conectadoSsid = null; conectando = null; redes = emptyList() }
         aoMudar()

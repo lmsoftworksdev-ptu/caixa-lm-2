@@ -85,7 +85,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 aoMudar()
             }
             override fun onRenderedFirstFrame() { if (p === player) { primeiroQuadro = true; aoMudar() } }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; aoMudar() } }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; if (isPlaying) aoComecou?.invoke(); aoMudar() } }
             override fun onPlayerError(e: PlaybackException) {
                 if (p !== player) { if (p === proximoPlayer) cancelarFade(); return }
                 Log.w(TAG, "erro no player", e)
@@ -150,13 +150,16 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun iniciarItemAgora(r: Resultado, video: Boolean, recuperando: Boolean = false) {
         if (!recuperando) { recuperacoes = 0; retomarEm = 0L }
+        // pega o foco de áudio JÁ, antes de achar o endereço da faixa (leva uns segundos): senão, quando o assistente fecha e solta o dele, o
+        // foco volta para o Bluetooth, que manda "tocar" ao celular, e a música do celular volta por cima da que foi pedida
+        try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
         val minha = ++geracao
         cancelarRampa(); fracaoVolume = 1f
         val pronta = preparada?.takeIf { it.item.url == r.url && !video }
         val videoPronto = if (video) videoPre.remove(r.url) else null
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false
-        infoExtra = Resultado(r.titulo, r.canal, r.duracaoSeg, r.url, r.miniaturas, r.visualizacoes).visualizacoesTexto      // até a informação completa chegar
+        infoExtra = ""      // visualizações e data só aparecem quando o dado verdadeiro chegar (o da lista de busca pode vir errado)
         // a capa já conhecida (ou a provisória) fica na tela: sem passar por um quadrado de cor sólida
         capa = capas.get(r.url) ?: capaProvisoria?.takeIf { it.first == r.url }?.second
         relacionados = emptyList(); primeiroQuadro = false
@@ -203,11 +206,19 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }.start()
     }
 
+    /** O player começou a tocar (música ou vídeo): quem dá play por último manda, então o celular pára. */
+    var aoComecou: (() -> Unit)? = null
+
+    /** O celular está mandando áudio agora? (informado pela tela principal) */
+    var celularTocando: () -> Boolean = { true }
+
     private val audioMgr = contexto.applicationContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
     // Perdeu o foco para outro app (o Bluetooth da caixa pega o foco quando o celular começa a tocar): pausa, para não saírem dois sons juntos.
     private val foco = android.media.AudioManager.OnAudioFocusChangeListener { mudanca ->
         if (mudanca == android.media.AudioManager.AUDIOFOCUS_LOSS) handler.post {
-            Log.d(TAG, "perdeu o foco de áudio (outro aplicativo tocando): pausando")
+            // o celular bloqueado ou desbloqueado também mexe no foco de áudio da caixa sem tocar nada: só pausa se ele está tocando de verdade
+            if (!celularTocando()) { Log.d(TAG, "perdeu o foco de áudio, mas o celular não está tocando: segue tocando"); return@post }
+            Log.d(TAG, "perdeu o foco de áudio (o celular está tocando): pausando")
             if (player?.isPlaying == true) pausarSuave()
         }
     }
@@ -513,6 +524,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         player = novo
         try { antigo.release() } catch (_: Throwable) {}
         nivelador.novaFaixa(); nivelador.ligar(novo.audioSessionId)
+        infoExtra = infoDe(pre.fonte)
         indice++
         item = pre.item
         relacionados = pre.fonte.relacionados; modoMusica = pre.fonte.musica

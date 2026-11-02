@@ -13,13 +13,25 @@ class AppDownloader private constructor(private val client: OkHttpClient) : Down
 
     override fun execute(request: Request): Response {
         val url = request.url()
-        val data = request.dataToSend()
+        var data = request.dataToSend()
+        // Tudo em português do Brasil: alguns pedidos do YouTube saem com idioma inglês e voltam com o título traduzido
+        // ("Reserved Seat" em vez de "Cadeira Cativa"). O idioma de cada pedido é forçado para pt-BR aqui.
+        if (data != null && url.contains("youtube.com")) {
+            val texto = String(data, Charsets.UTF_8)
+            val idioma = Regex(""""hl"\s*:\s*"([^"]*)"""")
+            val achou = idioma.find(texto)?.groupValues?.get(1)
+            if (achou != null && !achou.startsWith("pt")) {
+                android.util.Log.d("Idioma", "pedido ${url.substringAfter("youtube.com").substringBefore('?')} vinha com hl=$achou -> pt-BR")
+                data = idioma.replace(texto, "\"hl\":\"pt\"").toByteArray(Charsets.UTF_8)
+            }
+        }
         val body = data?.toRequestBody()
 
         val builder = okhttp3.Request.Builder()
             .method(request.httpMethod(), body)
             .url(url)
             .header("User-Agent", USER_AGENT)
+            .header("Accept-Language", "pt-BR,pt;q=0.9")
 
         for ((name, values) in request.headers()) {
             builder.removeHeader(name)
