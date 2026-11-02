@@ -56,7 +56,19 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     /** Mudanças de volume feitas pelo app (voz do assistente): a barra e a pílula não reagem nos próximos instantes. */
     fun ignorarMudancas() { ignorarAte = android.os.SystemClock.uptimeMillis() + 1500 }
 
-    fun abafarSistema(sim: Boolean) {
+    /** Põe o volume do aparelho no "Volume da voz" enquanto o assistente está na tela; [abafarSistema] (false) devolve depois. */
+    fun volumeDaVoz() {
+        if (abafado >= 0) return
+        val atual = audio.getStreamVolume(canal)
+        val daVoz = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+        abafado = atual; abafadoAlvo = daVoz
+        android.util.Log.d("CaixaVol", "volume da voz aplicado: guarda $atual, voz $daVoz")
+        ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+        audio.setStreamVolume(canal, daVoz, 0)
+    }
+
+    /** [fade] falso: devolve o volume na hora (usado quando a música ainda está pausada e vai voltar com o fade dela). */
+    fun abafarSistema(sim: Boolean, fade: Boolean = true) {
         if (sim) {
             if (abafado >= 0) return
             val atual = audio.getStreamVolume(canal)
@@ -67,9 +79,14 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         } else if (abafado >= 0) {
             val volta = abafado
             abafado = -1
-            // só devolve se ninguém mexeu no volume durante o abafado
-            if (audio.getStreamVolume(canal) <= NIVEL_ABAFADO) degrau(audio.getStreamVolume(canal), volta)
-            handler.postDelayed({ atualizar() }, 200)
+            // só devolve se ninguém mexeu no volume durante o abafado: o volume está onde o app o deixou (nível abafado ou da voz)
+            val atual = audio.getStreamVolume(canal)
+            android.util.Log.d("CaixaVol", "devolvendo volume: agora $atual, esperado $abafadoAlvo, volta para $volta")
+            if (atual == abafadoAlvo || atual <= NIVEL_ABAFADO) {
+                if (fade) degrau(atual, volta)
+                else { ignorarAte = android.os.SystemClock.uptimeMillis() + 1500; audio.setStreamVolume(canal, volta, 0); handler.postDelayed({ atualizar() }, 200) }
+            }
+            else handler.postDelayed({ atualizar() }, 200)
         }
     }
 
@@ -105,7 +122,6 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
         audio.setStreamVolume(canal, 1, 0)
         degrau(1, volta, 150L)
-        handler.postDelayed({ atualizar() }, 200)
     }
 
     /** Fade do volume do aparelho: um nível a cada 120 ms, sem abrir a pílula. */
@@ -123,6 +139,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
             if (fadeAtual != fadeAlvo) fadeAtual += if (fadeAlvo > fadeAtual) 1 else -1
             audio.setStreamVolume(canal, fadeAtual, 0)
             if (fadeAtual != fadeAlvo) handler.postDelayed(this, fadeMs)
+            else handler.postDelayed({ if (abafado < 0) atualizar() }, 300)     // fade acabou: mostra o número final de uma vez
         }
     }
     /** Quem apertou "+" (ou a tecla) já no volume máximo: o app toca o aviso. */
@@ -136,11 +153,10 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private val receptor = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, i: Intent) {
             if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", canal) != canal) return
-            if (abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) { atualizar(); return }
-            val antes = ultimoPorcento
+            // mudanças do próprio app (assistente abaixando/voltando o volume) não aparecem na tela
+            if (abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) return
+            // mudou por fora (celular que toca): só atualiza o número; a pílula abre apenas quando se toca no volume ou numa tecla
             atualizar()
-            // mudou por fora (celular que toca, tecla): mostra o nosso controle no lugar do indicador do Android
-            if (antes >= 0 && ultimoPorcento != antes) mostrarTemporario()
         }
     }
 
@@ -183,6 +199,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     }
 
     fun iniciar() {
+        if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento)
         if (!registrado) {
             registrado = true
             c.registerReceiver(receptor, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
@@ -235,8 +252,23 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         }
     }
 
-    private fun definir(fracao: Float) {
+    private fun definir(fracao: Float, guardar: Boolean = true) {
         audio.setStreamVolume(canal, Math.round(fracao * limite).coerceIn(0, limite), 0)
+        if (guardar) Ajustes.definirVolumeCaixa(Math.round(fracao * 100))
+        atualizar()
+    }
+
+    /**
+     * O volume da caixa prevalece sobre o do celular: quando o celular conecta ou começa a tocar ele manda o volume dele (volume
+     * absoluto do Bluetooth); aqui o da caixa volta, e o celular acompanha. Depois disso, mexer no celular vale normalmente.
+     */
+    fun imporVolumeDaCaixa() {
+        val alvo = Ajustes.volumeCaixa
+        if (alvo < 0 || abafado >= 0) return
+        val idx = Math.round(alvo / 100f * limite)
+        if (audio.getStreamVolume(canal) == idx) return
+        ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
+        audio.setStreamVolume(canal, idx, 0)
         atualizar()
     }
 
@@ -261,7 +293,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     }
 
     /** Muda o volume (0 a 100) sem abrir a pílula: usado no fade do temporizador de sono. */
-    fun definirSilencioso(p: Int) = definir(p.coerceIn(0, 100) / 100f)
+    fun definirSilencioso(p: Int, guardar: Boolean = false) = definir(p.coerceIn(0, 100) / 100f, guardar)
 
     fun alternarMudo() {
         val atual = audio.getStreamVolume(canal)

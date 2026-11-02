@@ -27,6 +27,11 @@ class InicioActivity : Activity() {
     private lateinit var telaWifi: TelaWifi
     private lateinit var telaBluetooth: TelaBluetooth
     private lateinit var bluetooth: BluetoothControle
+
+    /** O celular acabou de conectar ou de começar a tocar: reafirma o volume da caixa depois que ele manda o dele. */
+    private fun impor() {
+        for (ms in longArrayOf(800L, 2500L)) relogio.postDelayed({ painelVolume.imporVolumeDaCaixa() }, ms)
+    }
     private lateinit var musica: MusicaControle
     private lateinit var led: LedControle
     private lateinit var telaLed: TelaLed
@@ -229,12 +234,17 @@ class InicioActivity : Activity() {
         telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
         telaConfig.lerVolume = { Math.round(painelVolume.porcento / 10f) }
-        telaConfig.definirVolume = { n -> painelVolume.definirSilencioso(n * 10) }
+        telaConfig.definirVolume = { n -> painelVolume.definirSilencioso(n * 10, true) }
         telaConfig.aoMudarBrilho = { aplicarBrilho() }
         telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Aviso.mostrar(this, msg) } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
         // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
-        bluetooth.aoCelularTocando = { if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() } }
+        bluetooth.aoCelularTocando = {
+            if (playerMidia.ativo && playerMidia.tocando) { if (musica.emLocal) playerMidia.parar() else playerMidia.pausar() }
+            impor()
+        }
+        // o volume da caixa prevalece: o celular manda o dele ao conectar e ao começar a tocar, e logo depois o da caixa volta
+        bluetooth.aoConectado = { impor() }
         telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
         telaConfig.aoMudarCidade = { climaEm = 0L; previsao = null }      // o clima e a previsão buscam de novo, na cidade nova
         telaConfig.aoMudarNome = { bluetooth.aplicarNome() }
@@ -660,6 +670,7 @@ class InicioActivity : Activity() {
         private val focoVoz = android.media.AudioManager.OnAudioFocusChangeListener { }
         private var focoPedido = false
         private var modoPausa = false
+        private var modoPausaApp = false
         private var geracaoPausa = 0
         private var geracaoFimPausa = 0
 
@@ -671,8 +682,20 @@ class InicioActivity : Activity() {
             val celular = bluetooth.celularTocando || (bluetooth.algumConectado && audio.isMusicActive)
             var espera = 0L
             if (sim) {
-                if (!playerMidia.ativo && celular) {
-                    geracaoFimPausa++       // chamou de novo antes de a música voltar: cancela o fechamento pendente
+                geracaoFimPausa++           // chamou de novo antes de a música voltar: cancela o fechamento pendente
+                if (playerMidia.ativo) {
+                    // música/vídeo do app: desce em fade e pausa; a voz e os toquinhos saem no volume da voz
+                    if (!modoPausaApp) {
+                        val e = playerMidia.pausarParaAssistente()
+                        if (e > 0) {
+                            modoPausaApp = true
+                            espera = e + 100L
+                            relogio.postDelayed({ if (modoPausaApp) painelVolume.volumeDaVoz() }, e)
+                        }
+                    }
+                } else if (!celular) {
+                    painelVolume.volumeDaVoz()      // nada tocando: toquinhos, "pesquisando" e voz saem no volume da voz
+                } else {
                     if (!modoPausa) {
                         modoPausa = true
                         val g = ++geracaoPausa
@@ -700,8 +723,20 @@ class InicioActivity : Activity() {
                         painelVolume.pausaFim()
                     }
                 }, 350)
-            } else painelVolume.abafarSistema(false)
-            playerMidia.volume(if (sim) 0.2f else 1f)
+            } else if (modoPausaApp) {
+                val g = ++geracaoFimPausa
+                relogio.postDelayed({
+                    if (g == geracaoFimPausa && modoPausaApp) {
+                        modoPausaApp = false
+                        painelVolume.abafarSistema(false, fade = false)      // o volume volta com a música ainda parada
+                        playerMidia.retomarDoAssistente()
+                    }
+                }, 350)
+            } else {
+                val g = ++geracaoFimPausa
+                relogio.postDelayed({ if (g == geracaoFimPausa) painelVolume.abafarSistema(false) }, 350)
+            }
+            playerMidia.volume(1f)
             return espera
         }
 
@@ -886,11 +921,11 @@ class InicioActivity : Activity() {
     private fun aplicarVolumeVoz(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz.Volume): String? {
         val n = painelVolume.nivel
         return when (c.acao) {
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.AUMENTAR -> { painelVolume.definirNivel(n + 1); "Volume ${minOf(10, n + 1)}" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DIMINUIR -> { painelVolume.definirNivel(n - 1); "Volume ${maxOf(0, n - 1)}" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MAXIMO -> { painelVolume.definirNivel(10); "Volume máximo" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MINIMO -> { painelVolume.definirNivel(1); "Volume mínimo" }
-            br.com.lmsoftworks.caixa2.voz.AcaoVolume.NIVEL -> { painelVolume.definirNivel(c.nivel); "Volume ${c.nivel}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.AUMENTAR -> { painelVolume.definirSilencioso((n + 1).coerceIn(0, 10) * 10, true); "Volume ${minOf(10, n + 1)}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.DIMINUIR -> { painelVolume.definirSilencioso((n - 1).coerceIn(0, 10) * 10, true); "Volume ${maxOf(0, n - 1)}" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MAXIMO -> { painelVolume.definirSilencioso(100, true); "Volume máximo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.MINIMO -> { painelVolume.definirSilencioso(10, true); "Volume mínimo" }
+            br.com.lmsoftworks.caixa2.voz.AcaoVolume.NIVEL -> { painelVolume.definirSilencioso(c.nivel.coerceIn(0, 10) * 10, true); "Volume ${c.nivel}" }
             br.com.lmsoftworks.caixa2.voz.AcaoVolume.MUDO -> { if (n > 0) painelVolume.alternarMudo(); null }
             br.com.lmsoftworks.caixa2.voz.AcaoVolume.DESMUTAR -> { if (n == 0) painelVolume.alternarMudo(); "Som ligado" }
         }

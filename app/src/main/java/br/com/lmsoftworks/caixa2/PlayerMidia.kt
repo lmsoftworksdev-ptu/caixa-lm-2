@@ -352,6 +352,28 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (fila.size - indice > 2) fila = fila.take(indice + 1) + fila.drop(indice + 1).shuffled()
     }
 
+    private var retomarAposAssistente = false
+
+    /** O assistente foi chamado: a música (ou vídeo) desce em fade e pausa. Devolve em quantos ms terminou (0 se não estava tocando). */
+    fun pausarParaAssistente(): Long {
+        val p = player ?: return 0L
+        if (!p.isPlaying) return 0L
+        if (emFade) cancelarFade()
+        retomarAposAssistente = true
+        rampa(fracaoVolume, 0f, 400L) { p.pause(); restaurarVolume() }
+        return 450L
+    }
+
+    /** O assistente saiu da tela: volta a tocar de onde parou, com o som subindo em fade. */
+    fun retomarDoAssistente() {
+        if (!retomarAposAssistente) return
+        retomarAposAssistente = false
+        val p = player ?: return
+        if (p.isPlaying) return
+        p.volume = 0f; p.play()
+        rampa(0f, 1f, 1000L) { }
+    }
+
     /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
     fun volume(v: Float) { volumeBase = v; if (!emFade) player?.volume = v * fracaoVolume }
 

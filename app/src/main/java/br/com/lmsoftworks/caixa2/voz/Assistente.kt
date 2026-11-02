@@ -570,9 +570,10 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     private fun fim(esperaMs: Long) {
-        // a música só volta quando a tela do assistente sai (e só se ele não foi chamado de novo nesse meio-tempo)
+        // o volume e a música só voltam depois que a tela do assistente fechou de vez (fecha em esperaMs e some em ~550 ms), e só
+        // se ele não foi chamado de novo nesse meio-tempo
         val g = geracao
-        Handler(Looper.getMainLooper()).postDelayed({ if (g == geracao) acoes.abafar(false) }, esperaMs)
+        Handler(Looper.getMainLooper()).postDelayed({ if (g == geracao) acoes.abafar(false) }, esperaMs + 650L)
         faixa.fecharEm(esperaMs)
         if (ativo && escuta != null) estado = EstadoVoz.ESPERANDO_CHAMADA
     }

@@ -29,6 +29,8 @@ object Ajustes {
     @Volatile var avisoVolumeMax = true; private set
     /** Volume da voz e dos toquinhos do assistente, de 1 a 10 (canal próprio: não mexe no volume da música). */
     @Volatile var volumeVoz = 6; private set
+    /** Volume da caixa (0 a 100) escolhido na própria caixa: vale sobre o do celular ao conectar e ao começar a tocar. -1 = ainda não escolhido. */
+    @Volatile var volumeCaixa = -1; private set
     /** Nome da caixa (aparece no Bluetooth). */
     @Volatile var nomeAparelho = "LM Sound"; private set
     /** Cidade do clima escolhida pela pessoa; vazia = automática (pelo IP). */
@@ -54,6 +56,7 @@ object Ajustes {
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
         avisoVolumeMax = p.getBoolean("avisoVolumeMax", true)
         volumeVoz = p.getInt("volumeVozNivel", 6).coerceIn(1, 10)
+        volumeCaixa = p.getInt("volumeCaixa", -1)
         nomeAparelho = p.getString("nomeAparelho", "LM Sound") ?: "LM Sound"
         cidadeNome = p.getString("cidadeNome", "") ?: ""
         cidadeLat = p.getFloat("cidadeLat", 0f).toDouble()
@@ -71,6 +74,7 @@ object Ajustes {
     fun definirSensMic(v: Int) { sensMic = v.coerceIn(1, 10); guardar { putInt("sensMic", sensMic) } }
     fun definirAvisoVolumeMax(v: Boolean) { avisoVolumeMax = v; guardar { putBoolean("avisoVolumeMax", v) } }
     fun definirVolumeVoz(v: Int) { volumeVoz = v.coerceIn(1, 10); guardar { putInt("volumeVozNivel", volumeVoz) } }
+    fun definirVolumeCaixa(v: Int) { volumeCaixa = v.coerceIn(0, 100); guardar { putInt("volumeCaixa", volumeCaixa) } }
     fun definirNome(n: String) { nomeAparelho = n.trim().ifEmpty { "LM Sound" }; guardar { putString("nomeAparelho", nomeAparelho) } }
 
     fun definirCidade(nome: String, lat: Double, lon: Double) {
