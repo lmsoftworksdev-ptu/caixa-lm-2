@@ -264,6 +264,13 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 }))
                 opcoes.addView(linha("Versão", versao.ifBlank { "—" }, botao(c, "Verificar atualização", Tema.BOTAO) { aoVerificarAtualizacao() }))
                 opcoes.addView(linha("Registro do app", "As últimas linhas do diagnóstico, para achar problemas", botao(c, "Ver registro", Tema.BOTAO) { abrirRegistro() }))
+                opcoes.addView(linha("Limpar cache", "Apaga miniaturas guardadas, arquivos temporários e registros antigos", botao(c, "Limpar", Tema.BOTAO) {
+                    Aviso.mostrar(c, "Limpando…")
+                    Thread {
+                        val livre = try { Limpeza.executar(c) } catch (e: Throwable) { -1L }
+                        post { Aviso.mostrar(c, if (livre < 0) "Não consegui limpar tudo." else if (livre == 0L) "Já estava tudo limpo." else "Limpeza concluída: " + Limpeza.texto(livre) + " liberados") }
+                    }.start()
+                }))
                 opcoes.addView(linha("Restaurar ajustes", "Volta brilho, ocioso, sons, cidade e nome ao padrão", botao(c, "Restaurar", Tema.BOTAO, Tema.VERMELHO_SUAVE) { confirmarRestaurar() }))
                 opcoes.addView(linha("Energia", "Desligar ou reiniciar a caixa", botao(c, "Energia", Tema.BOTAO) { aoEnergia() }))
             }

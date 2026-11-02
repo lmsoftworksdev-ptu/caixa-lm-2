@@ -57,6 +57,9 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     val posicaoMs: Long get() = player?.currentPosition ?: 0L
     val sessaoAudio: Int get() = player?.audioSessionId ?: 0
 
+    /** Cria o ExoPlayer antes de precisar: montá-lo na primeira troca música <-> vídeo travava a tela e o esmaecimento saía sem animação. */
+    fun aquecer() { criar() }
+
     private fun criar(): ExoPlayer {
         player?.let { return it }
         val p = novoExo()
@@ -142,6 +145,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val atual = player
         if (!recuperando && atual != null && atual.isPlaying && fracaoVolume > 0.05f) {
             if (emFade) cancelarFade()
+            // o card já mostra a faixa nova enquanto a antiga some no volume (senão ficava a antiga por meio segundo e só depois trocava)
+            item = r; ehVideo = video; erro = null; carregando = true
+            infoExtra = ""
+            capa = capas.get(r.url) ?: capaProvisoria?.takeIf { it.first == r.url }?.second
+            primeiroQuadro = false
+            aoMudar()
             rampa(fracaoVolume, 0f, 500L) { val ret = retomarEm; iniciarItemAgora(r, video, recuperando); retomarEm = ret }
             return
         }
@@ -175,7 +184,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; modoMusica = fonte.musica; infoExtra = infoDe(fonte); tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
-                handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível abrir"; aoMudar() } }
+                handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível reproduzir"; aoMudar() } }
             }
         }.start()
     }

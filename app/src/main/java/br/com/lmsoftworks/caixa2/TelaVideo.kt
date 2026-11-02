@@ -229,7 +229,7 @@ class TelaVideo(
         val entrando = visibility != View.VISIBLE
         visibility = View.VISIBLE
         cortina.visibility = View.VISIBLE
-        if (entrando) { imagem.visibility = View.GONE; alpha = 0f; animate().alpha(1f).setDuration(380).withEndAction { imagem.visibility = View.VISIBLE }.start() }
+        if (entrando) { imagem.visibility = View.GONE; alpha = 0f; animate().alpha(1f).setDuration(FADE_MS).withEndAction { imagem.visibility = View.VISIBLE }.start() }
         titulo.text = tituloEspera; canal.text = canalEspera
         iconePlay.setImageResource(R.drawable.ic_tocar)
         rodinha.visibility = View.VISIBLE
@@ -249,7 +249,7 @@ class TelaVideo(
         if (esmaecendo) {
             imagem.visibility = View.GONE; cortinaForcada = true; cortina.visibility = View.VISIBLE
             alpha = 0f
-            animate().alpha(1f).setDuration(380).withEndAction { imagem.visibility = View.VISIBLE; player.ligarImagem(imagem); cortinaForcada = false; atualizar() }.start()
+            animate().alpha(1f).setDuration(FADE_MS).withEndAction { imagem.visibility = View.VISIBLE; player.ligarImagem(imagem); cortinaForcada = false; atualizar() }.start()
         } else { imagem.visibility = View.VISIBLE; player.ligarImagem(imagem) }
         mostrarControles(true)
         handler.removeCallbacks(tique); handler.post(tique)
@@ -297,7 +297,7 @@ class TelaVideo(
     fun esmaecerSaida(fim: () -> Unit) {
         player.ligarImagem(null)
         imagem.visibility = View.GONE; cortinaForcada = true; cortina.visibility = View.VISIBLE
-        animate().alpha(0f).setDuration(380).withEndAction { fim(); alpha = 1f; imagem.visibility = View.VISIBLE }.start()
+        animate().alpha(0f).setDuration(FADE_MS).withEndAction { fim(); alpha = 1f; imagem.visibility = View.VISIBLE }.start()
     }
 
     fun fechar() {
@@ -358,3 +358,6 @@ class TelaVideo(
         atualizarTempo()
     }
 }
+
+/** Duração do esmaecimento do vídeo, igual ao entrar (música -> vídeo) e ao sair (vídeo -> música). */
+const val FADE_MS = 380L

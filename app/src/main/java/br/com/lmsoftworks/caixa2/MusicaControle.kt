@@ -135,6 +135,10 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     var bluetoothLigado: () -> Boolean = { true }
     val emLocal: Boolean get() = local?.let { it.ativo && !it.ehVideo } == true
 
+    /** Erro da música tocada pelo app (endereço não abriu, rede...): a tela de música avisa e oferece tentar de novo. */
+    val erroLocal: String? get() = local?.takeIf { it.ativo && !it.ehVideo }?.erro
+    fun tentarDeNovoLocal() { local?.alternar() }
+
     val temMusica: Boolean get() = titulo.isNotEmpty()
     val tocando: Boolean get() = estado == PlaybackState.STATE_PLAYING || estado == PlaybackState.STATE_BUFFERING
     val conectado: Boolean get() = controle != null

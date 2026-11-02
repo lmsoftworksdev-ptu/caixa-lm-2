@@ -86,7 +86,9 @@ class EscutaAssistente(
         val minimo = AudioRecord.getMinBufferSize(TAXA, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minimo <= 0) return false
         val gr = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION, TAXA, AudioFormat.CHANNEL_IN_MONO,
+            // VOICE_COMMUNICATION faz o rádio do aparelho trocar o microfone por "speaker-mic" (surdo) assim que sai qualquer som pelo alto-falante
+            // (o toquinho da chamada): a caixa ouvia só a primeira chamada. VOICE_RECOGNITION mantém o microfone digital (dmic-endfire).
+            MediaRecorder.AudioSource.VOICE_RECOGNITION, TAXA, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, max(minimo * 4, TAXA * 2)
         )
         if (gr.state != AudioRecord.STATE_INITIALIZED) { gr.release(); return false }

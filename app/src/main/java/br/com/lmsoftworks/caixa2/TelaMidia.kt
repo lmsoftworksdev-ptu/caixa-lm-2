@@ -26,39 +26,91 @@ import android.widget.TextView
 import java.net.URL
 import java.util.concurrent.Executors
 
-/** Baixa e guarda as miniaturas dos vídeos e capas das músicas (poucas ao mesmo tempo, para não pesar no G3). */
+/**
+ * Baixa e guarda as miniaturas dos vídeos e capas das músicas. Três camadas: memória (já decodificadas, por tamanho em bytes), disco
+ * (os JPEG baixados, em pasta temporária que é apagada quando o app abre) e a internet. Poucos downloads ao mesmo tempo, em segundo plano.
+ */
 object Miniaturas {
-    private val cache = LruCache<String, Bitmap>(48)
-    private val fila = Executors.newFixedThreadPool(3)
+    private val cache = object : LruCache<String, Bitmap>(28 * 1024 * 1024) {
+        override fun sizeOf(chave: String, b: Bitmap) = b.byteCount
+    }
+    private val fila = Executors.newFixedThreadPool(4) { r -> Thread { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() } }
     private val principal = Handler(Looper.getMainLooper())
+    private var pasta: java.io.File? = null
+    private var gravadas = 0
+
+    /** Prepara a pasta temporária no cache do app. Começa vazia a cada abertura: as miniaturas só ficam guardadas enquanto o app roda. */
+    fun iniciar(ctx: android.content.Context) {
+        if (pasta != null) return
+        pasta = java.io.File(ctx.applicationContext.cacheDir, "miniaturas").apply { deleteRecursively(); mkdirs() }
+    }
+
+    /** Apaga as miniaturas guardadas (memória e disco); devolve quantos bytes liberou do disco. */
+    fun limparTudo(): Long {
+        cache.evictAll()
+        val p = pasta ?: return 0L
+        val tam = p.listFiles()?.sumOf { it.length() } ?: 0L
+        p.listFiles()?.forEach { it.delete() }
+        return tam
+    }
+
+    private fun nomeDe(url: String): String =
+        java.security.MessageDigest.getInstance("MD5").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /** Para cartões pequenos, o YouTube tem a versão de 320x180 (uns 10 KB) no lugar da de 1280x720: baixa bem mais rápido. */
+    private fun ajustar(urls: List<String>, ladoMax: Int): List<String> {
+        val primeira = urls.firstOrNull() ?: return urls
+        if (ladoMax > 240 || !primeira.contains("i.ytimg.com/vi/") || !primeira.endsWith("hq720.jpg")) return urls
+        return listOf(primeira.replace("hq720.jpg", "mqdefault.jpg")) + urls
+    }
 
     /**
      * Tenta cada endereço da lista, do melhor para o pior, até um funcionar. [ladoMax] é a largura a partir da qual a imagem ainda é
      * reduzida pela metade ao decodificar: cartões pequenos (Mídia) usam um valor baixo, para não estourar a memória do Moto G3.
      */
     fun carregar(urls: List<String>, alvo: ImageView, ladoMax: Int = 480) {
-        val url = urls.firstOrNull()
+        val lista = ajustar(urls, ladoMax)
+        val url = lista.firstOrNull()
         alvo.tag = url
+        if (url == null) { alvo.setImageDrawable(null); return }
+        val chave = "$ladoMax|$url"
+        cache.get(chave)?.let { alvo.setImageBitmap(it); return }      // já na memória: aparece na hora, sem piscar
         alvo.setImageDrawable(null)
-        if (url == null) return
-        cache.get(url)?.let { alvo.setImageBitmap(it); return }
         fila.execute {
             try {
-                var bytes: ByteArray? = null
-                for (u in urls) {
-                    try { bytes = URL(u).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.getInputStream().use { it.readBytes() }; break } catch (e: Exception) { }
+                val arquivo = pasta?.let { java.io.File(it, nomeDe(url)) }
+                var bytes: ByteArray? = try { arquivo?.takeIf { it.isFile && it.length() > 0 }?.readBytes() } catch (e: Exception) { null }
+                if (bytes == null) {
+                    // se nenhum endereço responder, tenta de novo (a rede da caixa oscila): até 4 rodadas, com pausa crescente
+                    for (rodada in 0 until 4) {
+                        for (u in lista) {
+                            try { bytes = URL(u).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.getInputStream().use { it.readBytes() }; break } catch (e: Exception) { }
+                        }
+                        if (bytes != null) break
+                        Thread.sleep(1500L * (rodada + 1))
+                    }
+                    if (bytes == null) return@execute
+                    try { arquivo?.writeBytes(bytes!!); if (++gravadas % 25 == 0) aparar() } catch (e: Exception) { }
                 }
-                if (bytes == null) return@execute
+                val dados = bytes!!
                 val limites = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, limites)
+                BitmapFactory.decodeByteArray(dados, 0, dados.size, limites)
                 var amostra = 1
                 while (limites.outWidth / (amostra * 2) >= ladoMax) amostra *= 2
                 val opcoes = BitmapFactory.Options().apply { inSampleSize = amostra; inPreferredConfig = Bitmap.Config.RGB_565 }
-                val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opcoes) ?: return@execute
-                cache.put(url, b)
+                val b = BitmapFactory.decodeByteArray(dados, 0, dados.size, opcoes) ?: return@execute
+                cache.put(chave, b)
                 principal.post { if (alvo.tag == url) alvo.setImageBitmap(b) }
             } catch (e: Exception) { }
         }
+    }
+
+    /** A pasta temporária não passa de uns 60 MB: acima disso apaga os arquivos mais antigos. */
+    private fun aparar() {
+        val arquivos = pasta?.listFiles() ?: return
+        var total = arquivos.sumOf { it.length() }
+        if (total <= 60L * 1024 * 1024) return
+        for (f in arquivos.sortedBy { it.lastModified() }) { total -= f.length(); f.delete(); if (total <= 40L * 1024 * 1024) break }
     }
 }
 
@@ -101,6 +153,9 @@ class TelaMidia(
     private val prefs = c.getSharedPreferences("caixa_midia", Context.MODE_PRIVATE)
     private val generos = HashMap<String, List<Resultado>>()      // "m|Sertanejo" ou "v|Sertanejo"
     private val generosPedidos = HashSet<String>()
+    private val tentativas = HashMap<String, Int>()
+    private val buscasGuardadas = HashMap<String, List<Resultado>>()      // pesquisa já feita: voltar a ela não busca de novo
+    private var tentativasAlta = 0
     private val rolagemM = ScrollView(c)
     private val rolagemV = ScrollView(c)
     private val areaM = LinearLayout(c)
@@ -247,6 +302,8 @@ class TelaMidia(
                     if (r == null && falha != null) aoFalha(falha!!)
                 }
                 renderizar()
+                // falhou: tenta de novo sozinho em alguns segundos, até carregar
+                if (r == null) principal.postDelayed({ if (consulta.isBlank() && !carregando && modoMusica == musica) { erro = null; carregarAlta() } }, 3_000L)
             }
         }.start()
     }
@@ -266,6 +323,8 @@ class TelaMidia(
             return
         }
         val musica = modoMusica
+        val guardada = buscasGuardadas[(if (musica) "m|" else "v|") + q.lowercase()]
+        if (guardada != null) { res = guardada; carregando = false; erro = null; renderizar(); return }
         carregando = true; erro = null
         renderizar()
         var r: List<Resultado>? = null; var falha: Exception? = null
@@ -277,7 +336,7 @@ class TelaMidia(
                 if (minha != seq) return@post
                 carregando = false
                 if (r == null) { falhou(falha); res = null }
-                else res = r.orEmpty().take(LIMITE_GENERO)
+                else { res = r.orEmpty().take(LIMITE_GENERO); if (!res.isNullOrEmpty()) buscasGuardadas[(if (musica) "m|" else "v|") + q.lowercase()] = res!! }
                 renderizar()
             }
         }.start()
@@ -346,9 +405,10 @@ class TelaMidia(
     private fun precarregarAlta(musica: Boolean) {
         if ((if (musica) altaM else altaV) != null) return
         Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             val r = try { YouTube.emAlta(musica) } catch (e: Exception) { null }
             principal.post {
-                if (r == null) return@post
+                if (r == null) { principal.postDelayed({ precarregarAlta(musica) }, 3_000L * (++tentativasAlta).coerceAtMost(20)); return@post }      // tenta de novo sozinho
                 if (musica) altaM = r.take(LIMITE) else altaV = r.take(LIMITE)
                 altaEm = System.currentTimeMillis()
                 if (modoMusica == musica && !carregando && consulta.isBlank()) renderizar()
@@ -359,8 +419,8 @@ class TelaMidia(
     // ------------------------------------------------------------------ desenho das fileiras
 
     /** [nicho] é o tema da fileira ("sertanejo", a pesquisa...): quem toca monta a fila com playlists desse tema. */
-    private fun cartoes(lista: List<Resultado>, musica: Boolean, nicho: String): List<View> =
-        lista.mapIndexed { i, r -> if (musica) cartaoMusica(r) { aoMusica(lista, i, nicho) } else cartaoVideo(r) { aoVideo(lista, i, nicho) } }
+    private fun cartoes(lista: List<Resultado>, musica: Boolean, nicho: String, grande: Boolean = false): List<View> =
+        lista.mapIndexed { i, r -> if (musica) cartaoMusica(r, grande) { aoMusica(lista, i, nicho) } else cartaoVideo(r, grande) { aoVideo(lista, i, nicho) } }
 
     private fun renderizar() {
         piscar?.cancel(); piscar = null
@@ -370,7 +430,7 @@ class TelaMidia(
         val musica = modoMusica
         if (carregando) {
             area.addView(cabecalho(if (q.isEmpty()) (if (musica) "Músicas em alta" else "Vídeos em alta") else (if (musica) "Músicas" else "Vídeos"), ""), cabLp())
-            area.addView(fileira(List(if (musica) 8 else 6) { esqueleto(true) }), fileiraLp())
+            area.addView(fileira(if (q.isEmpty()) List(if (musica) 12 else 6) { esqueleto(true, musica = musica) } else List(3) { esqueleto(true, grande = true, musica = musica) }), fileiraLp())      // na pesquisa o esqueleto já tem o tamanho das capas grandes
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
                 duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
                 addUpdateListener { v -> fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
@@ -383,7 +443,7 @@ class TelaMidia(
         mostrandoBusca[if (musica) 0 else 1] = q.isNotEmpty() && !achados.isNullOrEmpty()
         if (q.isNotEmpty() && !achados.isNullOrEmpty()) {
             area.addView(cabecalho(if (musica) "Músicas" else "Vídeos", ""), cabLp())
-            area.addView(fileira(cartoes(achados, musica, q)), fileiraLp())
+            area.addView(fileira(cartoes(achados, musica, q, grande = true)), fileiraLp())      // na pesquisa há uma fileira só: as capas ocupam o espaço da tela
             return
         }
         // sem pesquisa (ou sem resultado): o em alta do tipo escolhido e, abaixo, uma fileira por gênero
@@ -423,7 +483,7 @@ class TelaMidia(
         when {
             lista != null -> slot.addView(fileira(cartoes(lista, musica, GENEROS.firstOrNull { it.first == chave.substringAfter('|') }?.second ?: chave.substringAfter('|'))))
             chave in falhaGenero -> slot.addView(avisoLinha("Não carregou. Toque para tentar de novo.") { falhaGenero.remove(chave); generosPedidos.remove(chave); verificarVisiveis() })
-            else -> slot.addView(fileira(List(8) { esqueleto(true) }, registrar = false).apply { alpha = .5f })
+            else -> slot.addView(fileira(List(if (musica) 12 else 8) { esqueleto(true, musica = musica) }, registrar = false).apply { alpha = .5f })
         }
     }
 
@@ -443,11 +503,17 @@ class TelaMidia(
         if (!generosPedidos.add(chave)) return
         val t0 = android.os.SystemClock.uptimeMillis()
         Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             val r = try { YouTube.generoEmAlta(termo, musica) } catch (e: Exception) { null }
             android.util.Log.d("MidiaTempo", "gênero " + chave + ": " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
             principal.post {
-                if (r.isNullOrEmpty()) falhaGenero.add(chave) else generos[chave] = r
-                preencherSlot(chave)
+                if (r.isNullOrEmpty()) {
+                    // sem aviso nem toque: fica o esqueleto e o app tenta de novo sozinho, com pausa crescente, até carregar
+                    val n = (tentativas[chave] ?: 0) + 1
+                    tentativas[chave] = n
+                    generosPedidos.remove(chave)
+                    principal.postDelayed({ if (generos[chave] == null) carregarGenero(chave, termo, musica) }, (if (n > 6) 60_000L else minOf(2_000L * n, 12_000L)))
+                } else { tentativas.remove(chave); generos[chave] = r; preencherSlot(chave) }
                 atualizarProntidao()
             }
         }.start()
@@ -481,11 +547,12 @@ class TelaMidia(
         }
     }
 
-    private fun esqueleto(video: Boolean): View = LinearLayout(c).apply {
+    private fun esqueleto(video: Boolean, grande: Boolean = false, musica: Boolean = false): View = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
-        val largura = if (video) LARGURA_VIDEO else LADO_MUSICA
+        // música: quadrado do tamanho do cartão de música; vídeo: 16:9 do tamanho do cartão de vídeo
+        val largura = if (musica) (if (grande) 297 else 133) else if (grande) 528 else if (video) LARGURA_VIDEO else LADO_MUSICA
         val capa = View(c).apply { background = fundoArredondado(Color.parseColor("#33FFFFFF"), if (video) 16.d() else 18.d()) }
-        addView(capa, LinearLayout.LayoutParams(largura.d(), (if (video) LARGURA_VIDEO * 9 / 16 else LADO_MUSICA).d()))
+        addView(capa, LinearLayout.LayoutParams(largura.d(), (if (musica) largura else if (grande) 297 else if (video) LARGURA_VIDEO * 9 / 16 else LADO_MUSICA).d()))
         val l1 = View(c).apply { background = fundoArredondado(Color.parseColor("#33FFFFFF"), 6.d()) }
         val l2 = View(c).apply { background = fundoArredondado(Color.parseColor("#33FFFFFF"), 6.d()) }
         addView(l1, LinearLayout.LayoutParams((largura - 30).d(), 16.d()).apply { topMargin = 14.d() })
@@ -493,8 +560,10 @@ class TelaMidia(
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
-    private fun cartaoVideo(r: Resultado, aoToque: () -> Unit): View = LinearLayout(c).apply {
+    private fun cartaoVideo(r: Resultado, grande: Boolean = false, aoToque: () -> Unit): View = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
+        val lw = if (grande) 528 else LARGURA_VIDEO      // pesquisa: capa grande (16:9) em vez da miniatura
+        val lh = if (grande) 297 else 133
         isClickable = true
         setOnClickListener { aoToque() }
         efeitoToque()
@@ -502,20 +571,22 @@ class TelaMidia(
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         arredondar(quadro, 18)
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
-        Miniaturas.carregar(r.miniaturas, imagem, 240)
+        Miniaturas.carregar(r.miniaturas, imagem, if (grande) 640 else 240)
         quadro.addView(texto(c, r.duracaoTexto, 15, Color.WHITE, true).apply {
             background = fundoArredondado(Color.parseColor("#B8000000"), 7.d())
             setPadding(8.d(), 3.d(), 8.d(), 3.d())
         }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
-        addView(quadro, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), 133.d()))
-        addView(texto(c, r.titulo, 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 9.d() })
+        addView(quadro, LinearLayout.LayoutParams(lw.d(), lh.d()))
+        addView(texto(c, r.titulo, if (grande) 24 else 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(lw.d(), -2).apply { topMargin = 9.d() })
         val sub = listOf(r.canal, r.visualizacoesTexto).filter { it.isNotEmpty() }.joinToString(" · ")
-        addView(texto(c, sub, 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 3.d() })
+        addView(texto(c, sub, 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(lw.d(), -2).apply { topMargin = 3.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
-    private fun cartaoMusica(r: Resultado, aoToque: () -> Unit): View = LinearLayout(c).apply {
+    private fun cartaoMusica(r: Resultado, grande: Boolean = false, aoToque: () -> Unit): View = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
+        val lw = if (grande) 297 else 133      // a capa da música é quadrada: o cartão tem o tamanho dela, sem faixas dos lados
+        val lh = lw
         isClickable = true
         setOnClickListener { aoToque() }
         efeitoToque()
@@ -523,10 +594,10 @@ class TelaMidia(
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         arredondar(quadro, 18)
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
-        Miniaturas.carregar(r.miniaturas, imagem, 240)
-        addView(quadro, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), 133.d()))      // o mesmo tamanho do cartão de vídeo
-        addView(texto(c, r.titulo, 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 9.d() })
-        addView(texto(c, r.canal.removeSuffix(" - Topic"), 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA_VIDEO.d(), -2).apply { topMargin = 3.d() })
+        Miniaturas.carregar(r.miniaturas, imagem, if (grande) 640 else 240)
+        addView(quadro, LinearLayout.LayoutParams(lw.d(), lh.d()))
+        addView(texto(c, r.titulo, if (grande) 24 else 20, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(lw.d(), -2).apply { topMargin = 9.d() })
+        addView(texto(c, r.canal.removeSuffix(" - Topic"), 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(lw.d(), -2).apply { topMargin = 3.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 

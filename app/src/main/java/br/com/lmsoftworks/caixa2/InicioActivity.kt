@@ -196,6 +196,11 @@ class InicioActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Miniaturas.iniciar(this)
+        SomTeclado.iniciar(this)
+        TecladoView.aoMudarVisibilidade = { aberto -> if (::fundo.isInitialized) fundo.segurar(aberto) }
+        // o YouTube bloqueia o IPv6 da operadora ("confirme que não é um robô"): toda a rede do app sai pelo IPv4
+        System.setProperty("java.net.preferIPv4Stack", "true"); System.setProperty("java.net.preferIPv6Addresses", "false")
         super.onCreate(savedInstanceState)
         (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).let { if (it.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) it.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0) }      // a versão anterior podia deixar a caixa muda
         bootNovo = aparelhoAcabouDeLigar()
@@ -626,7 +631,7 @@ class InicioActivity : Activity() {
         val interpolador = if (desde == 0f && ate == 90f) android.view.animation.PathInterpolator(0.3f, 0.7f, 0.2f, 1f)
                            else android.view.animation.PathInterpolator(0f, 0f, 0.2f, 1f)
         var t0 = -1L
-        fundo.parar()      // o fundo animado fica parado durante o giro (menos redesenho); volta no fim
+        fundo.lento(true)      // durante o giro o fundo segue com menos quadros: a troca de cor do menu esmaece em vez de pular no fim
         // laço próprio (um quadro por vez), sem depender da escala de animação do sistema
         val passo = object : Runnable {
             override fun run() {
@@ -719,6 +724,7 @@ class InicioActivity : Activity() {
         private var geracaoFimPausa = 0
 
         override fun abafar(sim: Boolean): Long {
+            if (sim) pausarCelularNoFim = false
             // música do celular (Bluetooth): fade-out, pausa e voz no volume dela; vídeo/música do app: baixa o player
             // o aviso de "celular tocando" do Bluetooth só chega quando o estado muda: se o app abriu com a música já tocando, ele não
             // veio. Por isso também vale o aparelho dizer que há música saindo agora.
@@ -765,6 +771,12 @@ class InicioActivity : Activity() {
                         modoPausa = false
                         if (focoPedido) { audio.abandonAudioFocus(focoVoz); focoPedido = false }
                         painelVolume.pausaFim()
+                        // "pause"/"pare" com música do celular: ao soltar o foco o celular volta a tocar sozinho; manda pausar de novo (duas vezes, por garantia)
+                        if (pausarCelularNoFim) {
+                            pausarCelularNoFim = false
+                            relogio.postDelayed({ musica.pausarCelular() }, 700)
+                            relogio.postDelayed({ musica.pausarCelular() }, 1800)
+                        }
                     }
                 }, 350)
             } else if (modoPausaApp) {
@@ -788,6 +800,8 @@ class InicioActivity : Activity() {
 
         override fun tocar(lista: List<Resultado>, soAudio: Boolean) {
             musica.marcarPorVoz()      // o Bluetooth devolve o som ao celular no fim da fala: o app não cede a isso
+            // a lista de próximas também vem do que a voz pediu: o tema é o artista (ou o título) do primeiro resultado
+            lista.firstOrNull()?.let { iniciarNicho(it.canal.removeSuffix(" - Topic").ifBlank { it.titulo }, soAudio, it) }
             if (soAudio) { videoDeMusica = false; if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
         }
 
@@ -802,11 +816,11 @@ class InicioActivity : Activity() {
                 ir("midia"); telaMidia.pesquisar(c.consulta)
                 "Pesquisando ${br.com.lmsoftworks.caixa2.voz.InterpretadorVoz.consultaFalada(c.consulta)}"
             }
-            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pausar -> { if (noVideo) { if (playerMidia.tocando) playerMidia.alternar() } else musica.pausar(); null }
+            is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pausar -> { if (noVideo) { if (playerMidia.tocando) playerMidia.alternar() } else { musica.pausar(); pausarCelularNoFim = !musica.emLocal }; null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Continuar -> { if (noVideo) { if (!playerMidia.tocando) playerMidia.alternar() } else musica.tocar(); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Parar -> {
                 if (alarmeTocando != null) pararAlarme(false)
-                else if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() }
+                else if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() else pausarCelularNoFim = true }
                 null
             }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Proxima -> { if (noVideo) playerMidia.proxima() else musica.proxima(); null }
@@ -881,8 +895,8 @@ class InicioActivity : Activity() {
             relogio.post {
                 when {
                     lista.isEmpty() -> faixaAssistente.respondendo("Não encontrei $consulta.")
-                    musicaPedida -> { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista.take(1), 0) }
-                    else -> abrirVideo(lista.take(1), 0)
+                    musicaPedida -> { iniciarNicho(lista[0].canal.removeSuffix(" - Topic").ifBlank { lista[0].titulo }, true, lista[0]); if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista.take(1), 0) }
+                    else -> { iniciarNicho(lista[0].canal.removeSuffix(" - Topic").ifBlank { lista[0].titulo }, false, lista[0]); abrirVideo(lista.take(1), 0) }
                 }
             }
         }.start()
@@ -1299,6 +1313,7 @@ class InicioActivity : Activity() {
         val desde = android.os.SystemClock.uptimeMillis()
     }
     private var nicho: Nicho? = null
+    private var pausarCelularNoFim = false      // o pedido foi pausar/parar a música do celular: ela não pode voltar quando o assistente fechar
 
     /** O artista (ou canal) do item escolhido, limpo para pesquisar: sem " - Topic", sem "VEVO", só o primeiro de vários. Vazio se for igual ao tema. */
     private fun nomeDoArtista(canal: String, termo: String): String {
@@ -1469,7 +1484,7 @@ class InicioActivity : Activity() {
                             else { destinoCubo = destinoVoltar(); deCubo = tela(atual); paraCubo = tela(destinoCubo) }
                             if (destinoCubo.isNotEmpty() && destinoCubo != "inicio") { aplicarTema(destinoCubo); preencher(destinoCubo) }      // a tela de destino já aparece na cor dela
                             Cubo.preparar(deCubo!!, paraCubo!!)
-                            fundo.parar()      // fundo parado enquanto o dedo gira a caixa
+                            fundo.lento(true)      // com o dedo girando a caixa o fundo segue com menos quadros
                             girando = true; grauAtual = 0f; tArraste = android.os.SystemClock.uptimeMillis()
                         }
                     }

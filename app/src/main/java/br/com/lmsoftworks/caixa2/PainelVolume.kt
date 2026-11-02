@@ -226,11 +226,8 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         val conteudo = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(View(c), LinearLayout.LayoutParams(76.d(), 1))
-            addView(botaoMudo, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
-            addView(menos, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
+            addView(View(c), LinearLayout.LayoutParams(76.d(), 1))      // só a barra e a porcentagem: sem alto-falante, "−" e "+"
             addView(barra, LinearLayout.LayoutParams(0, ALTURA_DP.d(), 1f).apply { leftMargin = 6.d(); rightMargin = 6.d() })
-            addView(mais, LinearLayout.LayoutParams(56.d(), ALTURA_DP.d()))
             addView(rotulo, LinearLayout.LayoutParams(56.d(), LayoutParams.WRAP_CONTENT))
             rotulo.gravity = Gravity.CENTER
         }

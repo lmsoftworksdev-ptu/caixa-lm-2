@@ -231,6 +231,7 @@ class TelaMusica(
     private var proximasAbertas = false
     private val proximas = ListaProximas(c, "Próximas", 76, 76, { i -> musica.irParaLocal(i) }) { alternarProximas(false) }
     private val botaoProximas = LinearLayout(c)
+    private val avisoErro = LinearLayout(c)      // "Não foi possível reproduzir" + Tentar de novo, quando a música do app não abre
     private val fundoProximas = View(c)      // cobre a tela por trás da lista: tocar fora dela fecha
 
     /** Fundo com a capa desfocada (fica atrás de todas as telas; quem monta é a InicioActivity). */
@@ -238,6 +239,7 @@ class TelaMusica(
 
     init {
         // posições em px de projeto; a tela fica 64 abaixo do topo, então y local = y do protótipo - 64
+        conteudo.clipChildren = false      // a sombra da capa passa dos limites dela: cortada na borda de baixo, formava um fundo quadrado atrás dos cantos arredondados
         conteudo.addView(capa, LayoutParams(TAM_BANNER.d(), TAM_BANNER.d()).apply { leftMargin = 64.d(); topMargin = (BANNER_Y - 64).d() })
 
         val textos = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
@@ -306,6 +308,14 @@ class TelaMusica(
         addView(proximas, LayoutParams(PROXIMAS_LARGURA.d(), -1, Gravity.END).apply { topMargin = 36.d(); bottomMargin = 22.d(); rightMargin = 20.d() })
 
 
+        avisoErro.apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE
+            background = fundoArredondado(Color.parseColor("#CC0A1020"), 30.d(), Tema.BOTAO_BORDA)
+            setPadding(28.d(), 0, 12.d(), 0)
+            addView(texto(c, "Não foi possível reproduzir", 22, Tema.TEXTO, true))
+            addView(botao(c, "Tentar de novo", Cfg.AZUL) { musica.tentarDeNovoLocal() }, LinearLayout.LayoutParams(-2, 48.d()).apply { leftMargin = 18.d() })
+        }
+        addView(avisoErro, LayoutParams(-2, 60.d(), Gravity.BOTTOM or Gravity.START).apply { leftMargin = COLUNA_X.d(); bottomMargin = 24.d() })
         atualizar(true)
     }
 
@@ -336,11 +346,12 @@ class TelaMusica(
         conteudo.visibility = if (tem) View.VISIBLE else View.GONE
         seletor.visibility = if ((tem || painel) && !proximasAbertas) View.VISIBLE else View.GONE
         if (painel) { seletor.ativo = "musica"; seletor.videoDisponivel = false }
-        findMenu()?.visibility = if ((tem || painel) && !proximasAbertas) View.VISIBLE else View.GONE
+        findMenu()?.visibility = if (tem || painel) View.VISIBLE else View.GONE
         val local = tem && musica.emLocal && musica.filaLocal.size > 1
         if (!local && proximasAbertas) alternarProximas(false)
         botaoProximas.visibility = if (local && !proximasAbertas) View.VISIBLE else View.GONE
         if (proximasAbertas) proximas.atualizar(musica.filaLocal, musica.indiceLocal)
+        avisoErro.visibility = if (tem && musica.erroLocal != null) View.VISIBLE else View.GONE
         if (painel) return
         if (!tem) return      // sem música e sem celular tocando não há tela: quem manda é a InicioActivity (volta ao início)
 
@@ -383,7 +394,12 @@ class TelaMusica(
         if (abrir) proximas.atualizar(musica.filaLocal, musica.indiceLocal)
         botaoProximas.visibility = View.GONE
         seletor.visibility = if (abrir) View.GONE else seletor.visibility
-        findMenu()?.visibility = if (abrir) View.GONE else findMenu()?.visibility ?: View.GONE
+        // o botão Menu encolhe junto com a tela (mesmo ponto fixo) e fica no canto de baixo à direita dela; fica acima do fundo que fecha a lista
+        findMenu()?.let { m ->
+            m.pivotX = -m.left.toFloat(); m.pivotY = conteudo.height / 2f - m.top
+            m.animate().scaleX(escala).scaleY(escala).setDuration(260).start()
+            if (abrir) m.bringToFront()
+        }
     }
 
     /** O celular está tocando sem mandar os dados da música (a tela "Tocando de ..." é a que vale). Também liga a sessão, se ainda não estava. */

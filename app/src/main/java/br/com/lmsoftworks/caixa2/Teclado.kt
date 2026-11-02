@@ -36,6 +36,22 @@ class TecladoView(c: Context) : LinearLayout(c) {
         montar()
     }
 
+    companion object {
+        private val visiveis = HashSet<TecladoView>()
+        /** Avisa (true/false) quando o primeiro teclado aparece e quando o último some: o fundo animado para enquanto se digita. */
+        var aoMudarVisibilidade: ((Boolean) -> Unit)? = null
+    }
+
+    private fun conferirVisibilidade() {
+        val antes = visiveis.isNotEmpty()
+        if (isShown && isAttachedToWindow) visiveis.add(this) else visiveis.remove(this)
+        val agora = visiveis.isNotEmpty()
+        if (agora != antes) aoMudarVisibilidade?.invoke(agora)
+    }
+    override fun onVisibilityChanged(changedView: View, visibility: Int) { super.onVisibilityChanged(changedView, visibility); conferirVisibilidade() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); conferirVisibilidade() }
+    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); val antes = visiveis.isNotEmpty(); visiveis.remove(this); if (antes && visiveis.isEmpty()) aoMudarVisibilidade?.invoke(false) }
+
     /** Liga o ⇧ (a próxima letra sai maiúscula): usado quando o texto está vazio. */
     fun capitalizar(sim: Boolean) { if (maiuscula != sim) { maiuscula = sim; atualizarLetras() } }
 
@@ -47,8 +63,11 @@ class TecladoView(c: Context) : LinearLayout(c) {
             typeface = if (destaque) FONTE_MEDIA else FONTE_NORMAL
             gravity = Gravity.CENTER
             tag = ativa      // tecla "ligada" (o ⇧): fica na cor de destaque
-            fun normal(v: View) = fundoArredondado(if (destaque || v.tag == true) Cfg.AZUL else Color.parseColor("#1AFFFFFF"), 18.d())
-            fun premida(v: View) = fundoArredondado(if (destaque || v.tag == true) Cfg.AZUL else Color.parseColor("#47FFFFFF"), 18.d())
+            // os fundos são criados uma vez por estado (ligada ou não): criar dois a cada toque engasgava a digitação
+            val fundosN = arrayOfNulls<android.graphics.drawable.Drawable>(2)
+            val fundosP = arrayOfNulls<android.graphics.drawable.Drawable>(2)
+            fun normal(v: View): android.graphics.drawable.Drawable { val i = if (v.tag == true) 1 else 0; return fundosN[i] ?: fundoArredondado(if (destaque || i == 1) Cfg.AZUL else Color.parseColor("#1AFFFFFF"), 18.d()).also { fundosN[i] = it } }
+            fun premida(v: View): android.graphics.drawable.Drawable { val i = if (v.tag == true) 1 else 0; return fundosP[i] ?: fundoArredondado(if (destaque || i == 1) Cfg.AZUL else Color.parseColor("#47FFFFFF"), 18.d()).also { fundosP[i] = it } }
             background = normal(this)
             isClickable = true
             // tecla que repete (apagar): segurando, depois de um instante ela se repete sozinha e vai acelerando
@@ -127,36 +146,59 @@ class TecladoView(c: Context) : LinearLayout(c) {
     }
 }
 
-/** Toquinho de tecla: um estalo curto de 18 ms gerado no próprio app, tocado por 3 pistas que se revezam (teclas rápidas não se cortam). */
+/**
+ * Toquinho de tecla: um estalo curto de 18 ms gerado no próprio app (gravado uma vez como WAV) e tocado por um SoundPool. O SoundPool toca na
+ * hora, sem travar a thread da tela, e várias teclas seguidas tocam juntas sem se cortar (as AudioTrack paradas e recarregadas a cada tecla
+ * atrasavam o som quando se digitava rápido).
+ */
 object SomTeclado {
     private const val TAXA = 22050
-    private val estalo: ShortArray by lazy {
+    private var pool: android.media.SoundPool? = null
+    private var id = 0
+    @Volatile private var pronto = false
+
+    private fun gerarWav(): ByteArray {
         val n = TAXA * 18 / 1000
-        ShortArray(n) { i ->
+        val pcm = java.nio.ByteBuffer.allocate(n * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until n) {
             val t = i / TAXA.toDouble()
-            val envelope = Math.exp(-t * 260.0)
-            (Math.sin(2 * Math.PI * 1700.0 * t) * envelope * 9000).toInt().toShort()
+            pcm.putShort((Math.sin(2 * Math.PI * 1700.0 * t) * Math.exp(-t * 260.0) * 9000).toInt().toShort())
         }
+        val dados = pcm.array()
+        val cab = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        cab.put("RIFF".toByteArray()).putInt(36 + dados.size).put("WAVE".toByteArray()).put("fmt ".toByteArray())
+        cab.putInt(16).putShort(1).putShort(1).putInt(TAXA).putInt(TAXA * 2).putShort(2).putShort(16)
+        cab.put("data".toByteArray()).putInt(dados.size)
+        return cab.array() + dados
     }
-    private val pistas = arrayOfNulls<android.media.AudioTrack>(3)
-    private var vez = 0
+
+    /** Chamada ao abrir o app: grava o estalo e carrega no SoundPool. */
+    fun iniciar(ctx: android.content.Context) {
+        if (pool != null) return
+        try {
+            val arquivo = java.io.File(ctx.applicationContext.filesDir, "estalo.wav")
+            if (!arquivo.isFile) arquivo.writeBytes(gerarWav())
+            @Suppress("DEPRECATION")
+            val p = android.media.SoundPool(6, android.media.AudioManager.STREAM_MUSIC, 0)
+            p.setOnLoadCompleteListener { _, _, status -> pronto = status == 0 }
+            id = p.load(arquivo.absolutePath, 1)
+            pool = p
+        } catch (e: Throwable) { }
+    }
+
+    // O SoundPool.play() bloqueia a thread que o chama enquanto o áudio do aparelho responde (medido na caixa: a thread da tela ficava parada em
+    // play() durante a digitação, e era isso que travava as teclas e o fundo). Por isso toca numa thread própria; se o áudio atrasar, os
+    // estalos que não deram tempo de tocar são descartados em vez de formar fila.
+    private val pendentes = java.util.concurrent.atomic.AtomicInteger(0)
+    private val fila = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO); r.run() } }
 
     fun tocar() {
-        if (!Ajustes.sonsTeclado) return
-        try {
-            val i = vez; vez = (vez + 1) % pistas.size
-            var p = pistas[i]
-            if (p == null) {
-                @Suppress("DEPRECATION")
-                p = android.media.AudioTrack(android.media.AudioManager.STREAM_MUSIC, TAXA, android.media.AudioFormat.CHANNEL_OUT_MONO,
-                    android.media.AudioFormat.ENCODING_PCM_16BIT, estalo.size * 2, android.media.AudioTrack.MODE_STATIC)
-                p.write(estalo, 0, estalo.size)
-                pistas[i] = p
-            } else {
-                p.stop(); p.reloadStaticData()
-            }
-            p.play()
-        } catch (e: Throwable) { }
+        if (!Ajustes.sonsTeclado || !pronto) return
+        if (pendentes.get() >= 2) return
+        pendentes.incrementAndGet()
+        fila.execute {
+            try { pool?.play(id, 1f, 1f, 1, 0, 1f) } catch (e: Throwable) { } finally { pendentes.decrementAndGet() }
+        }
     }
 }
 

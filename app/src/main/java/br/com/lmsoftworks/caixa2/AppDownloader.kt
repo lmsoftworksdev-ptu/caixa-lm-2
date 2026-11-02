@@ -8,6 +8,18 @@ import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import java.util.concurrent.TimeUnit
 
+/**
+ * O YouTube bloqueia ("Sign in to confirm you're not a bot") os endereços IPv6 da operadora; pelo IPv4 funciona. Só IPv4 (e, se o
+ * nome não tiver IPv4, o que houver). O endereço do vídeo também fica preso ao IP de quem o pediu, por isso o player usa IPv4 também.
+ */
+object SoIpv4 : okhttp3.Dns {
+    override fun lookup(hostname: String): List<java.net.InetAddress> {
+        val todos = okhttp3.Dns.SYSTEM.lookup(hostname)
+        val v4 = todos.filter { it is java.net.Inet4Address }
+        return if (v4.isNotEmpty()) v4 else todos
+    }
+}
+
 /** Ponte entre o NewPipe Extractor e o OkHttp. */
 class AppDownloader private constructor(private val client: OkHttpClient) : Downloader() {
 
@@ -59,6 +71,7 @@ class AppDownloader private constructor(private val client: OkHttpClient) : Down
         val instance: AppDownloader by lazy {
             AppDownloader(
                 OkHttpClient.Builder()
+                    .dns(SoIpv4)
                     .readTimeout(30, TimeUnit.SECONDS)
                     .connectTimeout(20, TimeUnit.SECONDS)
                     .build()

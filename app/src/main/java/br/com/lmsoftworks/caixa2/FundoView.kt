@@ -24,6 +24,8 @@ import kotlin.math.sin
  */
 class FundoView(c: Context) : View(c) {
 
+    private val DURACAO_TROCA_MS = 900f
+
     private val quadroL = 320f
     private val quadroA = 180f
     private val img = Bitmap.createBitmap(128, 72, Bitmap.Config.ARGB_8888)
@@ -42,6 +44,10 @@ class FundoView(c: Context) : View(c) {
 
     private val atual = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)   // r1 g1 b1 r2 g2 b2 brilho
     private val alvo = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)
+    private val de = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)      // de onde a troca de cor partiu
+    private var tTroca = 0L
+    private var lento = false
+    private val alvoAnterior = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 1f)
     private var iniciado = false
     private var shader1: Shader? = null
     private var shader2: Shader? = null
@@ -54,18 +60,34 @@ class FundoView(c: Context) : View(c) {
     var sobreCapa = false
     private var baseOpaca = 1f
 
+    private var segurado = false      // quadro congelado (teclado aberto): a animação continua de onde parou quando o teclado fecha
+    private var agendado = false
+
     private val passo = object : Runnable {
         override fun run() {
-            if (!rodando) return
+            agendado = false
+            if (!rodando || segurado) return
             invalidate()
-            postDelayed(this, 1000L / Cfg.FPS)
+            agendado = true
+            postDelayed(this, 1000L / (if (lento) 15 else Cfg.FPS))
         }
     }
 
+    /** Congela o fundo no quadro de agora (sim) ou volta a animar (não). Com o teclado aberto o fundo mal aparece e disputava o processador. */
+    fun segurar(sim: Boolean) {
+        segurado = sim
+        if (!sim && rodando && !agendado) { agendado = true; post(passo) }
+    }
+
+
+    /** Durante o giro do cubo o fundo continua, só com menos quadros: a troca de cor do menu aparece como um esmaecimento, e não de uma vez no fim. */
+    fun lento(sim: Boolean) { lento = sim }
+
     fun iniciar() {
+        lento = false
         if (rodando) return
         rodando = true
-        post(passo)
+        if (!agendado) { agendado = true; post(passo) }
     }
 
     fun parar() { rodando = false }
@@ -75,6 +97,11 @@ class FundoView(c: Context) : View(c) {
         alvo[0] = Color.red(a).toFloat(); alvo[1] = Color.green(a).toFloat(); alvo[2] = Color.blue(a).toFloat()
         alvo[3] = Color.red(b).toFloat(); alvo[4] = Color.green(b).toFloat(); alvo[5] = Color.blue(b).toFloat()
         alvo[6] = brilho
+        // a troca de cor é um esmaecimento por tempo (não por quadro): começa de onde a cor está agora
+        var mudou = false
+        for (i in 0 until 7) if (Math.abs(alvo[i] - alvoAnterior[i]) > 0.5f) mudou = true
+        if (mudou && iniciado) { System.arraycopy(atual, 0, de, 0, 7); tTroca = SystemClock.elapsedRealtime() }
+        System.arraycopy(alvo, 0, alvoAnterior, 0, 7)
         if (!iniciado) { System.arraycopy(alvo, 0, atual, 0, 7); iniciado = true }
     }
 
@@ -95,7 +122,9 @@ class FundoView(c: Context) : View(c) {
 
     override fun onDraw(canvas: Canvas) {
         if (!iniciado) { canvas.drawColor(Tema.FUNDO); return }
-        for (i in 0 until 7) atual[i] += (alvo[i] - atual[i]) * .045f
+        val p = ((SystemClock.elapsedRealtime() - tTroca).toFloat() / DURACAO_TROCA_MS).coerceIn(0f, 1f)
+        val e = 1f - (1f - p) * (1f - p) * (1f - p)      // sai rápido e chega devagar
+        for (i in 0 until 7) atual[i] = de[i] + (alvo[i] - de[i]) * e
         val c1 = Color.rgb(atual[0].toInt(), atual[1].toInt(), atual[2].toInt())
         val c2 = Color.rgb(atual[3].toInt(), atual[4].toInt(), atual[5].toInt())
         if (shader1 == null || c1 != cor1Shader) { shader1 = gradienteUnitario(c1); cor1Shader = c1 }
