@@ -206,10 +206,6 @@ class InicioActivity : Activity() {
         telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") }) { videoDaMusica() }
         telaMusica.visibility = View.GONE
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
-        // toda música tocada pelo app usa o áudio do clipe da faixa (achado e guardado aqui; bloqueante, roda fora da thread principal)
-        playerMidia.achador = { r ->
-            clipesProntos[r.url] ?: acharClipe(r.titulo, r.canal.removeSuffix(" - Topic"), r.duracaoSeg)?.also { clipesProntos[r.url] = it }
-        }
         musica.local = playerMidia
         telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.aoAbrirWifi = { ir("wifi") }
@@ -313,64 +309,9 @@ class InicioActivity : Activity() {
         }
         setContentView(raiz)
         aplicarTema("inicio")
-        TesteLed.registrar(this, { led.parar() }, { led.iniciar() })
         aoMudarWifi()
         aoMudarBluetooth()
         aoMudarLed()
-        // gatilho de teste pelo adb, para ver a tela do alarme tocando sem mexer na tela:
-        //   adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_ALARME
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) { tocarAlarme(Alarme(0, 7, 0, 0, "Acordar", true), teste = true) }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_ALARME"))
-        // abre um menu como se tivesse tocado nele: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_IR --es para wifi
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) { ir(i.getStringExtra("para") ?: "inicio") }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_IR"))
-        // mostra a animação do assistente: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_ASSISTENTE --es estado ouvindo|pensando|falando|fechar
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                when (i.getStringExtra("estado")) {
-                    "ouvindo" -> faixaAssistente.ouvindo()
-                    "pensando" -> faixaAssistente.pensando("toca anitta")
-                    "falando" -> faixaAssistente.respondendo("São 23 horas e 58 minutos.")
-                    else -> faixaAssistente.esconder()
-                }
-            }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_ASSISTENTE"))
-        // pula para 35 s antes do fim da música atual (testa a emenda): adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_FIM
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                relogio.post { playerMidia.buscar(playerMidia.duracaoMs - 35_000) }
-            }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_FIM"))
-        // toca o primeiro resultado de uma busca: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_MIDIA --es tipo video --es q "texto"
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                val musicaTeste = i.getStringExtra("tipo") == "musica"
-                val q = i.getStringExtra("q") ?: "musica"
-                Thread {
-                    try {
-                        var lista = YouTube.buscar(q, musicaTeste)
-                        // q2 = uma segunda busca cujo 1º resultado entra na fila logo depois (para testar a emenda com faixas diferentes)
-                        i.getStringExtra("q2")?.let { q2 -> lista = listOf(lista[0]) + YouTube.buscar(q2, musicaTeste && i.getStringExtra("q2video") == null).take(1) }
-                        relogio.post { if (musicaTeste) tocarMusicaDoYoutube(lista, 0) else abrirVideo(lista, 0) }
-                    } catch (e: Exception) { android.util.Log.w("Midia", "teste falhou", e) }
-                }.start()
-            }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_MIDIA"))
-        // idem para o cubo: adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_CUBO --ei grau 40 --ei dir -1   (grau -1 = limpar)
-        registerReceiver(object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                val grau = i.getIntExtra("grau", -1); val dir = i.getIntExtra("dir", -1)
-                val deV = tela(i.getStringExtra("de") ?: atual); val paraV = tela(i.getStringExtra("para") ?: "wifi")
-                if (grau < 0) {
-                    for (v in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "led", "alarmes")) { val t = tela(v); Cubo.limpar(t); t.visibility = if (v == atual) View.VISIBLE else View.GONE }
-                    girando = false; return
-                }
-                girando = true
-                Cubo.preparar(deV, paraV); Cubo.aplicar(deV, paraV, grau.toFloat(), dir, metade())
-            }
-        }, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_CUBO"))
     }
 
     override fun onStart() {
@@ -1030,12 +971,12 @@ class InicioActivity : Activity() {
      * é "ao vivo" só se a faixa for, e tem a duração mais próxima da da faixa (a mais forte pista de ser a mesma gravação).
      */
     private fun acharClipe(titulo: String, artista: String, duracaoSeg: Long = 0L): Resultado? = try {
-        val lista = YouTube.buscar("$titulo $artista clipe oficial", false).filter { it.duracaoSeg in 30..900 }
+        val lista = YouTube.buscar("videoclipe $titulo $artista", false).filter { it.duracaoSeg in 30..900 }
         val pt = palavras(titulo.replace(Regex("\\(.*?\\)"), " ")); val pa = palavras(artista)
         val aoVivo = ehAoVivo(titulo)
-        lista.maxByOrNull { r ->
+        lista.withIndex().maxByOrNull { (pos, r) ->
             val rt = normalizar(r.titulo + " " + r.canal)
-            var pts = 0.0
+            var pts = YouTube.pontosOficial(r, "$titulo $artista", pos)
             if (pt.isNotEmpty()) { val ach = pt.count { rt.contains(it) }; pts += 4.0 * ach / pt.size - (if (ach * 2 < pt.size) 3.0 else 0.0) }
             if (pa.isNotEmpty() && pa.any { rt.contains(it) }) pts += 2.0
             pts += if (ehAoVivo(r.titulo) == aoVivo) 1.0 else -3.0
@@ -1044,7 +985,7 @@ class InicioActivity : Activity() {
                 pts += when { dif <= 8 -> 4.0; dif <= 20 -> 2.0; dif <= 45 -> 0.0; else -> -2.0 }
             }
             pts
-        }
+        }?.value
     } catch (e: Exception) { null }
 
     /** Música do app tocando: já deixa o clipe achado e o endereço dele resolvido, para o seletor abrir sem demora. */
@@ -1083,14 +1024,9 @@ class InicioActivity : Activity() {
         pedidoClipe++        // um clipe que ainda estava sendo procurado não abre mais
         val faixa = faixaDaMusica
         when {
-            // o clipe já estava tocando: o mesmo áudio continua (só a imagem sai), sem carregar nada e no mesmo segundo
-            voltarMusica && faixa != null && playerMidia.ehVideo && playerMidia.erro == null -> {
-                val atualItem = playerMidia.item
-                if (atualItem != null && atualItem.url != clipeAbertoUrl)
-                    // trocou de vídeo dentro do player: a música que volta é a do vídeo que estava passando, com a fila dele
-                    playerMidia.virarMusica(atualItem, playerMidia.fila, playerMidia.indice, playerMidia.capa)
-                else playerMidia.virarMusica(faixa, filaDaMusica, indiceDaMusica, capaDaMusica)
-            }
+            // trocou de vídeo dentro do player: a música que volta é a do vídeo que estava passando (pesquisada como música)
+            voltarMusica && playerMidia.item != null && playerMidia.ehVideo && playerMidia.item?.url != clipeAbertoUrl ->
+                musicaDoVideo(playerMidia.item!!, pos, estavaTocando, irParaMusica = false)
             // o clipe ainda nem tinha começado: a música segue de onde parou
             voltarMusica && faixa != null && !playerMidia.ehVideo -> if (musicaTocavaAntes) musica.tocar()
             voltarMusica && filaDaMusica.isNotEmpty() -> musica.tocarDoYoutube(filaDaMusica, indiceDaMusica, pos, estavaTocando)
@@ -1100,20 +1036,48 @@ class InicioActivity : Activity() {
 
     /**
      * Toque na nota do seletor dentro do player. Vídeo que veio de uma música: volta para a música (como antes). Vídeo aberto pela
-     * Mídia (ou por voz): ele próprio vira a música de Tocando agora, com o mesmo áudio e no mesmo segundo, e o vínculo com o vídeo
-     * fica guardado, então o ícone de vídeo reabre exatamente esse vídeo.
+     * Mídia (ou por voz): vira a música de Tocando agora, pesquisando o mesmo nome como música (não reaproveita o áudio do vídeo).
      */
     private fun seletorParaMusica() {
         if (videoDeMusica) { fecharVideoAnimado(); return }
         val item = playerMidia.item ?: return
         if (!playerMidia.ehVideo || girando) return
-        clipesProntos[item.url] = item
         pedidoClipe++
-        playerMidia.virarMusica(item, playerMidia.fila, playerMidia.indice, playerMidia.capa)
+        val pos = playerMidia.posicaoMs
+        playerMidia.pausar()
         telaVideo.mostrarSeletor(false)
         telaVideo.fechar()
         relogio.removeCallbacks(amostradorVideo)
-        ir("musica")
+        musicaDoVideo(item, pos, true, irParaMusica = true)
+    }
+
+    /** Tira da legenda do vídeo o que não é o nome da música: "(Clipe Oficial)", "[Official Video]", "Lyric Video"... */
+    private fun nomeDaMusica(tituloVideo: String): String =
+        tituloVideo.replace(Regex("""[\(\[][^\)\]]*[\)\]]"""), " ")
+            .replace(Regex("""(?i)(clipe oficial|v[ií]deo ?clipe|v[ií]deo oficial|official (music )?video|official audio|lyric video)"""), " ")
+            .replace(Regex("""\s+"""), " ").trim()
+
+    /**
+     * Vídeo que vira música: música é música, vídeo é vídeo. Pesquisa o mesmo nome na busca de MÚSICAS do YouTube (a gravação oficial)
+     * e toca a primeira, no mesmo segundo; o vínculo com o vídeo fica guardado, então o ícone de vídeo reabre exatamente esse vídeo.
+     */
+    private fun musicaDoVideo(v: Resultado, inicioMs: Long, tocar: Boolean, irParaMusica: Boolean) {
+        Thread {
+            val consulta = ("áudio " + nomeDaMusica(v.titulo) + " " + v.canal.removeSuffix(" - Topic")).trim()
+            val lista = try { YouTube.buscar(consulta, true) } catch (e: Exception) { emptyList() }
+            relogio.post {
+                if (lista.isEmpty()) {
+                    Aviso.mostrar(this, "Não achei a música deste vídeo")
+                    playerMidia.parar()
+                    if (irParaMusica) ir("inicio")
+                } else {
+                    clipesProntos[lista[0].url] = v
+                    telaMidia.fecharTeclado()
+                    musica.tocarDoYoutube(lista, 0, inicioMs, tocar)
+                    if (irParaMusica) ir("musica")
+                }
+            }
+        }.start()
     }
 
     /** Seletor da tela Tocando agora: abre o clipe da mesma faixa no mesmo segundo; a música para. */

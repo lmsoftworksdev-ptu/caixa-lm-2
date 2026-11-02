@@ -183,6 +183,9 @@ object Respostas {
     /** Combinacao (modelo, com busca no Google?) que ja funcionou: e a primeira a ser tentada. */
     private var combinacaoBoa: Pair<String, Boolean>? = null
 
+    /** Quando a busca do Google respondeu 429 (sem cota): até quando pular a busca. */
+    @Volatile private var buscaSemCotaAte = 0L
+
     /**
      * Tenta varias combinacoes ate uma responder: o plano gratuito nao da cota para todos os modelos
      * nem para a busca do Google (erro 429). Com busca = informacao atual; sem busca = conhecimento do modelo.
@@ -199,13 +202,22 @@ object Respostas {
             add("gemini-2.5-flash-lite" to false)
         }.distinct()
 
+        val semBusca = System.currentTimeMillis() < buscaSemCotaAte
         for ((modelo, busca) in candidatos) {
-            var r = geminiUma(ctx, chave, modelo, pergunta, busca)
+            if (busca && semBusca) continue      // a busca do Google estourou a cota há pouco: nem tenta (economiza alguns segundos)
+            val ultimo = java.util.concurrent.atomic.AtomicReference<ResultadoGemini>()
+            val achou = corrida(4000L, 2, 18000L) {
+                val x = geminiUma(ctx, chave, modelo, pergunta, busca, 12)
+                ultimo.set(x)
+                if (x.texto != null) x else null
+            }
+            var r = achou ?: ultimo.get() ?: ResultadoGemini(-1, null)
+            if (busca && r.codigo == 429) buscaSemCotaAte = System.currentTimeMillis() + 10 * 60_000L
             // 503 = modelo sobrecarregado por um instante: tenta de novo antes de desistir.
             var vezes = 0
             while (r.texto == null && r.codigo == 503 && vezes++ < 2) {
                 Thread.sleep(1500)
-                r = geminiUma(ctx, chave, modelo, pergunta, busca)
+                r = geminiUma(ctx, chave, modelo, pergunta, busca, 12)
             }
             if (r.texto != null) {
                 if (combinacaoBoa != modelo to busca) Log.d(TAG, "Gemini: funcionou com $modelo (busca no Google: $busca)")
@@ -788,39 +800,68 @@ object Respostas {
             "(\"texto\":\"\") e intencao \"comando\". NUNCA invente um pedido que não foi dito.\n" +
             "Responda SÓ o JSON: {\"texto\":\"...\",\"intencao\":\"musica|video|playlist|pergunta|comando\",\"busca\":\"...\"}"
         for (modelo in listOf(MODELO_GEMINI_PADRAO, modeloConfig).distinct()) {
-            var tentativas = 0
-            while (tentativas++ < 2) {
-                val corpo = JSONObject()
-                    .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray()
-                        .put(JSONObject().put("text", instrucao))
-                        .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", base64))))))
-                    .put("generationConfig", JSONObject().put("temperature", 0.0).put("maxOutputTokens", 300).put("responseMimeType", "application/json"))
-                val req = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
-                    .header("x-goog-api-key", chave).header("content-type", "application/json")
-                    .post(corpo.toString().toRequestBody("application/json".toMediaType())).build()
-                val (codigo, texto) = try {
-                    Rede.cliente(ctx, leituraSeg = 12).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
-                } catch (e: Exception) { Log.d(TAG, "entenderPedido $modelo: falha de rede: $e"); break }
-                if (codigo == 200) {
-                    try {
-                        val partes = JSONObject(texto).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-                        val sb = StringBuilder()
-                        if (partes != null) for (i in 0 until partes.length()) sb.append(partes.optJSONObject(i)?.optString("text").orEmpty())
-                        val j = JSONObject(sb.toString().trim().removePrefix("```json").removeSuffix("```").trim())
-                        val dito = j.optString("texto", "").trim()
-                        val intencao = j.optString("intencao", "").lowercase()
-                        val busca = j.optString("busca", "").trim()
-                        return Entendimento(dito, if (intencao in setOf("musica", "video", "playlist", "pergunta", "comando")) PedidoMidia(intencao, busca) else null)
-                    } catch (e: Exception) { Log.d(TAG, "entenderPedido: resposta ilegivel: $e"); break }
-                }
-                Log.d(TAG, "entenderPedido $modelo: HTTP $codigo ${texto.replace(Regex("""\s+"""), " ").take(200)}")
-                if (codigo == 401 || codigo == 403) return null
-                if (codigo == 503 || codigo == 429) { Thread.sleep(800); continue }
-                break
-            }
+            val r = corrida(3500L, 3, 15000L) { entenderUma(ctx, chave, modelo, instrucao, base64) }
+            if (r != null) return r
         }
         return null
+    }
+
+    /** Uma tentativa de entender o pedido; null se falhou (rede, limite, resposta ilegível). */
+    private fun entenderUma(ctx: Context, chave: String, modelo: String, instrucao: String, base64: String): Entendimento? {
+        val corpo = JSONObject()
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray()
+                .put(JSONObject().put("text", instrucao))
+                .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", base64))))))
+            .put("generationConfig", JSONObject().put("temperature", 0.0).put("maxOutputTokens", 300).put("responseMimeType", "application/json"))
+        val req = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
+            .header("x-goog-api-key", chave).header("content-type", "application/json")
+            .post(corpo.toString().toRequestBody("application/json".toMediaType())).build()
+        val inicioMs = System.currentTimeMillis()
+        val (codigo, texto) = try {
+            Rede.cliente(ctx, leituraSeg = 12).newCall(req).execute().use { it.code to (it.body?.string() ?: "") }
+        } catch (e: Exception) { Log.d(TAG, "entenderPedido $modelo: falha de rede: $e"); return null }
+        Log.d(TAG, "entenderPedido $modelo: HTTP $codigo em ${System.currentTimeMillis() - inicioMs} ms")
+        if (codigo != 200) { Log.d(TAG, "entenderPedido $modelo: ${texto.replace(Regex("""\s+"""), " ").take(200)}"); return null }
+        return try {
+            val partes = JSONObject(texto).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+            val sb = StringBuilder()
+            if (partes != null) for (i in 0 until partes.length()) sb.append(partes.optJSONObject(i)?.optString("text").orEmpty())
+            val j = JSONObject(sb.toString().trim().removePrefix("```json").removeSuffix("```").trim())
+            val dito = j.optString("texto", "").trim()
+            val intencao = j.optString("intencao", "").lowercase()
+            val busca = j.optString("busca", "").trim()
+            Entendimento(dito, if (intencao in setOf("musica", "video", "playlist", "pergunta", "comando")) PedidoMidia(intencao, busca) else null)
+        } catch (e: Exception) { Log.d(TAG, "entenderPedido: resposta ilegivel: $e"); null }
+    }
+
+    /**
+     * Pede a mesma coisa em paralelo quando a primeira tentativa demora: começa uma, e a cada [escalonaMs] sem resposta lança outra
+     * (até [tentativas]); uma que falha dispara a próxima na hora. Devolve a primeira que der certo, ou null depois de [totalMs].
+     * Acaba com as respostas que travam por muitos segundos de vez em quando.
+     */
+    private fun <T : Any> corrida(escalonaMs: Long, tentativas: Int, totalMs: Long, tarefa: () -> T?): T? {
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(tentativas)
+        val fila = java.util.concurrent.ExecutorCompletionService<T?>(pool)
+        try {
+            val limite = System.currentTimeMillis() + totalMs
+            var lancadas = 0
+            var terminadas = 0
+            fun lancar() { fila.submit(java.util.concurrent.Callable<T?> { tarefa() }); lancadas++ }
+            lancar()
+            while (terminadas < lancadas || lancadas < tentativas) {
+                val restante = limite - System.currentTimeMillis()
+                if (restante <= 0) return null
+                val espera = if (lancadas < tentativas) Math.min(escalonaMs, restante) else restante
+                val f = fila.poll(espera, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (f == null) { if (lancadas < tentativas) lancar(); continue }
+                terminadas++
+                val v = try { f.get() } catch (e: Exception) { null }
+                if (v != null) return v
+                if (lancadas < tentativas) lancar()
+            }
+            return null
+        } finally { pool.shutdown() }
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")

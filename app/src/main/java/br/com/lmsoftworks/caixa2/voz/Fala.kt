@@ -44,7 +44,6 @@ object Fala {
             val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             val alvo = Math.round(audio.getStreamMaxVolume(CANAL) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
             if (volumeAntes < 0) volumeAntes = audio.getStreamVolume(CANAL)
-            Log.d(TAG, "volume da voz: nivel=${Ajustes.volumeVoz} alvo=$alvo antes=${audio.getStreamVolume(CANAL)} max=${audio.getStreamMaxVolume(CANAL)}")
             if (audio.getStreamVolume(CANAL) != alvo) { aoMexerNoVolume?.invoke(); audio.setStreamVolume(CANAL, alvo, 0) }
             volumeFixado = alvo
         } catch (e: Throwable) { Log.d(TAG, "volume da voz: $e") }

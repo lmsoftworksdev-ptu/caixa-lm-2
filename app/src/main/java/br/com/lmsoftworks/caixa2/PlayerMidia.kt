@@ -122,9 +122,6 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private var comecarTocando = true
 
-    /** Dada uma faixa, devolve o vídeo (clipe) dela; o áudio da música passa a vir dele. Chamado fora da thread principal. */
-    var achador: ((Resultado) -> Resultado?)? = null
-
     // ---------------------------------------------------------------- troca música <-> clipe sem esperar
 
     private val videoPre = LinkedHashMap<String, Fonte>()
@@ -140,18 +137,18 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }.start()
     }
 
-    /**
-     * Do clipe de volta para a música sem carregar nada: o mesmo áudio do vídeo continua tocando (só a imagem é desligada) e a
-     * tela passa a mostrar a faixa original e a fila dela.
-     */
-    fun virarMusica(original: Resultado, filaOriginal: List<Resultado>, i: Int, capaOriginal: Bitmap?) {
-        cancelarFade()
-        fila = filaOriginal; indice = i; item = original; ehVideo = false; capa = capaOriginal; relacionados = emptyList(); primeiroQuadro = false
-        player?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build() }
-        aoMudar()
+    /** Troca o que está tocando: o som atual desce em fade (500 ms) antes de a nova faixa ou vídeo entrar. */
+    private fun iniciarItem(r: Resultado, video: Boolean, recuperando: Boolean = false) {
+        val atual = player
+        if (!recuperando && atual != null && atual.isPlaying && fracaoVolume > 0.05f) {
+            if (emFade) cancelarFade()
+            rampa(fracaoVolume, 0f, 500L) { val ret = retomarEm; iniciarItemAgora(r, video, recuperando); retomarEm = ret }
+            return
+        }
+        iniciarItemAgora(r, video, recuperando)
     }
 
-    private fun iniciarItem(r: Resultado, video: Boolean, recuperando: Boolean = false) {
+    private fun iniciarItemAgora(r: Resultado, video: Boolean, recuperando: Boolean = false) {
         if (!recuperando) { recuperacoes = 0; retomarEm = 0L }
         val minha = ++geracao
         cancelarRampa(); fracaoVolume = 1f
@@ -165,11 +162,9 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         Thread {
             try {
                 val t0 = SystemClock.uptimeMillis()
-                // música do YouTube: o áudio vem do vídeo (clipe) da faixa, para o que se ouve ser sempre o que o vídeo mostra
-                val alvo = if (!video && pronta == null) (try { achador?.invoke(r) } catch (e: Exception) { null }) ?: r else r
-                val t1 = SystemClock.uptimeMillis()
-                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(alvo.url, soAudio = !video)
-                Log.d(TAG, "faixa '${r.titulo}': achar o clipe ${t1 - t0} ms + abrir o áudio ${SystemClock.uptimeMillis() - t1} ms (${if (alvo.url == r.url) "áudio da faixa" else "áudio do clipe"})")
+                // música é música e vídeo é vídeo: o áudio vem sempre da própria faixa pedida
+                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
+                Log.d(TAG, "faixa '${r.titulo}': abrir ${if (video) "o vídeo" else "o áudio"} ${SystemClock.uptimeMillis() - t0} ms")
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
@@ -215,10 +210,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         p.setMediaSource(origem, retomarEm)
         retomarEm = 0L
         cancelarRampa(); fracaoVolume = 1f
-        p.volume = volumeBase
         p.prepare()
-        p.playWhenReady = comecarTocando
+        val vaiTocar = comecarTocando
+        p.playWhenReady = vaiTocar
         comecarTocando = true
+        // entra em fade-in (1 s), sem corte seco
+        if (vaiTocar) { p.volume = 0f; rampa(0f, 1f, 1000L) { } } else p.volume = volumeBase
     }
 
     private fun origemDe(fonte: Fonte): MediaSource {
@@ -416,7 +413,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             preparando = true
             val minha = geracao
             Thread {
-                val f = try { YouTube.resolver((try { achador?.invoke(prox) } catch (e: Exception) { null } ?: prox).url, soAudio = true) } catch (e: Exception) { null }
+                val f = try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
                 handler.post {
                     preparando = false
                     if (f != null && minha == geracao && !ehVideo) { preparada = Preparada(prox, f); prepararProximo() }

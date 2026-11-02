@@ -62,7 +62,6 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         val atual = audio.getStreamVolume(canal)
         val daVoz = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
         abafado = atual; abafadoAlvo = daVoz
-        android.util.Log.d("CaixaVol", "volume da voz aplicado: guarda $atual, voz $daVoz")
         ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
         audio.setStreamVolume(canal, daVoz, 0)
     }
@@ -81,7 +80,6 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
             abafado = -1
             // só devolve se ninguém mexeu no volume durante o abafado: o volume está onde o app o deixou (nível abafado ou da voz)
             val atual = audio.getStreamVolume(canal)
-            android.util.Log.d("CaixaVol", "devolvendo volume: agora $atual, esperado $abafadoAlvo, volta para $volta")
             if (atual == abafadoAlvo || atual <= NIVEL_ABAFADO) {
                 if (fade) degrau(atual, volta)
                 else { ignorarAte = android.os.SystemClock.uptimeMillis() + 1500; audio.setStreamVolume(canal, volta, 0); handler.postDelayed({ atualizar() }, 200) }

@@ -83,7 +83,7 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
     private val prefs = ctx.getSharedPreferences("led", Context.MODE_PRIVATE)
     private val handler = Handler(Looper.getMainLooper())
-    private val fita: FitaBle = FitaBle(ctx, ENDERECO, { Log.d(TAG, it) }, { !TesteLed.ativo }, object : FitaBle.Ouvinte {
+    private val fita: FitaBle = FitaBle(ctx, ENDERECO, { Log.d(TAG, it) }, { true }, object : FitaBle.Ouvinte {
         override fun aoConectar() = aoPronto()
         override fun aoDesconectar() = aoPerder()
         override fun aoAviso(dados: ByteArray) = aoAvisoDaFita()
@@ -266,41 +266,6 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
         }
     }
 
-    // ----- teste do ritmo por adb: o próprio app toca um arquivo e registra no logcat (etiqueta RitmoTeste) cada batida achada
-    //   adb shell am broadcast -a br.com.lmsoftworks.caixa2.TESTE_RITMO --es arquivo /caminho/teste.wav   (sem "arquivo" = parar)
-    private var tocadorTeste: android.media.MediaPlayer? = null
-    private var modoAntesTeste: String? = null
-
-    private val receptorTeste = object : android.content.BroadcastReceiver() {
-        override fun onReceive(c: Context, i: android.content.Intent) {
-            val arq = i.getStringExtra("arquivo")
-            pararTeste()
-            if (arq == null) return
-            try {
-                val mp = android.media.MediaPlayer()
-                mp.setDataSource(arq); mp.prepare()
-                mp.setOnCompletionListener { pararTeste() }
-                tocadorTeste = mp
-                modoAntesTeste = modo
-                sessaoForcada = mp.audioSessionId
-                definirLigado(true); definirModo("ritmo")
-                handler.postDelayed({ trocarSessao(sessaoForcada) }, 300)
-                handler.postDelayed({ inicioTeste = SystemClock.uptimeMillis(); mp.start(); android.util.Log.d("RitmoTeste", "inicio sens=$sensibilidade") }, 1500)
-            } catch (e: Exception) { android.util.Log.d("RitmoTeste", "falhou: ${e.message}") }
-        }
-    }
-
-    private fun pararTeste() {
-        val mp = tocadorTeste ?: return
-        tocadorTeste = null
-        try { mp.stop() } catch (e: Exception) { }
-        mp.release()
-        sessaoForcada = -1; inicioTeste = 0L
-        modoAntesTeste?.let { definirModo(it) }
-        modoAntesTeste = null
-        android.util.Log.d("RitmoTeste", "fim")
-    }
-
     /**
      * Antes de desligar ou reiniciar: para os efeitos e apaga a fita (3b 24), insistindo até o comando sair, e avisa em
      * [aoFim] uns instantes depois (para o comando chegar antes de o Bluetooth cair).
@@ -335,7 +300,6 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun iniciar() {
         if (!receptorRegistrado) {
-            ctx.registerReceiver(receptorTeste, android.content.IntentFilter("br.com.lmsoftworks.caixa2.TESTE_RITMO"))
             receptorRegistrado = true
             ctx.registerReceiver(receptorDesligar, android.content.IntentFilter(android.content.Intent.ACTION_SHUTDOWN))
         }
@@ -388,7 +352,7 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     // Aqui só ficam as reações aos eventos dela.
 
     fun conectar() {
-        if (TesteLed.ativo || conectando || conectado) return
+        if (conectando || conectado) return
         fita.iniciar()
         fita.tentarAgora()
     }

@@ -67,6 +67,38 @@ object YouTube {
         }
     }
 
+    private fun semAcento(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
+
+    private val PALAVRAS_DE_PEDIDO = setOf("videoclipe", "clipe", "oficial", "official", "video", "audio", "musica", "the", "and", "dos", "das", "com", "feat")
+
+    /**
+     * Quanto um resultado parece ser o vídeo OFICIAL do que foi pedido: vídeo oficial costuma estar no canal do próprio artista (o nome
+     * do canal tem palavras do pedido) ou no VEVO, ter "oficial" no título e vir entre os primeiros. Cover, karaokê, letra, remix etc.
+     * perdem pontos, a não ser que a pessoa tenha pedido isso. [posicao] = lugar do resultado na busca (0 = primeiro).
+     */
+    fun pontosOficial(r: Resultado, consulta: String, posicao: Int): Double {
+        val pedido = semAcento(consulta).split(" ").filter { it.length > 2 && it !in PALAVRAS_DE_PEDIDO }.toSet()
+        val canal = semAcento(r.canal.removeSuffix(" - Topic"))
+        val titulo = semAcento(r.titulo)
+        var pts = 0.0
+        val palavrasCanal = canal.replace("vevo", " ").split(" ").filter { it.length > 2 && it !in PALAVRAS_DE_PEDIDO }
+        if (palavrasCanal.isNotEmpty() && palavrasCanal.all { it in pedido || semAcento(consulta).contains(it) }) pts += 4.0       // canal do artista
+        else if (palavrasCanal.any { it in pedido }) pts += 2.0
+        if (canal.contains("vevo")) pts += 1.5
+        if (Regex("\\b(oficial|official)\\b").containsMatchIn(titulo)) pts += 1.5
+        for (ruim in listOf("karaoke", "cover", "remix", "reaction", "tutorial", "instrumental", "slowed", "sped up", "nightcore", "legendado", "playback", "aula", "como tocar")) {
+            if (titulo.contains(ruim) && !semAcento(consulta).contains(ruim)) pts -= 3.0
+        }
+        if (titulo.contains("lyric") || titulo.contains("letra")) { if (!semAcento(consulta).let { it.contains("lyric") || it.contains("letra") }) pts -= 1.5 }
+        pts += (1.5 - 0.3 * posicao).coerceAtLeast(0.0)      // quem veio primeiro na busca leva uma vantagem pequena
+        return pts
+    }
+
+    /** A mesma lista, com os vídeos que parecem oficiais na frente. */
+    fun preferirOficial(lista: List<Resultado>, consulta: String): List<Resultado> =
+        lista.withIndex().sortedByDescending { (i, r) -> pontosOficial(r, consulta, i) }.map { it.value }
+
     /** Bloqueante: chame fora da thread principal. */
     fun buscar(consulta: String, musica: Boolean): List<Resultado> {
         garantirInicio()

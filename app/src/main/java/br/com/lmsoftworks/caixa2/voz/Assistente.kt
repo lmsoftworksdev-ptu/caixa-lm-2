@@ -476,7 +476,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 pedido != null -> pedido.intencao == "musica" || pedido.intencao == "playlist"
                 else -> !acoes.videoAberto()
             }
-            val lista = try { YouTube.buscar(busca, soAudio) } catch (e: Exception) { Log.w(TAG, "busca falhou", e); null }
+            // vídeo: "videoclipe" na frente da pesquisa faz o YouTube trazer primeiro o clipe oficial
+            val consulta = if (!soAudio && !Regex("(?i)clipe|show|ao vivo").containsMatchIn(busca)) "videoclipe $busca" else busca
+            val lista = try { YouTube.buscar(consulta, soAudio).let { if (soAudio) it else YouTube.preferirOficial(it, busca) } } catch (e: Exception) { Log.w(TAG, "busca falhou", e); null }
             main.post {
                 if (minha != geracao) return@post
                 if (lista == null) { resposta("Não consegui buscar agora.", dito, erro = true); return@post }
