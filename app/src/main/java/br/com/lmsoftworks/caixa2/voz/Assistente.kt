@@ -149,6 +149,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     /** Se não for null, o pedido atual é uma busca por voz: o texto vai para cá e nada é executado. */
     private var destinoBusca: ((String?) -> Unit)? = null
     private var aoOuvirBusca: (() -> Unit)? = null
+    private var aoPesquisarBusca: (() -> Unit)? = null
     private var aoParcialBusca: ((String) -> Unit)? = null
     private var ultimoLivre = ""      // último texto ao vivo (offline) da busca por voz
 
@@ -264,13 +265,14 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     /** Chamada pelo botão do microfone da busca: ouve um pedido e entrega o texto a [aoTexto] em vez de executar. */
-    fun ouvirParaBusca(aoComecar: () -> Unit, aoParcial: (String) -> Unit, aoTexto: (String?) -> Unit) {
+    fun ouvirParaBusca(aoComecar: () -> Unit, aoParcial: (String) -> Unit, aoTexto: (String?) -> Unit, aoPesquisar: () -> Unit = {}) {
         if (!ativo || escuta == null) { aoTexto(null); return }
         destinoBusca = aoTexto
         ultimoLivre = ""
         escuta?.textoAoVivo = true          // o que a pessoa fala vai aparecendo na barra de pesquisa
         aoParcialBusca = aoParcial
         aoOuvirBusca = aoComecar
+        aoPesquisarBusca = aoPesquisar
         acordou()
     }
 
@@ -341,6 +343,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         estado = EstadoVoz.PENSANDO
         if (busca != null) {
             // busca por voz: primeiro o sinal de que parou de ouvir, só depois o som de "pesquisando"
+            aoPesquisarBusca?.invoke()
             TonsVoz.fimEscuta()
             main.postDelayed({ if (minha == geracao && destinoBusca != null) TonsVoz.comecarPensando(ctx) }, 400)
         } else TonsVoz.comecarPensando(ctx)
@@ -486,7 +489,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 // entendeu: tira a tela do assistente na hora e abre a música/vídeo; a caixa só confirma em voz alta
                 TonsVoz.pararPensando()
                 faixa.esconder()
-                acoes.tocar(lista, soAudio)
+                acoes.tocar(lista.take(1), soAudio)
                 val gerundio = tocar?.gerundio ?: if (soAudio) "Tocando" else "Reproduzindo"
                 estado = EstadoVoz.RESPONDENDO
                 Fala.falar(ctx, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}") { fim(0) }

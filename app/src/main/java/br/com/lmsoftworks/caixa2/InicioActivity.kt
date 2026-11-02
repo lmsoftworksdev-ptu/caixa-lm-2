@@ -207,18 +207,19 @@ class InicioActivity : Activity() {
         telaMusica.visibility = View.GONE
         playerMidia = PlayerMidia(this) { aoMudarPlayer() }
         musica.local = playerMidia
-        telaMidia = TelaMidia(this, { lista, i -> abrirVideo(lista, i) }, { lista, i -> tocarMusicaDoYoutube(lista, i) }, { e -> Atualizador.aoFalhar(this, e) })
+        telaMidia = TelaMidia(this, { lista, i -> abrirVideo(listOf(lista[i]), 0) }, { lista, i -> tocarMusicaDoYoutube(listOf(lista[i]), 0) }, { e -> Atualizador.aoFalhar(this, e) })
         telaMidia.aoAbrirWifi = { ir("wifi") }
         telaMidia.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
+        telaMidia.nivelMic = { assistente.nivelMicrofone }
         telaMidia.aoMicrofone = {
             assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { parcial -> telaMidia.mostrarParcial(parcial) }, { texto ->
                 telaMidia.ouvindoVoz(false)
                 if (texto != null) telaMidia.pesquisar(texto) else telaMidia.avisoBusca("Não ouvi. Toque no microfone e fale de novo.")
-            })
+            }, { telaMidia.pesquisandoVoz() })
         }
         telaLed = TelaLed(this, led)
         telaLed.visibility = View.GONE
@@ -777,8 +778,8 @@ class InicioActivity : Activity() {
             relogio.post {
                 when {
                     lista.isEmpty() -> faixaAssistente.respondendo("Não encontrei $consulta.")
-                    musicaPedida -> { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) }
-                    else -> abrirVideo(lista, 0)
+                    musicaPedida -> { if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista.take(1), 0) }
+                    else -> abrirVideo(lista.take(1), 0)
                 }
             }
         }.start()

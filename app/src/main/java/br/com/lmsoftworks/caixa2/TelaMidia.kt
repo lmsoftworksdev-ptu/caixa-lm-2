@@ -352,28 +352,59 @@ class TelaMidia(
         botaoLimpar.visibility = if (consulta.isEmpty()) View.GONE else View.VISIBLE
     }
 
-    /** Busca por voz: o microfone fica vermelho, pulsando, e a barra mostra "Ouvindo…". */
+    /** Quanto a voz está alta agora (0 a 1): o microfone vermelho cresce e brilha junto com ela. */
+    var nivelMic: (() -> Float)? = null
+
+    private fun pintarMic(cor: Int, escala: Float) {
+        microfone.background = fundoArredondado(cor, 24.d())
+        microfoneTeclado.background = fundoArredondado(cor, 32.d())
+        microfone.scaleX = escala; microfone.scaleY = escala; microfoneTeclado.scaleX = escala; microfoneTeclado.scaleY = escala
+    }
+
+    private fun misturar(a: Int, b: Int, t: Float): Int = Color.rgb(
+        (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+        (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+        (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt())
+
+    /**
+     * Busca por voz, ouvindo: o microfone fica vermelho e acompanha a voz (cresce e brilha mais quando a pessoa fala, respira
+     * devagar quando está quieto). Ao terminar de falar, [pesquisandoVoz] troca para verde.
+     */
     fun ouvindoVoz(sim: Boolean) {
         pulsoMic?.cancel(); pulsoMic = null
         principal.removeCallbacks(restaurarDica)
         if (sim) {
             // o teclado fica como está: o que a pessoa fala vai aparecendo na barra de pesquisa
-            microfone.background = fundoArredondado(Tema.ERRO, 24.d())
-            microfoneTeclado.background = fundoArredondado(Tema.ERRO, 32.d())
-            consulta = ""; textoBusca.text = ""; dica.visibility = View.VISIBLE     // a barra espera o texto ao vivo
-            pulsoMic = ValueAnimator.ofFloat(1f, 1.15f).apply {
-                duration = 600; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+            consulta = ""; textoBusca.text = ""; dica.text = "Ouvindo…"; dica.visibility = View.VISIBLE     // a barra espera o texto ao vivo
+            val apagado = misturar(Tema.ERRO, Color.BLACK, 0.35f)
+            var suave = 0f
+            val t0 = android.os.SystemClock.uptimeMillis()
+            pulsoMic = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1000; repeatCount = ValueAnimator.INFINITE
                 addUpdateListener {
-                    val v = it.animatedValue as Float
-                    microfone.scaleX = v; microfone.scaleY = v; microfoneTeclado.scaleX = v; microfoneTeclado.scaleY = v
+                    val n = (nivelMic?.invoke() ?: 0f).coerceIn(0f, 1f)
+                    suave += (n - suave) * (if (n > suave) 0.5f else 0.15f)      // sobe rápido com a voz e desce devagar
+                    val respiro = 0.04f * Math.sin((android.os.SystemClock.uptimeMillis() - t0) / 1000.0 * 2 * Math.PI * 0.9).toFloat()
+                    pintarMic(misturar(apagado, Tema.ERRO, (0.35f + 0.65f * suave).coerceIn(0f, 1f)), 1.04f + respiro + 0.45f * suave)
                 }
                 start()
             }
         } else {
-            microfone.scaleX = 1f; microfone.scaleY = 1f; microfoneTeclado.scaleX = 1f; microfoneTeclado.scaleY = 1f
-            microfone.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 24.d())
-            microfoneTeclado.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 32.d())
+            pintarMic(Color.parseColor("#33FFFFFF"), 1f)
             restaurarDica.run()
+        }
+    }
+
+    /** Terminou de falar: o microfone fica verde, respirando, e a barra mostra "Pesquisando…" até o resultado chegar. */
+    fun pesquisandoVoz() {
+        pulsoMic?.cancel(); pulsoMic = null
+        principal.removeCallbacks(restaurarDica)
+        dica.text = "Pesquisando…"
+        if (consulta.isEmpty()) dica.visibility = View.VISIBLE
+        pulsoMic = ValueAnimator.ofFloat(1f, 1.12f).apply {
+            duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { pintarMic(Tema.OK, it.animatedValue as Float) }
+            start()
         }
     }
 

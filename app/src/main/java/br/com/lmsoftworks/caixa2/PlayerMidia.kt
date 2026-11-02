@@ -312,14 +312,34 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         rampa(fracaoVolume, 0f, 250L) { acao() }
     }
 
-    val temProxima: Boolean get() = indice + 1 < fila.size || relacionados.isNotEmpty()
+    /** As palavras que identificam a música no título: sem (parênteses), [colchetes], "clipe oficial", "ao vivo" e afins. */
+    private fun palavrasDoTitulo(t: String): Set<String> {
+        val ruido = setOf("clipe", "oficial", "official", "video", "videoclipe", "audio", "lyrics", "lyric", "letra", "ao", "vivo", "live", "hd", "4k", "dvd", "com", "feat", "part", "the", "and", "dos", "das")
+        return java.text.Normalizer.normalize(t.lowercase().replace(Regex("""[\(\[][^\)\]]*[\)\]]"""), " "), java.text.Normalizer.Form.NFD)
+            .replace(Regex("""\p{M}+"""), "").replace(Regex("[^a-z0-9]+"), " ").trim().split(" ")
+            .filter { it.length > 2 && it !in ruido }.toSet()
+    }
+
+    /** É outra versão de uma música que já tocou nesta fila (mesmas palavras do título)? */
+    private fun repetida(r: Resultado): Boolean {
+        val p = palavrasDoTitulo(r.titulo)
+        if (p.isEmpty()) return false
+        return fila.take(indice + 1).any { f ->
+            f.url == r.url || palavrasDoTitulo(f.titulo).let { q -> q.isNotEmpty() && p.count { it in q } * 100 >= 60 * Math.min(p.size, q.size) }
+        }
+    }
+
+    /** O que o YouTube sugere depois, sem as outras versões do que já tocou: segue com músicas diferentes do mesmo estilo. */
+    private fun relacionadosNovos(): List<Resultado> = relacionados.filter { !repetida(it) }
+
+    val temProxima: Boolean get() = indice + 1 < fila.size || relacionadosNovos().isNotEmpty()
     val temAnterior: Boolean get() = indice > 0
 
     /** Próximo da lista; no fim dela, segue pelas sugestões do YouTube (como o autoplay de lá). */
     fun proxima() { trocarSuave { avancar() } }
 
     private fun avancar() {
-        if (indice + 1 >= fila.size && relacionados.isNotEmpty()) { fila = fila + relacionados; relacionados = emptyList() }
+        if (indice + 1 >= fila.size && relacionadosNovos().isNotEmpty()) { fila = fila + relacionadosNovos(); relacionados = emptyList() }
         if (indice + 1 < fila.size) { indice++; iniciarItem(fila[indice], ehVideo) }
     }
 
@@ -398,7 +418,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     init { handler.post(vigia) }
 
-    private fun proximoDaFila(): Resultado? = fila.getOrNull(indice + 1) ?: relacionados.firstOrNull()
+    private fun proximoDaFila(): Resultado? = fila.getOrNull(indice + 1) ?: relacionadosNovos().firstOrNull()
 
     private fun verificarEmenda() {
         val p = player ?: return
@@ -461,7 +481,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val pre = preparada ?: return
         proximoPlayer = null; emFade = false; preparada = null
         novo.playWhenReady = true
-        if (indice + 1 >= fila.size) { fila = fila + relacionados; relacionados = emptyList() }
+        if (indice + 1 >= fila.size) { fila = fila + relacionadosNovos(); relacionados = emptyList() }
         player = novo
         try { antigo.release() } catch (_: Throwable) {}
         indice++
