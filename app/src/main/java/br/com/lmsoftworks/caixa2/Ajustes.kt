@@ -21,6 +21,8 @@ object Ajustes {
     @Volatile var sonsResposta = true; private set
     /** Toquinho a cada tecla do teclado da tela. */
     @Volatile var sonsTeclado = true; private set
+    /** Nivelamento de áudio: as faixas mais baixas sobem até o nível das mais fortes. */
+    @Volatile var nivelarAudio = true; private set
     /** Volume mínimo do alarme: 0 = suave, 1 = médio, 2 = alto. */
     @Volatile var volumeAlarme = 1; private set
     /** Mostra, no alto da tela do assistente, a resposta escrita. */
@@ -54,6 +56,7 @@ object Ajustes {
         escurecerOcioso = p.getBoolean("escurecerOcioso", true)
         sonsResposta = p.getBoolean("sonsResposta", true)
         sonsTeclado = p.getBoolean("sonsTeclado", true)
+        nivelarAudio = p.getBoolean("nivelarAudio", true)
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
         mostrarResposta = p.getBoolean("mostrarResposta", true)
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
@@ -71,6 +74,7 @@ object Ajustes {
     fun definirBrilho(v: Int) { brilho = v.coerceIn(5, 100); guardar { putInt("brilho", brilho) } }
     fun definirOcioso(seg: Int) { ociosoSeg = seg; guardar { putInt("ociosoSeg", seg) } }
     fun definirEscurecer(v: Boolean) { escurecerOcioso = v; guardar { putBoolean("escurecerOcioso", v) } }
+    fun definirNivelarAudio(v: Boolean) { nivelarAudio = v; guardar { putBoolean("nivelarAudio", v) } }
     fun definirSonsTeclado(v: Boolean) { sonsTeclado = v; guardar { putBoolean("sonsTeclado", v) } }
     fun definirSons(v: Boolean) { sonsResposta = v; guardar { putBoolean("sonsResposta", v) } }
     fun definirVolumeAlarme(v: Int) { volumeAlarme = v.coerceIn(0, 2); guardar { putInt("volumeAlarme", volumeAlarme) } }

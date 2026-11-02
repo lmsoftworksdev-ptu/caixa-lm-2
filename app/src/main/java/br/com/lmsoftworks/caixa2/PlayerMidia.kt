@@ -211,6 +211,9 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }
     }
 
+    /** Nivelamento de áudio (ver [Nivelador]): só mede quando o som está limpo, sem fade e com o volume do player inteiro. */
+    private val nivelador = Nivelador(handler) { !emFade && saindo.not() && (player?.volume ?: 0f) >= volumeBase * 0.97f && volumeBase > 0.9f }
+
     private fun tocarFonte(fonte: Fonte) {
         // pede o foco de áudio: o A2DP da caixa perde o dele e manda "pausar" ao celular
         try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
@@ -222,6 +225,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         retomarEm = 0L
         cancelarRampa(); fracaoVolume = 1f
         p.prepare()
+        nivelador.novaFaixa(); nivelador.ligar(p.audioSessionId)
         val vaiTocar = comecarTocando
         p.playWhenReady = vaiTocar
         comecarTocando = true
@@ -498,6 +502,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (indice + 1 >= fila.size) { fila = fila + relacionadosNovos(); relacionados = emptyList() }
         player = novo
         try { antigo.release() } catch (_: Throwable) {}
+        nivelador.novaFaixa(); nivelador.ligar(novo.audioSessionId)
         indice++
         item = pre.item
         relacionados = pre.fonte.relacionados; modoMusica = pre.fonte.musica
@@ -537,6 +542,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         geracao++
         cancelarFade()
         handler.removeCallbacks(vigia)
+        nivelador.desligar()
         player?.release(); player = null
     }
 }

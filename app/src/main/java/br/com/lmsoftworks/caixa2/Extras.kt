@@ -110,8 +110,16 @@ object Cubo {
         }
     }
 
+    private var nivelA = -1
+    private var nivelB = -1
+
     private fun escurecer(v: View, tinta: Paint, quanto: Float) {
-        tinta.colorFilter = PorterDuffColorFilter(Color.argb((255f * quanto).toInt().coerceIn(0, 255), 0, 0, 0), PorterDuff.Mode.SRC_ATOP)
+        // em degraus de ~3%: o filtro só é trocado quando o escurecimento muda de verdade (menos trabalho a cada quadro do giro)
+        val nivel = (quanto * 32f).toInt().coerceIn(0, 32)
+        val ultimo = if (tinta === tintaA) nivelA else nivelB
+        if (ultimo == nivel) return
+        if (tinta === tintaA) nivelA = nivel else nivelB = nivel
+        tinta.colorFilter = PorterDuffColorFilter(Color.argb((255f * nivel / 32f).toInt().coerceIn(0, 255), 0, 0, 0), PorterDuff.Mode.SRC_ATOP)
         v.setLayerPaint(tinta)
     }
 
@@ -146,6 +154,7 @@ object Cubo {
         v.translationX = 0f; v.translationZ = 0f; v.rotationY = 0f; v.alpha = 1f
         v.pivotX = v.width / 2f; v.pivotY = v.height / 2f
         v.setLayerPaint(null)
+        nivelA = -1; nivelB = -1
         v.setLayerType(View.LAYER_TYPE_NONE, null)
     }
 }

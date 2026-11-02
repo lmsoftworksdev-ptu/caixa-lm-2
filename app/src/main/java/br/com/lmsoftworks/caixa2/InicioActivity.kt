@@ -560,11 +560,17 @@ class InicioActivity : Activity() {
     }
 
     private fun terminarGiro(de: View, para: View, ficouNoDestino: Boolean) {
-        if (ficouNoDestino) de.visibility = View.GONE else para.visibility = View.GONE
-        Cubo.limpar(de); Cubo.limpar(para)
+        // INVISIBLE (e não GONE): esconder sem GONE não pede nova medida e posição de todas as telas, que era o tranco do fim do giro
+        if (ficouNoDestino) de.visibility = View.INVISIBLE else para.visibility = View.INVISIBLE
+        val ficou = if (ficouNoDestino) para else de
+        val saiu = if (ficouNoDestino) de else para
+        Cubo.limpar(saiu)      // a que saiu já está escondida: limpar é de graça
         girando = false
-        if (apareceu && !ocioso) fundo.iniciar()
-        if (ficouNoDestino) aoChegar(atual)      // só agora o trabalho pesado, com a tela já parada
+        // O quadro em que o giro termina fica livre: nada pesado nele (era isso que dava a "paradinha" no encaixe). A tela que ficou
+        // continua como camada pronta (a imagem é idêntica à final) e só depois volta ao desenho normal, com o fundo e o trabalho do menu.
+        relogio.postDelayed({ if (!girando) Cubo.limpar(ficou) }, 160)
+        if (apareceu && !ocioso) relogio.postDelayed({ if (!girando && !ocioso) fundo.iniciar() }, 300)
+        if (ficouNoDestino) relogio.postDelayed({ if (!girando) aoChegar(atual) }, 220)      // só agora o trabalho pesado, com a tela já parada
     }
 
     private fun ir(destino: String) {
