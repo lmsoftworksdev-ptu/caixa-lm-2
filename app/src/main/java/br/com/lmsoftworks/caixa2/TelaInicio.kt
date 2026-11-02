@@ -424,6 +424,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
         val cal = Calendar.getInstance()
         val hm = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
         if (relogio.text.toString() != hm) relogio.text = hm
+        formatoData.timeZone = java.util.TimeZone.getDefault()      // o fuso pode mudar em Configurações
         val d = formatoData.format(agora).replaceFirstChar { it.uppercase() }
         if (data.text.toString() != d) data.text = d
     }

@@ -156,6 +156,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val videoPronto = if (video) videoPre.remove(r.url) else null
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false
+        infoExtra = Resultado(r.titulo, r.canal, r.duracaoSeg, r.url, r.miniaturas, r.visualizacoes).visualizacoesTexto      // até a informação completa chegar
         // a capa já conhecida (ou a provisória) fica na tela: sem passar por um quadrado de cor sólida
         capa = capas.get(r.url) ?: capaProvisoria?.takeIf { it.first == r.url }?.second
         relacionados = emptyList(); primeiroQuadro = false
@@ -168,7 +169,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 // música é música e vídeo é vídeo: o áudio vem sempre da própria faixa pedida
                 val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
                 Log.d(TAG, "faixa '${r.titulo}': abrir ${if (video) "o vídeo" else "o áudio"} ${SystemClock.uptimeMillis() - t0} ms")
-                handler.post { if (minha == geracao) { relacionados = fonte.relacionados; modoMusica = fonte.musica; tocarFonte(fonte); aoMudar() } }
+                handler.post { if (minha == geracao) { relacionados = fonte.relacionados; modoMusica = fonte.musica; infoExtra = infoDe(fonte); tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
                 handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível abrir"; aoMudar() } }
@@ -213,6 +214,15 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Nivelamento de áudio (ver [Nivelador]): só mede quando o som está limpo, sem fade e com o volume do player inteiro. */
     private val nivelador = Nivelador(handler) { !emFade && saindo.not() && (player?.volume ?: 0f) >= volumeBase * 0.97f && volumeBase > 0.9f }
+
+    /** "1,2 mi de visualizações  ·  12 de março de 2023": mostrado ao lado do nome do canal no player de vídeo. */
+    @Volatile var infoExtra: String = ""; private set
+
+    private fun infoDe(f: Fonte): String {
+        val vistas = Resultado("", "", 0, "", emptyList(), f.visualizacoes).visualizacoesTexto
+        val data = if (f.publicadoEm > 0) java.text.SimpleDateFormat("d 'de' MMMM 'de' yyyy", java.util.Locale("pt", "BR")).format(java.util.Date(f.publicadoEm)) else ""
+        return listOf(vistas, data).filter { it.isNotEmpty() }.joinToString("  ·  ")
+    }
 
     private fun tocarFonte(fonte: Fonte) {
         // pede o foco de áudio: o A2DP da caixa perde o dele e manda "pausar" ao celular

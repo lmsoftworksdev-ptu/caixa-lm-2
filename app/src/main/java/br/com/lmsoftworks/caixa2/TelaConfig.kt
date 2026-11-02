@@ -26,6 +26,9 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     /** Procura a cidade (em segundo plano) e devolve (nome, latitude, longitude) ou null. */
     var buscarCidade: (String, (Triple<String, Double, Double>?) -> Unit) -> Unit = { _, volta -> volta(null) }
     var aoMudarCidade: () -> Unit = {}
+    /** O fuso horário mudou: o app refaz o que depende da hora (alarmes, lembretes, relógio). */
+    var aoMudarFuso: () -> Unit = {}
+    var buscarFusoAutomatico: () -> Unit = {}
     var aoMudarNome: () -> Unit = {}
     var aoRestaurar: () -> Unit = {}
     /** Pede as últimas linhas do registro do app (em segundo plano) e entrega o texto. */
@@ -39,6 +42,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
         Secao("tela", "Tela", "Brilho e modo ocioso", R.drawable.ic_bulb),
         Secao("som", "Som", "Volume e avisos", R.drawable.ic_volume_2),
         Secao("assistente", "Assistente", "Resposta e microfone", R.drawable.ic_mic),
+        Secao("hora", "Data e hora", "Fuso horário", R.drawable.ic_alarme),
         Secao("conexoes", "Conexões", "Wi-Fi, Bluetooth e fita", R.drawable.ic_wifi),
         Secao("sistema", "Sistema", "Versão e energia", R.drawable.ic_config)
     )
@@ -193,7 +197,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 opcoes.addView(linha("Volume", "O mesmo da barra de cima", deslizador(lerVolume() / 10f, { "${Math.round(it * 10)}" }) { f -> definirVolume(Math.round(f * 10)) }))
                 opcoes.addView(linha("Sons de resposta", "Toquinhos de quando a caixa começa e termina de ouvir",
                     interruptor(Ajustes.sonsResposta) { Ajustes.definirSons(it) }))
-                opcoes.addView(linha("Nivelar o áudio", "Músicas e vídeos no mesmo nível: as mais baixas sobem, sem uma ficar mais alta que a outra",
+                opcoes.addView(linha("Nivelar o áudio", "Músicas e vídeos no mesmo nível de volume",
                     interruptor(Ajustes.nivelarAudio) { Ajustes.definirNivelarAudio(it) }))
                 opcoes.addView(linha("Sons do teclado", "Um toquinho a cada tecla apertada",
                     interruptor(Ajustes.sonsTeclado) { Ajustes.definirSonsTeclado(it) }))
@@ -211,6 +215,31 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     }))
                 opcoes.addView(linha("Sensibilidade do microfone", "Quanto mais alto, de mais longe ele ouve a palavra de ativação",
                     deslizador((Ajustes.sensMic - 1) / 9f, { "${1 + Math.round(it * 9)}" }) { f -> Ajustes.definirSensMic(1 + Math.round(f * 9)) }))
+            }
+            "hora" -> {
+                val agora = java.util.Calendar.getInstance()
+                val formato = java.text.SimpleDateFormat("EEEE, d 'de' MMMM 'de' yyyy  ·  HH:mm", java.util.Locale("pt", "BR")).apply { timeZone = java.util.TimeZone.getDefault() }
+                opcoes.addView(linha("Agora", "Hora usada pela caixa", texto(c, formato.format(agora.time).replaceFirstChar { it.uppercase() }, 21, Tema.TEXTO2)))
+                opcoes.addView(linha("Fuso horário automático",
+                    if (Ajustes.fusoAuto) "Pela internet: ${FusoHorario.nome(FusoHorario.minutos())}" else "Desligado: você escolhe o fuso abaixo",
+                    interruptor(Ajustes.fusoAuto) { ligado ->
+                        Ajustes.definirFusoAuto(ligado); FusoHorario.aplicar()
+                        if (ligado) buscarFusoAutomatico()
+                        aoMudarFuso(); montar()
+                    }))
+                if (!Ajustes.fusoAuto) {
+                    fun mudar(passo: Int) { Ajustes.definirFusoManual(Ajustes.fusoManualMin + passo); FusoHorario.aplicar(); aoMudarFuso(); montar() }
+                    opcoes.addView(linha("Fuso horário", "Diferença para a hora de Greenwich (Brasília é UTC−3)", LinearLayout(c).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(FrameLayout(c).apply { background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA); isClickable = true; setOnClickListener { mudar(-30) }; efeitoToque(); addView(icone(c, R.drawable.ic_menos, 26, Color.WHITE), FrameLayout.LayoutParams(26.d(), 26.d(), Gravity.CENTER)) }, LinearLayout.LayoutParams(60.d(), 60.d()))
+                        addView(texto(c, FusoHorario.nome(Ajustes.fusoManualMin), 23, Tema.TEXTO, true).apply { gravity = Gravity.CENTER },
+                            LinearLayout.LayoutParams(130.d(), -2))
+                        addView(FrameLayout(c).apply { background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA); isClickable = true; setOnClickListener { mudar(30) }; efeitoToque(); addView(icone(c, R.drawable.ic_mais, 26, Color.WHITE), FrameLayout.LayoutParams(26.d(), 26.d(), Gravity.CENTER)) }, LinearLayout.LayoutParams(60.d(), 60.d()))
+                    }))
+                    opcoes.addView(linha("Brasília", "UTC−3, sem horário de verão", botao(c, "Usar", Cfg.AZUL) {
+                        Ajustes.definirFusoManual(-180); FusoHorario.aplicar(); aoMudarFuso(); montar()
+                    }))
+                }
             }
             "conexoes" -> {
                 opcoes.addView(linha("Wi-Fi", null, LinearLayout(c).apply {

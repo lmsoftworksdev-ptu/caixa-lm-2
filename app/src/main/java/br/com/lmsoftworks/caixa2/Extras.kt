@@ -17,12 +17,13 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * Modo ocioso: tela preta com só a hora, grande, fina e em cinza-azulado escuro. A hora muda de lugar alguns pixels a
+ * Modo ocioso: tela preta com só a hora, grande, na fonte da tela inicial e em cinza-azulado escuro. A hora muda de lugar alguns pixels a
  * cada minuto, para não marcar a tela.
  */
 class TelaOciosa(c: Context) : FrameLayout(c) {
     private val hora = texto(c, "", 210, Color.parseColor("#6F7A93")).apply {
-        typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
+        typeface = Tema.OUTFIT          // a mesma fonte da hora grande da tela inicial
+        letterSpacing = -4f / 208f
         fontFeatureSettings = "tnum"
     }
 

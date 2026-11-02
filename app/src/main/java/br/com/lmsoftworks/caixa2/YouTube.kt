@@ -43,7 +43,7 @@ data class Resultado(
 }
 
 /** O que o player precisa para tocar: uma ou duas URLs (video + audio separados). */
-data class Fonte(val videoUrl: String?, val audioUrl: String?, val unicaUrl: String?, val relacionados: List<Resultado> = emptyList(), val musica: Boolean = true)
+data class Fonte(val videoUrl: String?, val audioUrl: String?, val unicaUrl: String?, val relacionados: List<Resultado> = emptyList(), val musica: Boolean = true, val visualizacoes: Long = -1, val publicadoEm: Long = 0L)
 
 object YouTube {
     private val service get() = ServiceList.YouTube
@@ -111,6 +111,22 @@ object YouTube {
             itens = executarBusca(consulta, YoutubeSearchQueryHandlerFactory.VIDEOS)
         }
         return itens
+    }
+
+    private val EM_INGLES = listOf(
+        "official music video" to "Videoclipe Oficial", "official lyric video" to "Vídeo com Letra Oficial", "official video" to "Vídeo Oficial",
+        "official audio" to "Áudio Oficial", "official visualizer" to "Visualizador Oficial", "official trailer" to "Trailer Oficial",
+        "official performance video" to "Vídeo da Apresentação", "performance video" to "Vídeo da Apresentação", "music video" to "Videoclipe",
+        "lyric video" to "Vídeo com Letra", "lyrics video" to "Vídeo com Letra", "lyrics" to "Letra", "visualizer" to "Visualizador",
+        "behind the scenes" to "Bastidores", "full album" to "Álbum Completo", "remastered" to "Remasterizado", "acoustic" to "Acústico",
+        "live" to "Ao Vivo", "audio" to "Áudio", "official" to "Oficial"
+    ).map { (en, pt) -> Regex("""(?<![\p{L}])${Regex.escape(en)}(?![\p{L}])""", RegexOption.IGNORE_CASE) to pt }
+
+    /** Passa para português as marcas em inglês dos títulos ("(Official Video)" vira "(Vídeo Oficial)"); nome de música e de artista ficam como são. */
+    fun emPortugues(titulo: String): String {
+        var t = titulo
+        for ((re, pt) in EM_INGLES) t = re.replace(t, pt)
+        return t
     }
 
     private val FORA_DE_MUSICA = listOf(
@@ -182,7 +198,7 @@ object YouTube {
                 val v = escolhida.getJSONObject(i)
                 val id = v.optString("id")
                 if (id.isEmpty()) continue
-                saida.add(Resultado(v.optString("title"), v.optString("channelName"), v.optLong("videoDuration", 0), "https://www.youtube.com/watch?v=$id", miniaturas(id), v.optString("viewCount").toLongOrNull() ?: -1L))
+                saida.add(Resultado(emPortugues(v.optString("title")), v.optString("channelName"), v.optLong("videoDuration", 0), "https://www.youtube.com/watch?v=$id", miniaturas(id), v.optString("viewCount").toLongOrNull() ?: -1L))
             }
         } else {
             val tipos = conteudo.getJSONArray("trackTypes")
@@ -194,7 +210,7 @@ object YouTube {
                 if (id.isEmpty()) continue
                 val artistas = f.optJSONArray("artists")
                 val nomes = (0 until (artistas?.length() ?: 0)).joinToString(", ") { artistas!!.getJSONObject(it).optString("name") }
-                saida.add(Resultado(f.optString("name"), nomes, 200, "https://www.youtube.com/watch?v=$id", miniaturas(id), f.optString("viewCount").toLongOrNull() ?: -1L))
+                saida.add(Resultado(emPortugues(f.optString("name")), nomes, 200, "https://www.youtube.com/watch?v=$id", miniaturas(id), f.optString("viewCount").toLongOrNull() ?: -1L))
             }
         }
         return saida
@@ -226,7 +242,7 @@ object YouTube {
     }
 
     private fun paraResultado(it: StreamInfoItem) = Resultado(
-        titulo = it.name ?: "(sem titulo)",
+        titulo = emPortugues(it.name ?: "(sem titulo)"),
         canal = it.uploaderName ?: "",
         duracaoSeg = it.duration,
         url = it.url,
@@ -271,7 +287,7 @@ object YouTube {
 
     private fun relacionadosDe(info: StreamInfo): List<Resultado> =
         info.relatedItems.filterIsInstance<StreamInfoItem>().take(15).map {
-            Resultado(it.name ?: "(sem titulo)", it.uploaderName ?: "", it.duration, it.url,
+            Resultado(emPortugues(it.name ?: "(sem titulo)"), it.uploaderName ?: "", it.duration, it.url,
                 melhoresMiniaturas(it.thumbnails.map { t -> t.url }, it.url), it.viewCount)
         }
 
@@ -281,7 +297,9 @@ object YouTube {
         val info = StreamInfo.getInfo(service, url)
         val categoria = try { info.category.orEmpty().lowercase() } catch (e: Exception) { "" }
         val ehMusica = categoria.contains("mus") || pareceMusica(info.name.orEmpty(), info.uploaderName.orEmpty(), info.duration, "")
-        return resolverDe(info, soAudio).copy(relacionados = try { relacionadosDe(info) } catch (e: Exception) { emptyList() }, musica = ehMusica)
+        val publicado = try { info.uploadDate?.offsetDateTime()?.toInstant()?.toEpochMilli() ?: 0L } catch (e: Throwable) { 0L }
+        return resolverDe(info, soAudio).copy(relacionados = try { relacionadosDe(info) } catch (e: Exception) { emptyList() }, musica = ehMusica,
+            visualizacoes = info.viewCount, publicadoEm = publicado)
     }
 
     private fun resolverDe(info: StreamInfo, soAudio: Boolean): Fonte {

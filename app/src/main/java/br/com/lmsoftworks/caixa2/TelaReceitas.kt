@@ -220,21 +220,16 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
     private fun abrirReceita(r: Receita) {
         val minha = ++seqDetalhe
         detalheAberto = true
-        detalhe.removeAllViews()
         detalhe.visibility = View.VISIBLE
         principalView.visibility = View.INVISIBLE
+        montarDetalhe(null, r)        // a página já aparece montada, com brilho passando nas caixas enquanto a receita carrega
         detalhe.alpha = 0f
         detalhe.animate().alpha(1f).setDuration(180).start()
-        val carregandoTxt = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        carregandoTxt.addView(texto(c, "Abrindo a receita…", 30, Tema.TEXTO, true))
-        carregandoTxt.addView(texto(c, r.titulo, 20, Tema.TEXTO2).apply { maxLines = 1 }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d() })
-        detalhe.addView(carregandoTxt, LayoutParams(-1, -1))
-        detalhe.addView(botaoFechar(), LayoutParams(56.d(), 56.d(), Gravity.TOP or Gravity.END).apply { topMargin = 34.d(); rightMargin = 48.d() })
         Thread {
             val d = Receitas.detalhe(c, r)
             principal.post {
                 if (minha != seqDetalhe || !detalheAberto) return@post
-                if (d == null) { fecharDetalhe(); mostrarAviso("Não consegui abrir esta receita") } else montarDetalhe(d)
+                if (d == null) { fecharDetalhe(); mostrarAviso("Não consegui abrir esta receita") } else montarDetalhe(d, r)
             }
         }.start()
     }
@@ -249,7 +244,8 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
         addView(icone(c, R.drawable.ic_fechar, 28, Color.WHITE), LayoutParams(28.d(), 28.d(), Gravity.CENTER))
     }
 
-    private fun montarDetalhe(d: ReceitaDetalhe) {
+    /** [d] nulo = ainda carregando: a foto e o nome já são os da lista; o resto são caixas com brilho passando. */
+    private fun montarDetalhe(d: ReceitaDetalhe?, r: Receita) {
         detalhe.removeAllViews()
         // cabeçalho: foto, nome e dados (começa abaixo dos ícones da barra de cima, na mesma altura da barra de pesquisa)
         val cab = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -257,24 +253,35 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
         arredondar(quadro, 18)
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
-        if (d.imagem.isNotEmpty()) Miniaturas.carregar(listOf(d.imagem), imagem)
+        val foto = d?.imagem ?: r.imagem
+        if (foto.isNotEmpty()) Miniaturas.carregar(listOf(foto, r.imagemReserva).filter { it.isNotEmpty() }, imagem)
         cab.addView(quadro, LinearLayout.LayoutParams(150.d(), 100.d()))
         val info = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        info.addView(texto(c, d.titulo, 30, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
-        val meta = listOf(d.fonte, d.tempo, d.porcoes).filter { it.isNotEmpty() }.joinToString("  ·  ")
-        info.addView(texto(c, meta, 19, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d() })
+        info.addView(texto(c, d?.titulo ?: r.titulo, 30, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+        if (d != null) {
+            val meta = listOf(d.fonte, d.tempo, d.porcoes).filter { it.isNotEmpty() }.joinToString("  ·  ")
+            info.addView(texto(c, meta, 19, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 6.d() })
+        } else info.addView(BlocoBrilho(c, 8), LinearLayout.LayoutParams(260.d(), 18.d()).apply { topMargin = 10.d() })
         cab.addView(info, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 22.d(); rightMargin = 80.d() })
         detalhe.addView(cab, LayoutParams(-1, 100.d()).apply { topMargin = 32.d(); leftMargin = 48.d(); rightMargin = 48.d() })
 
         // duas colunas: o título de cada uma fica parado e só a descrição rola
         val ing = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(24.d(), 0, 24.d(), 24.d()) }
-        for (i in d.ingredientes) ing.addView(texto(c, "•  $i", 20, Color.WHITE), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
         val pre = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(24.d(), 0, 24.d(), 24.d()) }
-        d.passos.forEachIndexed { n, p ->
-            val l = LinearLayout(c)
-            l.addView(texto(c, "${n + 1}", 20, Color.parseColor("#FFB05A"), true), LinearLayout.LayoutParams(34.d(), -2))
-            l.addView(texto(c, p, 20, Color.WHITE), LinearLayout.LayoutParams(0, -2, 1f))
-            pre.addView(l, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12.d() })
+        if (d != null) {
+            for (i in d.ingredientes) ing.addView(texto(c, "•  $i", 20, Color.WHITE), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.d() })
+            d.passos.forEachIndexed { n, p ->
+                val l = LinearLayout(c)
+                l.addView(texto(c, "${n + 1}", 20, Color.parseColor("#FFB05A"), true), LinearLayout.LayoutParams(34.d(), -2))
+                l.addView(texto(c, p, 20, Color.WHITE), LinearLayout.LayoutParams(0, -2, 1f))
+                pre.addView(l, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12.d() })
+            }
+        } else {
+            for (n in 0 until 7) ing.addView(BlocoBrilho(c, 8), LinearLayout.LayoutParams(if (n % 3 == 2) 260.d() else 340.d(), 20.d()).apply { topMargin = 16.d() })
+            for (n in 0 until 6) {
+                pre.addView(BlocoBrilho(c, 8), LinearLayout.LayoutParams(-1, 20.d()).apply { topMargin = 18.d() })
+                pre.addView(BlocoBrilho(c, 8), LinearLayout.LayoutParams(560.d(), 20.d()).apply { topMargin = 8.d() })
+            }
         }
         fun coluna(titulo: String, conteudo: View) = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
@@ -386,5 +393,47 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
             if (y >= p[1] && y <= p[1] + f.height && f.scrollX > 0) return true
         }
         return false
+    }
+}
+
+/** Caixa de carregamento: uma faixa mais clara passa por dentro dela enquanto o conteúdo não chega. */
+class BlocoBrilho(c: Context, private val raio: Int) : View(c) {
+    private val fundo = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#22FFFFFF") }
+    private val faixa = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val area = android.graphics.RectF()
+    private val matriz = android.graphics.Matrix()
+    private var gradiente: android.graphics.LinearGradient? = null
+    private var fase = 0f
+    private var animador: ValueAnimator? = null
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        gradiente = android.graphics.LinearGradient(0f, 0f, w * 0.6f, 0f,
+            intArrayOf(Color.TRANSPARENT, Color.parseColor("#40FFFFFF"), Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
+        faixa.shader = gradiente
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        animador = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1300; repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { fase = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() { animador?.cancel(); animador = null; super.onDetachedFromWindow() }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val r = raio.d().toFloat()
+        area.set(0f, 0f, width.toFloat(), height.toFloat())
+        canvas.drawRoundRect(area, r, r, fundo)
+        val g = gradiente ?: return
+        canvas.save()
+        val caminho = android.graphics.Path().apply { addRoundRect(area, r, r, android.graphics.Path.Direction.CW) }
+        canvas.clipPath(caminho)
+        matriz.setTranslate(-width * 0.6f + fase * width * 1.6f, 0f)
+        g.setLocalMatrix(matriz)
+        canvas.drawRect(area, faixa)
+        canvas.restore()
     }
 }

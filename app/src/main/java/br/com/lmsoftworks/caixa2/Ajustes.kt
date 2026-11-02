@@ -23,6 +23,10 @@ object Ajustes {
     @Volatile var sonsTeclado = true; private set
     /** Nivelamento de áudio: as faixas mais baixas sobem até o nível das mais fortes. */
     @Volatile var nivelarAudio = true; private set
+    /** Fuso horário: automático (pela internet) ou manual. As diferenças para Greenwich são em minutos (-180 = UTC−3). */
+    @Volatile var fusoAuto = true; private set
+    @Volatile var fusoManualMin = -180; private set
+    @Volatile var fusoAutoMin = 99999; private set      // 99999 = ainda não lido
     /** Volume mínimo do alarme: 0 = suave, 1 = médio, 2 = alto. */
     @Volatile var volumeAlarme = 1; private set
     /** Mostra, no alto da tela do assistente, a resposta escrita. */
@@ -57,6 +61,9 @@ object Ajustes {
         sonsResposta = p.getBoolean("sonsResposta", true)
         sonsTeclado = p.getBoolean("sonsTeclado", true)
         nivelarAudio = p.getBoolean("nivelarAudio", true)
+        fusoAuto = p.getBoolean("fusoAuto", true)
+        fusoManualMin = p.getInt("fusoManualMin", -180)
+        fusoAutoMin = p.getInt("fusoAutoMin", 99999)
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
         mostrarResposta = p.getBoolean("mostrarResposta", true)
         sensMic = p.getInt("sensMic", 5).coerceIn(1, 10)
@@ -74,6 +81,9 @@ object Ajustes {
     fun definirBrilho(v: Int) { brilho = v.coerceIn(5, 100); guardar { putInt("brilho", brilho) } }
     fun definirOcioso(seg: Int) { ociosoSeg = seg; guardar { putInt("ociosoSeg", seg) } }
     fun definirEscurecer(v: Boolean) { escurecerOcioso = v; guardar { putBoolean("escurecerOcioso", v) } }
+    fun definirFusoAuto(v: Boolean) { fusoAuto = v; guardar { putBoolean("fusoAuto", v) } }
+    fun definirFusoManual(min: Int) { fusoManualMin = min.coerceIn(-12 * 60, 14 * 60); guardar { putInt("fusoManualMin", fusoManualMin) } }
+    fun definirFusoAutoMin(min: Int) { fusoAutoMin = min; guardar { putInt("fusoAutoMin", min) } }
     fun definirNivelarAudio(v: Boolean) { nivelarAudio = v; guardar { putBoolean("nivelarAudio", v) } }
     fun definirSonsTeclado(v: Boolean) { sonsTeclado = v; guardar { putBoolean("sonsTeclado", v) } }
     fun definirSons(v: Boolean) { sonsResposta = v; guardar { putBoolean("sonsResposta", v) } }

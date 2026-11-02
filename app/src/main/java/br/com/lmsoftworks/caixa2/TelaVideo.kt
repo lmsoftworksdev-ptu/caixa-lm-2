@@ -287,7 +287,7 @@ class TelaVideo(
         cortina.visibility = if (cortinaForcada || !player.primeiroQuadro) View.VISIBLE else View.GONE
         val r = player.item
         titulo.text = r?.titulo ?: ""
-        canal.text = r?.canal ?: ""
+        canal.text = listOfNotNull(r?.canal?.takeIf { it.isNotEmpty() }, player.infoExtra.takeIf { it.isNotEmpty() }).joinToString("  ·  ")
         iconePlay.setImageResource(if (player.tocando) R.drawable.ic_pausar else R.drawable.ic_tocar)
         val erro = player.erro
         rodinha.visibility = if (player.carregando && erro == null) View.VISIBLE else View.GONE

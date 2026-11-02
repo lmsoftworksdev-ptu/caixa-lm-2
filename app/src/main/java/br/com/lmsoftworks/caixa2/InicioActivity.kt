@@ -246,6 +246,8 @@ class InicioActivity : Activity() {
         // o volume da caixa prevalece: o celular manda o dele ao conectar e ao começar a tocar, e logo depois o da caixa volta
         bluetooth.aoConectado = { impor() }
         telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
+        telaConfig.aoMudarFuso = { alarmes.reagendar(); aoMudarAlarmes(); climaEm = 0L }
+        telaConfig.buscarFusoAutomatico = { FusoHorario.buscarAutomatico(this, relogio) { telaConfig.aoMudarFuso(); if (atual == "config") telaConfig.atualizar() } }
         telaConfig.aoMudarCidade = { climaEm = 0L; previsao = null }      // o clima e a previsão buscam de novo, na cidade nova
         telaConfig.aoMudarNome = { bluetooth.aplicarNome() }
         telaConfig.aoRestaurar = { aplicarBrilho(); bluetooth.aplicarNome(); climaEm = 0L; previsao = null }
@@ -321,6 +323,7 @@ class InicioActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        if (Ajustes.fusoAuto) telaConfig.buscarFusoAutomatico()      // o fuso do lugar, pela internet (o do Android daqui tem horário de verão antigo)
         alarmes.reagendar()
         aoMudarAlarmes()
         Quiosque.aplicar(this)
