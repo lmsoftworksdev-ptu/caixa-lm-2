@@ -69,7 +69,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         if (alvo < 0 || abafado >= 0 || suspenso || android.os.SystemClock.uptimeMillis() < ignorarAte) return@Runnable
         val idx = Math.round(alvo / 100f * limite)
         val atual = audio.getStreamVolume(canal)
-        if (atual == idx || atual == 0) return@Runnable          // 0 = mudo, que é escolha da caixa
+        if (atual == idx) return@Runnable      // mudo escolhido na caixa já vem com alvo 0; um 0 mandado pelo celular não vale
         ignorarAte = android.os.SystemClock.uptimeMillis() + 800
         audio.setStreamVolume(canal, idx, 0)
         atualizar()

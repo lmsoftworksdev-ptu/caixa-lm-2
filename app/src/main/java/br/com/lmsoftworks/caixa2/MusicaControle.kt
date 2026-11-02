@@ -78,6 +78,15 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
         iniciouLocalEm = SystemClock.uptimeMillis()
         if (celularAtivo(controle?.playbackState)) controle?.transportControls?.pause()
     }
+    /** O celular desconectou: o título, a capa e o estado dele não valem mais (o cartão de música sumia só muito depois). */
+    fun celularDesconectou() {
+        if (emLocal || origem != Origem.CELULAR) return
+        titulo = ""; artista = ""; album = ""; duracaoMs = 0L; capa = null; chaveCapa = ""; pendente = null
+        estado = PlaybackState.STATE_NONE; posicaoBase = 0L
+        origem = Origem.NENHUMA
+        aoMudar()
+    }
+
     /**
      * O iPhone não passou nenhum estado (nem "pausado")? Conectado direito, ele manda "pausado" na hora; com o registro de avisos do
      * Bluetooth do Android incompleto o estado fica "parado" até o fim. Serve para detectar a falha antes mesmo de dar play.

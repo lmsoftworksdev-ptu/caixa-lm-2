@@ -29,16 +29,6 @@ class InicioActivity : Activity() {
     private lateinit var bluetooth: BluetoothControle
 
     /** O celular acabou de conectar ou de começar a tocar: reafirma o volume da caixa depois que ele manda o dele. */
-    private var semTituloDesde = 0L
-    private var diagFeito = 0
-    private var conectadoDesde = 0L
-    private var ajustandoBt = false
-    private var ajusteViuQueda = false
-    private var ajusteDesde = 0L
-    private var conexaoAjustada = false
-    private var semCelularDesde = 0L
-    private var reiniciosBt = 0
-    private var ultimoReinicioBt = 0L
     private fun impor() {
         painelVolume.imporPor(12000L)      // por alguns segundos o volume que o celular manda de partida não vale: o da caixa prevalece
     }
@@ -51,7 +41,6 @@ class InicioActivity : Activity() {
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
     private lateinit var modalAtualizacao: ModalAtualizacao
-    private lateinit var modalConexao: ModalConexao
     private lateinit var faixaAssistente: br.com.lmsoftworks.caixa2.voz.FaixaAssistente
     private lateinit var assistente: br.com.lmsoftworks.caixa2.voz.Assistente
     private lateinit var alarmes: AlarmeControle
@@ -161,45 +150,6 @@ class InicioActivity : Activity() {
             val agoraMs = android.os.SystemClock.uptimeMillis()
             val semDados = !musica.temMusica && bluetooth.algumConectado && bluetooth.celularTocando && !playerMidia.ativo && !telaVideo.aberto
             if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
-            // O Bluetooth do Android daqui às vezes registra só parte dos avisos do iPhone, e a música tocada por ele fica sem título e sem
-            // capa. Desligar e ligar o Bluetooth da caixa refaz tudo. Para o usuário nunca cair nisso, toda conexão nova passa por esse
-            // ajuste atrás do aviso "Conectando a ...": quando o aviso some, o celular já está pronto para tocar.
-            val semTitulo = bluetooth.algumConectado && !musica.temMusica && (bluetooth.celularTocando || musica.tocando) && !playerMidia.ativo && !telaVideo.aberto
-            if (semTitulo) { if (semTituloDesde == 0L) semTituloDesde = agoraMs } else semTituloDesde = 0L
-            if (bluetooth.algumConectado) { semCelularDesde = 0L; if (conectadoDesde == 0L) conectadoDesde = agoraMs }
-            else { conectadoDesde = 0L; if (semCelularDesde == 0L) semCelularDesde = agoraMs }
-            if (!ajustandoBt && semCelularDesde != 0L && agoraMs - semCelularDesde > 8000L) { conexaoAjustada = false; reiniciosBt = 0 }      // conexão nova de verdade
-            if (musica.temMusica) reiniciosBt = 0
-            val semCiclo = java.io.File(getExternalFilesDir(null), "sem_ciclo").exists()      // TEMPORÁRIO: experimento
-            if (bluetooth.algumConectado && conectadoDesde != 0L) {
-                val t = agoraMs - conectadoDesde
-                if (t > 5000L && diagFeito < 1) { diagFeito = 1; bluetooth.consultarAvrcp { e, c -> android.util.Log.d("CaixaDiag", "5s: estado=$e config=$c") } }
-                if (t > 12000L && diagFeito < 2) { diagFeito = 2; bluetooth.consultarAvrcp { e, c -> android.util.Log.d("CaixaDiag", "12s: estado=$e config=$c") } }
-            } else diagFeito = 0
-            if (semCiclo) conexaoAjustada = true
-            if (ajustandoBt) {
-                if (!bluetooth.algumConectado) ajusteViuQueda = true
-                val reconectou = ajusteViuQueda && bluetooth.algumConectado && agoraMs - conectadoDesde > 4000L
-                if (reconectou && musica.semEstadoDoCelular && reiniciosBt < 3) {
-                    // o ajuste não pegou (o iPhone não disse nem "pausado"): refaz AGORA, ainda atrás do aviso, em vez de deixar para depois do play
-                    reiniciosBt++; ajusteViuQueda = false; ajusteDesde = agoraMs
-                    bluetooth.reiniciarPorFalhaDeMidia()
-                } else if (reconectou || agoraMs - ajusteDesde > 35_000L) {
-                    ajustandoBt = false; conexaoAjustada = true; conectadoDesde = if (bluetooth.algumConectado) agoraMs else 0L
-                    modalConexao.fechar()
-                }
-            } else if (alarmeTocando == null && !Ajustes.restaurarRedes && reiniciosBt < 5 && !semCiclo) {
-                // 1) conexão nova ainda não ajustada; 2) conectado e o iPhone nem disse "pausado"; 3) tocando sem título
-                val nova = bluetooth.algumConectado && !conexaoAjustada && agoraMs - conectadoDesde > 1500L
-                val semEstado = conexaoAjustada && conectadoDesde != 0L && agoraMs - conectadoDesde > 8000L && musica.semEstadoDoCelular && !bluetooth.celularTocando
-                val semTituloLongo = conexaoAjustada && semTituloDesde != 0L && agoraMs - semTituloDesde > 7000L
-                if (nova || semEstado || semTituloLongo) {
-                    reiniciosBt++; ultimoReinicioBt = agoraMs; semTituloDesde = 0L
-                    ajustandoBt = true; ajusteViuQueda = false; ajusteDesde = agoraMs
-                    modalConexao.mostrar(bluetooth.nomeConectado() ?: "o celular")
-                    bluetooth.reiniciarPorFalhaDeMidia()
-                }
-            }
             val genericoVisivel = semDadosDesde != 0L && agoraMs - semDadosDesde > 2500L && !dispensada
             if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
             else if (genericoVisivel) inicio.definirMusica("Tocando do celular", bluetooth.nomeConectado() ?: "Bluetooth", null, true)
@@ -219,6 +169,7 @@ class InicioActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).let { if (it.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) it.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0) }      // a versão anterior podia deixar a caixa muda
         bootNovo = aparelhoAcabouDeLigar()
         if (bootNovo) aquecerAudio()
         window.addFlags(
@@ -323,6 +274,12 @@ class InicioActivity : Activity() {
         }
         // o volume da caixa prevalece: o celular manda o dele ao conectar e ao começar a tocar, e logo depois o da caixa volta
         bluetooth.aoConectado = { painelVolume.imporPor(20000L) }
+        bluetooth.podeRenovarPilha = { !Ajustes.restaurarRedes && !modalEnergia.aberto }
+        bluetooth.aoDesconectado = {
+            // o aparelho saiu (a pessoa desligou o Bluetooth do celular ou se afastou): o cartão de música some e a tela de música volta a
+            // pedir para conectar um celular. Não muda de tela.
+            if (!Ajustes.restaurarRedes && !modalEnergia.aberto) musica.celularDesconectou()
+        }
         telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
         telaConfig.aoMudarFuso = { alarmes.reagendar(); aoMudarAlarmes(); climaEm = 0L }
         telaConfig.buscarFusoAutomatico = { FusoHorario.buscarAutomatico(this, relogio) { telaConfig.aoMudarFuso(); if (atual == "config") telaConfig.atualizar() } }
@@ -348,7 +305,6 @@ class InicioActivity : Activity() {
         telaAlarmeTocando = TelaAlarmeTocando(this, { pararAlarme(true) }, { pararAlarme(false) })
         telaOciosa = TelaOciosa(this)
         modalAtualizacao = ModalAtualizacao(this)
-        modalConexao = ModalConexao(this)
         Atualizador.aoHaAtualizacao = { v -> if (alarmeTocando == null) modalAtualizacao.mostrar(v) }
 
         conteudo = FrameLayout(this).apply {
@@ -381,7 +337,6 @@ class InicioActivity : Activity() {
             addView(telaOciosa, FrameLayout.LayoutParams(-1, -1))
             addView(modalEnergia, FrameLayout.LayoutParams(-1, -1))
             addView(modalAtualizacao, FrameLayout.LayoutParams(-1, -1))
-            addView(modalConexao, FrameLayout.LayoutParams(-1, -1))
             addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                 if (v.width > v.height && !apareceu) {
                     apareceu = true
@@ -1285,7 +1240,7 @@ class InicioActivity : Activity() {
      *  (o estado do celular às vezes não chega, e a tela ociosa não pode entrar com música tocando). */
     private fun tocandoMusica() = musica.tocando || (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isMusicActive
 
-    private fun ocupado() = tocandoMusica() || telaVideo.aberto || alarmeTocando != null || modalEnergia.aberto || modalAtualizacao.aberto || modalConexao.aberto || painelVolume.aberto || girando
+    private fun ocupado() = tocandoMusica() || telaVideo.aberto || alarmeTocando != null || modalEnergia.aberto || modalAtualizacao.aberto || painelVolume.aberto || girando
 
     /** 60 s sem toque e sem nada tocando: tela preta só com a hora, fundo animado parado e brilho baixo. */
     private fun entrarOcioso() {
@@ -1579,7 +1534,6 @@ class InicioActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (alarmeTocando != null) return                 // o alarme só para pelos botões
-        if (modalConexao.aberto) return
         if (modalAtualizacao.aberto) { modalAtualizacao.fechar(); return }
         if (modalEnergia.aberto) { modalEnergia.fechar(); return }
         if (painelVolume.aberto) { painelVolume.fechar(); return }
