@@ -45,6 +45,8 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private var ultimoPorcento = -1
     private var animador: ValueAnimator? = null
     private var abrindo = false
+    /** Toques seguidos fora da pílula (zera quando se mexe no volume ou ela abre de novo). */
+    private var toquesFora = 0
     private var abafado = -1
     private var abafadoAlvo = -1
     private var ignorarAte = 0L
@@ -164,8 +166,15 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     init {
         visibility = View.GONE
-        // fora da pílula: um toque em qualquer lugar fecha
-        addView(View(c).apply { isClickable = true; setOnClickListener { fechar() } }, LayoutParams(-1, -1))
+        // fora da pílula: um toque só NÃO fecha (a bolinha é pequena e errar o toque é comum); o segundo toque seguido fora fecha
+        addView(View(c).apply {
+            isClickable = true
+            setOnClickListener {
+                toquesFora++
+                if (toquesFora >= 2) fechar()
+                else { handler.removeCallbacks(fecharSozinho); handler.postDelayed(fecharSozinho, 4000) }
+            }
+        }, LayoutParams(-1, -1))
 
         val menos = BotaoRedondo(c, R.drawable.ic_menos, "Diminuir volume", 36).apply { pintar(Color.WHITE, false); setOnClickListener { passo(-1) } }
         val mais = BotaoRedondo(c, R.drawable.ic_mais, "Aumentar volume", 36).apply { pintar(Color.WHITE, false); setOnClickListener { passo(+1) } }
@@ -215,6 +224,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     /** Abre a pílula e fecha sozinha depois de uns segundos sem mexer. */
     fun mostrarTemporario() {
+        toquesFora = 0
         aoMostrar?.invoke()
         atualizar()
         if (!abrindo) animar(true)
@@ -251,7 +261,10 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     }
 
     private fun definir(fracao: Float, guardar: Boolean = true) {
-        audio.setStreamVolume(canal, Math.round(fracao * limite).coerceIn(0, limite), 0)
+        val idx = Math.round(fracao * limite).coerceIn(0, limite)
+        // volume pedido com o assistente na tela (por voz): é o volume que vale quando ele fecha, e não o que estava antes
+        if (abafado >= 0 && guardar) { abafado = idx; abafadoAlvo = idx }
+        audio.setStreamVolume(canal, idx, 0)
         if (guardar) Ajustes.definirVolumeCaixa(Math.round(fracao * 100))
         atualizar()
     }
@@ -308,6 +321,7 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
 
     /** Lê o volume real do aparelho (ele também muda pelo celular que toca a música) e redesenha. */
     fun atualizar() {
+        toquesFora = 0
         // o celular que toca pode mandar 100% (volume absoluto do Bluetooth): trazemos de volta para o limite
         if (audio.getStreamVolume(canal) > limite) audio.setStreamVolume(canal, limite, 0)
         val p = porcento
@@ -346,10 +360,11 @@ class BarraVolume(c: Context) : View(c) {
         val f = if (arrastando) atual else valor
         val meio = height / 2f
         val r = 2.d().toFloat()
+        val bolinha = 15.d().toFloat()
         p.color = Color.parseColor("#29FFFFFF")
         canvas.drawRoundRect(0f, meio - r, width.toFloat(), meio + r, r, r, p)
         p.color = Color.WHITE
         canvas.drawRoundRect(0f, meio - r, width * f, meio + r, r, r, p)
-        canvas.drawCircle((width * f).coerceIn(9.d().toFloat(), width - 9.d().toFloat()), meio, 9.d().toFloat(), p)
+        canvas.drawCircle((width * f).coerceIn(bolinha, width - bolinha), meio, bolinha, p)
     }
 }

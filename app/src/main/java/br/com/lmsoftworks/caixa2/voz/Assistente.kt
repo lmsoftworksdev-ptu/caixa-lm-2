@@ -364,6 +364,17 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         c is ComandoVoz.Parar || c is ComandoVoz.Proxima || c is ComandoVoz.Anterior || c is ComandoVoz.Recomecar || c is ComandoVoz.PularTempo ||
         c is ComandoVoz.Ir || c is ComandoVoz.Voltar || c is ComandoVoz.Embaralhar || c is ComandoVoz.Soneca
 
+    /**
+     * Comando de controle (volume, luz, pausar, próxima...): faz a ação e pronto, sem a caixa repetir o que foi feito ("Volume 1").
+     * Só fala quando há o que dizer de verdade (um erro, uma resposta, "só consigo repetir músicas que eu mesma toco").
+     */
+    private fun deveFalar(c: ComandoVoz, frase: String?): Boolean = when {
+        frase == null -> !silencioso(c)
+        c is ComandoVoz.Volume || c is ComandoVoz.Luz || c is ComandoVoz.Embaralhar || c is ComandoVoz.Soneca -> false
+        c is ComandoVoz.Repetir -> !(frase.startsWith("Repetindo") || frase.startsWith("Repetição"))
+        else -> true
+    }
+
     private fun executarRapido(texto: String, c: ComandoVoz) {
         TonsVoz.pararPensando()
         pendente?.let { p ->
@@ -385,7 +396,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             else -> {}
         }
         val frase = acoes.executar(c, texto)
-        if (silencioso(c) && (frase == null || c is ComandoVoz.Volume || c is ComandoVoz.Luz)) { fechar(); return }
+        if (!deveFalar(c, frase)) { fechar(); return }
         resposta(frase ?: "Pronto", texto, falar = frase)
     }
 
@@ -436,6 +447,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             is ComandoVoz.Tocar -> resolverMidia(texto, comando.consulta, comando, minha)
             else -> {
                 val frase = acoes.executar(comando, texto)
+                if (!deveFalar(comando, frase)) { fechar(); return }
                 resposta(frase ?: "Pronto", texto, falar = frase)
             }
         }

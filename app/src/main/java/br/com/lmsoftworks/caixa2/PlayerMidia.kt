@@ -155,7 +155,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val pronta = preparada?.takeIf { it.item.url == r.url && !video }
         val videoPronto = if (video) videoPre.remove(r.url) else null
         cancelarFade()
-        item = r; ehVideo = video; erro = null; carregando = true; tocando = false; capa = null; relacionados = emptyList(); primeiroQuadro = false
+        item = r; ehVideo = video; erro = null; carregando = true; tocando = false
+        // a capa já conhecida (ou a provisória) fica na tela: sem passar por um quadrado de cor sólida
+        capa = capas.get(r.url) ?: capaProvisoria?.takeIf { it.first == r.url }?.second
+        relacionados = emptyList(); primeiroQuadro = false
         player?.stop(); player?.clearMediaItems()
         aoMudar()
         carregarCapa(r, minha)
@@ -173,7 +176,15 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }.start()
     }
 
+    /** Capas já baixadas (por endereço da faixa): ao voltar para uma música, a capa aparece na hora, sem o quadrado de cor sólida. */
+    private val capas = android.util.LruCache<String, Bitmap>(24)
+    private var capaProvisoria: Pair<String, Bitmap>? = null
+
+    /** Capa para mostrar enquanto a de verdade ainda não chegou (ex.: a imagem do vídeo de onde a música veio). */
+    fun usarCapaProvisoria(url: String, b: Bitmap) { capaProvisoria = url to b }
+
     private fun carregarCapa(r: Resultado, minha: Int) {
+        capas.get(r.url)?.let { capa = it; return }
         if (r.miniaturas.isEmpty()) return
         Thread {
             try {
@@ -186,7 +197,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 // o YouTube manda 16:9 (às vezes com tarja preta em cima e embaixo): recorta o centro, quadrado, para a capa
                 val lado = minOf(b.width, b.height)
                 val quadrada = Bitmap.createBitmap(b, (b.width - lado) / 2, (b.height - lado) / 2, lado, lado)
-                handler.post { if (minha == geracao) { capa = quadrada; aoMudar() } }
+                handler.post { capas.put(r.url, quadrada); if (minha == geracao) { capa = quadrada; aoMudar() } }
             } catch (e: Exception) { Log.w(TAG, "sem capa", e) }
         }.start()
     }

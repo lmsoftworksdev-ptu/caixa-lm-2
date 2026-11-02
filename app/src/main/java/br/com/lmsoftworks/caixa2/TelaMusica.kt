@@ -109,7 +109,7 @@ class BarraProgresso(c: Context) : View(c) {
 
     override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(MeasureSpec.getSize(w), 44.d())
 
-    private fun fracaoDe(x: Float) = ((x - 12.d()) / (width - 24.d()).toFloat()).coerceIn(0f, 1f)
+    private fun fracaoDe(x: Float) = ((x - 15.d()) / (width - 30.d()).toFloat()).coerceIn(0f, 1f)
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!ativa) return false
@@ -135,8 +135,8 @@ class BarraProgresso(c: Context) : View(c) {
     override fun onDraw(canvas: Canvas) {
         val altura = if (arrastando) 8.d() else 6.d()
         val meio = height / 2f
-        val esq = 12.d().toFloat()
-        val dir = (width - 12.d()).toFloat()
+        val esq = 15.d().toFloat()          // a bolinha (raio 15) não passa da borda da barra
+        val dir = (width - 15.d()).toFloat()
         val r = altura / 2f
         val f = if (arrastando) fracaoDedo else fracao
         p.color = Color.parseColor("#29FFFFFF")
@@ -146,7 +146,7 @@ class BarraProgresso(c: Context) : View(c) {
         canvas.drawRoundRect(esq, meio - r, x, meio + r, r, r, p)
         if (ativa) {
             p.color = Color.WHITE
-            canvas.drawCircle(x, meio, if (arrastando) 13.d().toFloat() else 9.d().toFloat(), p)
+            canvas.drawCircle(x, meio, 15.d().toFloat(), p)
         }
     }
 }

@@ -105,8 +105,7 @@ class BarraTopo(
         const val TOPO = 14
         const val X_WIFI = 36
         const val X_BLUETOOTH = 126
-        const val X_LED = 216
-        const val X_VOLUME = 306
+        const val X_VOLUME = 216      // a luz (LED) não fica mais aqui: só no menu da tela inicial
     }
 
     init {
@@ -117,7 +116,7 @@ class BarraTopo(
         volume.setOnClickListener { aoAbrirVolume() }
         energia.setOnClickListener { aoAbrirEnergia() }
 
-        for ((v, x) in listOf(wifi to X_WIFI, bluetooth to X_BLUETOOTH, led to X_LED, volume to X_VOLUME))
+        for ((v, x) in listOf(wifi to X_WIFI, bluetooth to X_BLUETOOTH, volume to X_VOLUME))
             addView(v, LayoutParams(TAM.d(), TAM.d()).apply { leftMargin = x.d(); topMargin = TOPO.d() })
         addView(hora, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 134.d(); topMargin = 28.d() })
         addView(energia, LayoutParams(TAM.d(), TAM.d(), Gravity.END or Gravity.TOP).apply { rightMargin = 36.d(); topMargin = TOPO.d() })

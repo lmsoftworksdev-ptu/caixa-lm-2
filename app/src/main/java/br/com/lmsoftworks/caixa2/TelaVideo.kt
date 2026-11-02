@@ -174,8 +174,10 @@ class TelaVideo(
     /** Abre já na tela de carregamento (rodinha e título), enquanto o clipe ainda está sendo achado. */
     fun esperar(tituloEspera: String, canalEspera: String) {
         esperando = true
+        val entrando = visibility != View.VISIBLE
         visibility = View.VISIBLE
         cortina.visibility = View.VISIBLE
+        if (entrando) { imagem.visibility = View.GONE; alpha = 0f; animate().alpha(1f).setDuration(380).withEndAction { imagem.visibility = View.VISIBLE }.start() }
         titulo.text = tituloEspera; canal.text = canalEspera
         iconePlay.setImageResource(R.drawable.ic_tocar)
         rodinha.visibility = View.VISIBLE
@@ -184,10 +186,18 @@ class TelaVideo(
         controles.alpha = 1f
     }
 
-    fun abrir() {
+    /**
+     * [esmaecendo]: a tela entra por esmaecimento sobre o que estava embaixo. A superfície do vídeo não acompanha a transparência da
+     * tela, então ela só entra depois do esmaecimento, com a cortina preta cobrindo até lá.
+     */
+    fun abrir(esmaecendo: Boolean = false) {
         esperando = false
         visibility = View.VISIBLE
-        player.ligarImagem(imagem)
+        if (esmaecendo) {
+            imagem.visibility = View.GONE; cortinaForcada = true; cortina.visibility = View.VISIBLE
+            alpha = 0f
+            animate().alpha(1f).setDuration(380).withEndAction { imagem.visibility = View.VISIBLE; player.ligarImagem(imagem); cortinaForcada = false; atualizar() }.start()
+        } else { imagem.visibility = View.VISIBLE; player.ligarImagem(imagem) }
         mostrarControles(true)
         handler.removeCallbacks(tique); handler.post(tique)
         atualizar()
@@ -228,6 +238,13 @@ class TelaVideo(
                 aoCor(Color.HSVToColor(hsv))
             }, handler)
         } catch (e: Exception) { amostrando = false }
+    }
+
+    /** Sai por esmaecimento, mostrando o que está embaixo; [fim] roda quando a tela já sumiu. */
+    fun esmaecerSaida(fim: () -> Unit) {
+        player.ligarImagem(null)
+        imagem.visibility = View.GONE; cortinaForcada = true; cortina.visibility = View.VISIBLE
+        animate().alpha(0f).setDuration(380).withEndAction { fim(); alpha = 1f; imagem.visibility = View.VISIBLE }.start()
     }
 
     fun fechar() {

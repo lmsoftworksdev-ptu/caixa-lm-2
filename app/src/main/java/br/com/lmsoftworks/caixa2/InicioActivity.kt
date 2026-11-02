@@ -1023,8 +1023,9 @@ class InicioActivity : Activity() {
         telaMidia.fecharTeclado()
         if (musica.tocando) musica.pausar()
         musica.pausarCelular()      // o celular que estiver tocando pára (mesmo que ele não avise que está tocando)
+        val entrando = !telaVideo.aberto && apareceu
         playerMidia.tocarVideo(lista, i, inicioMs)
-        telaVideo.abrir()
+        telaVideo.abrir(esmaecendo = entrando)
         relogio.removeCallbacks(amostradorVideo); relogio.post(amostradorVideo)
     }
 
@@ -1059,10 +1060,7 @@ class InicioActivity : Activity() {
         pedidoClipe++
         val pos = playerMidia.posicaoMs
         playerMidia.pausar()
-        telaVideo.mostrarSeletor(false)
-        telaVideo.fechar()
-        relogio.removeCallbacks(amostradorVideo)
-        musicaDoVideo(item, pos, true, irParaMusica = true)
+        musicaDoVideo(item, pos, true, irParaMusica = true)      // o vídeo esmaece sobre Tocando agora quando a música estiver pronta
     }
 
     /** Tira da legenda do vídeo o que não é o nome da música: "(Clipe Oficial)", "[Official Video]", "Lyric Video"... */
@@ -1081,14 +1079,32 @@ class InicioActivity : Activity() {
             val lista = try { YouTube.buscar(consulta, true) } catch (e: Exception) { emptyList() }
             relogio.post {
                 if (lista.isEmpty()) {
+                    // sem música para esse vídeo: ele continua na tela, pausado
                     Aviso.mostrar(this, "Não achei a música deste vídeo")
-                    playerMidia.parar()
-                    if (irParaMusica) ir("inicio")
+                    if (!irParaMusica) playerMidia.parar()
                 } else {
                     clipesProntos[lista[0].url] = v
                     telaMidia.fecharTeclado()
-                    musica.tocarDoYoutube(lista, 0, inicioMs, tocar)
-                    if (irParaMusica) ir("musica")
+                    // a imagem do vídeo serve de capa até a capa da música chegar (nada de quadrado de cor sólida)
+                    playerMidia.capa?.let { playerMidia.usarCapaProvisoria(lista[0].url, it) }
+                    if (irParaMusica && telaVideo.aberto) {
+                        // Tocando agora fica por baixo e o vídeo esmaece sobre ela
+                        val de = tela(atual)
+                        relogio.removeCallbacks(amostradorVideo)
+                        telaVideo.esmaecerSaida {
+                            videoDeMusica = false
+                            telaVideo.mostrarSeletor(false)
+                            telaVideo.fechar()
+                            if (de !== telaMusica) de.visibility = View.GONE
+                        }
+                        telaMusica.visibility = View.VISIBLE
+                        mudarEstado("musica")
+                        musica.tocarDoYoutube(lista, 0, inicioMs, tocar)
+                        relogio.postDelayed({ aoChegar("musica") }, 420)
+                    } else {
+                        musica.tocarDoYoutube(lista, 0, inicioMs, tocar)
+                        if (irParaMusica) ir("musica")
+                    }
                 }
             }
         }.start()
@@ -1135,16 +1151,12 @@ class InicioActivity : Activity() {
     }
 
 
-    /** Fecha o vídeo girando o cubo de volta para a busca (botão X e tecla voltar). */
+    /** Fecha o vídeo esmaecendo sobre a tela de baixo (botão X, tecla voltar e gesto de voltar). */
     private fun fecharVideoAnimado() {
         if (girando || !apareceu) { fecharVideo(); return }
         girando = true
-        destinoCubo = ""
-        telaVideo.cobrir(true)
-        val debaixo = tela(origemVideo)
-        Cubo.preparar(telaVideo, debaixo)
-        Cubo.aplicar(telaVideo, debaixo, 0f, 1, metade())
-        animarCubo(telaVideo, debaixo, 1, 0f, 90f) { terminarGiro(telaVideo, debaixo, true); fecharVideo() }
+        tela(origemVideo).visibility = View.VISIBLE
+        telaVideo.esmaecerSaida { girando = false; fecharVideo() }
     }
 
     private fun tocarMusicaDoYoutube(lista: List<Resultado>, i: Int) {
@@ -1238,7 +1250,7 @@ class InicioActivity : Activity() {
                         cancela.action = MotionEvent.ACTION_CANCEL
                         super.dispatchTouchEvent(cancela)   // solta o toque que os botões já tinham recebido
                         cancela.recycle()
-                        modoCubo = !emDetalheAtual()
+                        modoCubo = !emDetalheAtual() && !telaVideo.aberto      // com vídeo aberto o gesto fecha por esmaecimento
                         if (modoCubo) {
                             if (telaVideo.aberto) { destinoCubo = ""; deCubo = telaVideo; paraCubo = tela(origemVideo); telaVideo.cobrir(true) }
                             else { destinoCubo = destinoVoltar(); deCubo = tela(atual); paraCubo = tela(destinoCubo) }
