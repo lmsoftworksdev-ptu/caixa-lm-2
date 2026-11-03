@@ -31,7 +31,7 @@ import java.util.concurrent.Executors
  * (os JPEG baixados, em pasta temporária que é apagada quando o app abre) e a internet. Poucos downloads ao mesmo tempo, em segundo plano.
  */
 object Miniaturas {
-    private val cache = object : LruCache<String, Bitmap>(28 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
         override fun sizeOf(chave: String, b: Bitmap) = b.byteCount
     }
     private val fila = Executors.newFixedThreadPool(4) { r -> Thread { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() } }

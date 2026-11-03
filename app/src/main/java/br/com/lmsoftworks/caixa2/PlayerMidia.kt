@@ -71,8 +71,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     /** O mesmo controle de carga de sempre, com um teto opcional do que guardar à frente (a pré-carga do próximo vídeo guarda só uns 20 s). */
     private class ControleCarga : DefaultLoadControl(
         androidx.media3.exoplayer.upstream.DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
-        50_000, 120_000, 10_000, 20_000,      // só começa com 10 s guardados; depois de uma parada, espera 20 s
-        56 * 1024 * 1024, false, 0, false
+        50_000, 60_000, 10_000, 20_000,      // só começa com 10 s guardados; depois de uma parada, espera 20 s; guarda no máximo 60 s à frente
+        28 * 1024 * 1024, false, 0, false      // o Moto G3 tem 1 GB: com 56 MB de buffer o sistema matava o app por falta de memória
     ) {
         @Volatile var tetoUs = Long.MAX_VALUE
         override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
@@ -139,20 +139,52 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     // ---------------------------------------------------------------- troca música <-> clipe sem esperar
 
     private val videoPre = LinkedHashMap<String, Fonte>()
-
-    /** Resolve o endereço do vídeo antes de ele ser pedido, para o clipe abrir mais rápido. */
+    private val videoPreEm = HashMap<String, Long>()      // quando o endereço foi descoberto (os do YouTube vencem em umas 6 horas)
     private val resolvendoVideo = HashSet<String>()
+    private var resolvidoEm = 0L                           // quando terminou o último pedido (um de cada vez, com pausa)
+    private var falhasSeguidas = 0
+    private val VALIDADE_ENDERECO_MS = 90L * 60_000L
 
+    /** O endereço guardado deste vídeo, se ainda vale. */
+    private fun enderecoGuardado(url: String): Fonte? {
+        val f = videoPre[url] ?: return null
+        if (SystemClock.uptimeMillis() - (videoPreEm[url] ?: 0L) > VALIDADE_ENDERECO_MS) { videoPre.remove(url); videoPreEm.remove(url); return null }
+        return f
+    }
+
+    /** Resolve o endereço do vídeo antes de ele ser pedido, para ele abrir mais rápido. */
     fun prefetchVideo(r: Resultado) {
-        if (videoPre.containsKey(r.url) || !resolvendoVideo.add(r.url)) return
+        if (enderecoGuardado(r.url) != null || !resolvendoVideo.add(r.url)) return
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-            try {
-                val f = YouTube.resolver(r.url, soAudio = false)
-                handler.post { videoPre[r.url] = f; while (videoPre.size > 4) videoPre.remove(videoPre.keys.first()) }
-            } catch (e: Exception) { }
-            handler.post { resolvendoVideo.remove(r.url) }
+            var f: Fonte? = null
+            try { f = YouTube.resolver(r.url, soAudio = false) } catch (e: Exception) { }
+            handler.post {
+                resolvendoVideo.remove(r.url)
+                resolvidoEm = SystemClock.uptimeMillis()
+                if (f != null) {
+                    falhasSeguidas = 0
+                    videoPre[r.url] = f; videoPreEm[r.url] = SystemClock.uptimeMillis()
+                    while (videoPre.size > 80) { val velho = videoPre.keys.first(); videoPre.remove(velho); videoPreEm.remove(velho) }
+                } else falhasSeguidas++
+            }
         }.start()
+    }
+
+    /**
+     * Descobre o endereço dos vídeos da lista perto do atual, um de cada vez e com pausa entre eles (o YouTube bloqueia quem pede demais de
+     * uma vez): primeiro os que vêm depois, depois os de antes. Se um pedido falhar, espera mais antes do próximo.
+     */
+    private fun resolverFila() {
+        if (resolvendoVideo.isNotEmpty()) return
+        val agora = SystemClock.uptimeMillis()
+        // 5 s entre pedidos (uns 12 por minuto, bem abaixo de uma pessoa trocando de vídeo sem parar); depois de uma falha, 1 minuto; depois de duas, 3
+        val pausa = when { falhasSeguidas >= 2 -> 180_000L; falhasSeguidas == 1 -> 60_000L; else -> 5_000L }
+        if (agora - resolvidoEm < pausa) return
+        // só uma janela perto do atual (25 à frente, 5 atrás): a janela anda conforme os vídeos passam
+        val ordem = (indice + 1 until minOf(fila.size, indice + 26)) + (indice - 1 downTo maxOf(indice - 5, 0))
+        val alvo = ordem.map { fila[it] }.firstOrNull { enderecoGuardado(it.url) == null } ?: return
+        prefetchVideo(alvo)
     }
 
     // ---------------------------------------------------------------- pré-carga do próximo vídeo
@@ -176,13 +208,17 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (!tocando || erro != null || !primeiroQuadro || repetindo || p.currentPosition < 3000) return
         val proximo = fila.getOrNull(indice + 1) ?: relacionadosNovos().firstOrNull() ?: return
         // etapa 1: descobre o endereço dos dois próximos (só texto, quase não gasta internet)
-        prefetchVideo(proximo)
-        fila.getOrNull(indice + 2)?.let { prefetchVideo(it) }
+        prefetchVideo(proximo)      // o seguinte primeiro, sem pausa
+        resolverFila()
         // etapa 2: só com folga de internet
         if (preVideo != null) { if (preVideo!!.item.url != proximo.url) liberarPreVideo(); return }
         val aFrente = p.bufferedPosition - p.currentPosition
         if (aFrente < 20_000) return
-        val fonte = videoPre[proximo.url] ?: return
+        // memória: o segundo player e o segundo decodificador só entram se sobrar bastante; com pouca memória o sistema mata o app (isso já aconteceu)
+        val mem = android.app.ActivityManager.MemoryInfo()
+        (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mem)
+        if (mem.lowMemory || mem.availMem < 300L * 1024 * 1024) return
+        val fonte = enderecoGuardado(proximo.url) ?: return
         val novo = novoExo()
         val controle = ultimoControle ?: return
         controle.tetoUs = 20_000_000L
@@ -242,7 +278,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val minha = ++geracao
         cancelarRampa(); fracaoVolume = 1f
         val pronta = preparada?.takeIf { it.item.url == r.url && !video }
-        val videoPronto = if (video) videoPre.remove(r.url) else null
+        val videoPronto = if (video) enderecoGuardado(r.url) else null
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false
         infoExtra = ""      // visualizações e data só aparecem quando o dado verdadeiro chegar (o da lista de busca pode vir errado)

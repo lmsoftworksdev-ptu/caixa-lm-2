@@ -333,7 +333,7 @@ class TelaVideo(
         val dur = player.duracaoMs
         tempoAtual.text = formatar(player.posicaoMs)
         redeVideo.text = UsoRede.texto
-        if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "") + (if (UsoRede.texto.isNotEmpty()) "    " + UsoRede.texto else "")
+        if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "")
         tempoTotal.text = if (dur > 0) " / " + formatar(dur) else ""
         barra.fracao = if (dur > 0) player.posicaoMs.toFloat() / dur else 0f
         barra.ativa = dur > 0
