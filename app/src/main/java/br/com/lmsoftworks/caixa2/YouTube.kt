@@ -48,6 +48,16 @@ data class Fonte(val videoUrl: String?, val audioUrl: String?, val unicaUrl: Str
 object YouTube {
     private val service get() = ServiceList.YouTube
 
+    /** Velocidade de download medida pelo player (bits/s, média suavizada); 0 = ainda não medida. */
+    @Volatile var bandaBps = 0L
+    fun medirBanda(bps: Long) {
+        if (bps <= 0) return
+        bandaBps = if (bandaBps == 0L) bps else (bandaBps * 0.5 + bps * 0.5).toLong()
+    }
+
+    /** O vídeo é sempre HD (720p, ou 1080p quando não há 720p): decisão do dono da caixa, mesmo com a internet lenta. */
+    private fun alturaAlvo(): Int = 720
+
     @Volatile
     private var iniciado = false
 
@@ -371,7 +381,10 @@ object YouTube {
         // A MELHOR imagem disponivel (ate 1080p), sempre HD: nunca abaixo de 720p.
         // A tela da caixa é 1280x720: 1080p não mostra nada a mais e tem o dobro de dados (travava o vídeo ao carregar). Usa 720p;
         // só sobe para 1080p se não houver 720p.
-        val hd = h264.filter { it.height >= 720 }.minByOrNull { it.height }
+        val alvo = alturaAlvo()
+        Log.d("Midia", "qualidade escolhida: até ${alvo}p (banda ${bandaBps / 1_000_000.0} Mbps)")
+        val hd = if (alvo >= 720) h264.filter { it.height >= 720 }.minByOrNull { it.height }
+                 else h264.filter { it.height <= alvo }.maxByOrNull { it.height } ?: h264.minByOrNull { it.height }
         if (hd != null && audio != null) return Fonte(hd.content, audio.content, null)
 
         // 1b) Sem H.264 HD (alguns videos so oferecem VP9 em HD): VP9 em 720p. O G3 nao tem decodificador

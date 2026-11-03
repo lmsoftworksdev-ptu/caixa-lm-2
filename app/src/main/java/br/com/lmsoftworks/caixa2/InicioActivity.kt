@@ -137,6 +137,8 @@ class InicioActivity : Activity() {
             if (atual == "config") atualizarConfig()
             if (atual == "alarmes") telaAlarmes.tique()
             barra.atualizarHora()
+            UsoRede.amostrar()
+            barra.atualizarRede()
             if (atual == "inicio") aplicarTema("inicio")      // o fundo do Início acompanha a hora do dia
             alarmes.verificar()?.let { tocarAlarme(it) }
             if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }

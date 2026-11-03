@@ -77,6 +77,7 @@ class TelaVideo(
     private var botaoProxima: View? = null
     private val tempoAtual = texto(c, "0:00", 20, Color.WHITE)
     private val tempoTotal = texto(c, "", 20, Color.WHITE)
+    private val redeVideo = texto(c, "", 19, Color.parseColor("#CCFFFFFF"))      // velocidade de download, entre o tempo e o volume
     private val rodinha = Carregando(c)
     private val mensagem = LinearLayout(c)
     private val textoErro = texto(c, "", 28, Color.WHITE, true)
@@ -144,6 +145,7 @@ class TelaVideo(
         linhaBotoes.addView(lista, lp68())
         linhaBotoes.addView(tempoAtual.apply { setPadding(10.d(), 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))
         linhaBotoes.addView(tempoTotal, LinearLayout.LayoutParams(-2, -2))
+        linhaBotoes.addView(redeVideo, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 34.d() })
         espacador = View(c)
         linhaBotoes.addView(espacador, LinearLayout.LayoutParams(0, 1, 1f))
         iconeVolume = icone(c, R.drawable.ic_volume_2, 34, Color.WHITE)
@@ -208,6 +210,7 @@ class TelaVideo(
         // player reduzido: só anterior, play/pause e próximo; sem o botão da lista (tocar na tela fecha a lista) e com o tempo no canto
         botaoLista?.visibility = if (abrir || player.fila.size <= 1) View.GONE else View.VISIBLE
         tempoAtual.visibility = if (abrir) View.GONE else View.VISIBLE
+        redeVideo.visibility = if (abrir) View.GONE else View.VISIBLE
         tempoTotal.visibility = if (abrir) View.GONE else View.VISIBLE
         tempoCanto.visibility = if (abrir) View.VISIBLE else View.GONE
         if (abrir) atualizarTempo()
@@ -329,7 +332,8 @@ class TelaVideo(
     private fun atualizarTempo() {
         val dur = player.duracaoMs
         tempoAtual.text = formatar(player.posicaoMs)
-        if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "")
+        redeVideo.text = UsoRede.texto
+        if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "") + (if (UsoRede.texto.isNotEmpty()) "    " + UsoRede.texto else "")
         tempoTotal.text = if (dur > 0) " / " + formatar(dur) else ""
         barra.fracao = if (dur > 0) player.posicaoMs.toFloat() / dur else 0f
         barra.ativa = dur > 0

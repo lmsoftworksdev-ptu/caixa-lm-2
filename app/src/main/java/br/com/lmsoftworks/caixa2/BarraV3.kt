@@ -94,6 +94,8 @@ class BarraTopo(
     private val volume = BotaoBarra(c, R.drawable.ic_volume_2, "Volume")
     private val energia = BotaoBarra(c, R.drawable.ic_power, "Desligar ou reiniciar")
     private val hora: TextView = texto(c, "", 38, Tema.TEXTO).apply { letterSpacing = 0.02f; fontFeatureSettings = "tnum" }
+    /** Velocidade de download ao vivo (↓), ao lado da hora. */
+    private val rede: TextView = texto(c, "", 21, Tema.TEXTO2).apply { fontFeatureSettings = "tnum" }
 
     /** Coloca a pílula do volume atrás do botão de volume (ela cresce para a direita a partir dele). */
     fun colocarPilulaVolume(pilula: View) {
@@ -119,6 +121,7 @@ class BarraTopo(
         for ((v, x) in listOf(wifi to X_WIFI, bluetooth to X_BLUETOOTH, volume to X_VOLUME))
             addView(v, LayoutParams(TAM.d(), TAM.d()).apply { leftMargin = x.d(); topMargin = TOPO.d() })
         addView(hora, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 134.d(); topMargin = 28.d() })
+        addView(rede, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 134.d(); topMargin = 38.d() })
         addView(energia, LayoutParams(TAM.d(), TAM.d(), Gravity.END or Gravity.TOP).apply { rightMargin = 36.d(); topMargin = TOPO.d() })
 
         wifi.estado(Tema.ERRO, true)
@@ -166,7 +169,17 @@ class BarraTopo(
     }
 
     /** A hora da barra só aparece nos menus; na tela Início a hora grande já está na tela. */
-    fun mostrarHora(v: Boolean) { hora.visibility = if (v) View.VISIBLE else View.GONE }
+    fun mostrarHora(v: Boolean) { hora.visibility = if (v) View.VISIBLE else View.GONE; posicionarRede() }
+
+    /** O indicador fica à esquerda da hora (ou no lugar dela, na tela Início, onde a hora da barra não aparece). */
+    private fun posicionarRede() {
+        val lp = rede.layoutParams as LayoutParams
+        val margem = 134.d() + if (hora.visibility == View.VISIBLE && hora.width > 0) hora.width + 26.d() else 0
+        if (lp.rightMargin != margem) { lp.rightMargin = margem; rede.layoutParams = lp }
+    }
+
+    /** Chamada a cada meio segundo, depois de [UsoRede.amostrar]. */
+    fun atualizarRede() { rede.text = UsoRede.texto; posicionarRede() }
 
     fun atualizarHora() {
         val cal = Calendar.getInstance()

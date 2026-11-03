@@ -68,11 +68,22 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         return p
     }
 
+    /** O mesmo controle de carga de sempre, com um teto opcional do que guardar à frente (a pré-carga do próximo vídeo guarda só uns 20 s). */
+    private class ControleCarga : DefaultLoadControl(
+        androidx.media3.exoplayer.upstream.DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+        50_000, 120_000, 10_000, 20_000,      // só começa com 10 s guardados; depois de uma parada, espera 20 s
+        56 * 1024 * 1024, false, 0, false
+    ) {
+        @Volatile var tetoUs = Long.MAX_VALUE
+        override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
+            if (parameters.bufferedDurationUs >= tetoUs) false else super.shouldContinueLoading(parameters)
+    }
+
+    private var ultimoControle: ControleCarga? = null
+
     private fun novoExo(): ExoPlayer {
-        val controle = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(50_000, 120_000, 10_000, 20_000)      // só começa com 10 s guardados; depois de uma parada, espera 20 s
-            .setTargetBufferBytes(56 * 1024 * 1024)
-            .build()
+        val controle = ControleCarga()
+        ultimoControle = controle
         val p = ExoPlayer.Builder(ctx).setLoadControl(controle).build()
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -90,7 +101,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             override fun onRenderedFirstFrame() { if (p === player) { primeiroQuadro = true; aoMudar() } }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; if (isPlaying) aoComecou?.invoke(); aoMudar() } }
             override fun onPlayerError(e: PlaybackException) {
-                if (p !== player) { if (p === proximoPlayer) cancelarFade(); return }
+                if (p !== player) { if (p === proximoPlayer) cancelarFade() else if (p === preVideo?.player) liberarPreVideo(); return }
                 Log.w(TAG, "erro no player", e)
                 // endereço vencido ou rede que caiu: pede um novo e retoma de onde parou (até 3 vezes)
                 val r = item
@@ -100,7 +111,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         })
         p.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onBandwidthEstimate(t: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, ms: Int, bytes: Long, bps: Long) {
-                Log.d(TAG, "rede: ${bps / 1_000_000.0} Mbps estimados")
+                YouTube.medirBanda(bps); Log.d(TAG, "rede: ${bps / 1_000_000.0} Mbps estimados")
             }
         })
         return p
@@ -130,14 +141,80 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private val videoPre = LinkedHashMap<String, Fonte>()
 
     /** Resolve o endereço do vídeo antes de ele ser pedido, para o clipe abrir mais rápido. */
+    private val resolvendoVideo = HashSet<String>()
+
     fun prefetchVideo(r: Resultado) {
-        if (videoPre.containsKey(r.url)) return
+        if (videoPre.containsKey(r.url) || !resolvendoVideo.add(r.url)) return
         Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 val f = YouTube.resolver(r.url, soAudio = false)
-                handler.post { videoPre[r.url] = f; while (videoPre.size > 3) videoPre.remove(videoPre.keys.first()) }
+                handler.post { videoPre[r.url] = f; while (videoPre.size > 4) videoPre.remove(videoPre.keys.first()) }
             } catch (e: Exception) { }
+            handler.post { resolvendoVideo.remove(r.url) }
         }.start()
+    }
+
+    // ---------------------------------------------------------------- pré-carga do próximo vídeo
+    //
+    // Enquanto um vídeo toca, o endereço dos próximos é descoberto antes (etapa 1) e, se a internet tem folga (o vídeo atual já tem 20 s
+    // guardados à frente), o seguinte começa a carregar em outro player, parado, com no máximo 20 s (etapa 2). Na troca a imagem passa
+    // para ele e o vídeo começa na hora. Com internet lenta a etapa 2 nunca começa, para não tirar banda do vídeo que está passando.
+
+    private class PreVideo(val item: Resultado, val fonte: Fonte, val player: ExoPlayer, val controle: ControleCarga)
+
+    private var preVideo: PreVideo? = null
+
+    private fun liberarPreVideo() {
+        val pv = preVideo ?: return
+        preVideo = null
+        try { pv.player.release() } catch (_: Throwable) { }
+    }
+
+    private fun verificarPreVideo() {
+        val p = player ?: return
+        if (!tocando || erro != null || !primeiroQuadro || repetindo || p.currentPosition < 3000) return
+        val proximo = fila.getOrNull(indice + 1) ?: relacionadosNovos().firstOrNull() ?: return
+        // etapa 1: descobre o endereço dos dois próximos (só texto, quase não gasta internet)
+        prefetchVideo(proximo)
+        fila.getOrNull(indice + 2)?.let { prefetchVideo(it) }
+        // etapa 2: só com folga de internet
+        if (preVideo != null) { if (preVideo!!.item.url != proximo.url) liberarPreVideo(); return }
+        val aFrente = p.bufferedPosition - p.currentPosition
+        if (aFrente < 20_000) return
+        val fonte = videoPre[proximo.url] ?: return
+        val novo = novoExo()
+        val controle = ultimoControle ?: return
+        controle.tetoUs = 20_000_000L
+        novo.volume = 0f
+        novo.setMediaSource(origemDe(fonte))
+        novo.playWhenReady = false
+        novo.prepare()
+        preVideo = PreVideo(proximo, fonte, novo, controle)
+        Log.d(TAG, "pré-carga: ${proximo.titulo} (o atual tem ${aFrente / 1000}s guardados)")
+    }
+
+    /** O vídeo pedido já está carregado em outro player: ele assume a imagem e o som, e começa na hora. */
+    private fun assumirPreVideo(pv: PreVideo, r: Resultado) {
+        val antigo = player
+        val novo = pv.player
+        superficie?.let { antigo?.clearVideoSurfaceView(it) }
+        player = novo
+        pv.controle.tetoUs = Long.MAX_VALUE      // daqui em diante guarda o que precisar, como qualquer vídeo
+        superficie?.let { novo.setVideoSurfaceView(it) }
+        try { antigo?.release() } catch (_: Throwable) { }
+        relacionados = pv.fonte.relacionados; modoMusica = pv.fonte.musica; infoExtra = infoDe(pv.fonte)
+        novo.repeatMode = Player.REPEAT_MODE_OFF
+        val vaiTocar = comecarTocando
+        comecarTocando = true
+        novo.playWhenReady = vaiTocar
+        cancelarRampa(); fracaoVolume = 1f
+        if (vaiTocar) { novo.volume = 0f; rampa(0f, 1f, 600L) { } } else novo.volume = volumeBase
+        nivelador.novaFaixa(); nivelador.ligar(novo.audioSessionId)
+        carregando = novo.playbackState != Player.STATE_READY
+        tocando = novo.isPlaying
+        Log.d(TAG, "pré-carga usada: ${r.titulo} (${novo.bufferedPosition / 1000}s já guardados)")
+        aoMudar()
     }
 
     /** Troca o que está tocando: o som atual desce em fade (500 ms) antes de a nova faixa ou vídeo entrar. */
@@ -172,6 +249,16 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         // a capa já conhecida (ou a provisória) fica na tela: sem passar por um quadrado de cor sólida
         capa = capas.get(r.url) ?: capaProvisoria?.takeIf { it.first == r.url }?.second
         relacionados = emptyList(); primeiroQuadro = false
+        val pv = preVideo
+        if (pv != null) {
+            preVideo = null
+            if (video && !recuperando && pv.item.url == r.url && pv.player.bufferedPosition > 3000) {
+                carregarCapa(r, minha)
+                assumirPreVideo(pv, r)
+                return
+            }
+            try { pv.player.release() } catch (_: Throwable) { }
+        }
         player?.stop(); player?.clearMediaItems()
         aoMudar()
         carregarCapa(r, minha)
@@ -483,7 +570,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun verificarEmenda() {
         val p = player ?: return
-        if (ehVideo || !tocando || item == null || erro != null || repetindo) return
+        if (ehVideo) { verificarPreVideo(); return }
+        if (!tocando || item == null || erro != null || repetindo) return
         if (emFade) { passoDoFade(); return }
         val dur = p.duration
         if (dur == C.TIME_UNSET || dur < 25_000) return
@@ -577,6 +665,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     fun parar() {
         geracao++
         cancelarFade()
+        liberarPreVideo()
         player?.stop(); player?.clearMediaItems()
         item = null; fila = emptyList(); indice = -1; carregando = false; tocando = false; erro = null; capa = null; ehVideo = false; primeiroQuadro = false
         aoMudar()
@@ -585,6 +674,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     fun liberar() {
         geracao++
         cancelarFade()
+        liberarPreVideo()
         handler.removeCallbacks(vigia)
         nivelador.desligar()
         player?.release(); player = null

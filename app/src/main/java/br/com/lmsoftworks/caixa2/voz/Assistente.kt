@@ -197,6 +197,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     private fun comecarChamada() {
         val m = modelo ?: return
+        MIC_COMUNICACAO = try { File(ctx.getExternalFilesDir(null), "mic_comunicacao").exists() } catch (e: Throwable) { false }
         escuta?.parar()
         try {
             val gramatica = (FRASES_CHAMADA + ISCAS).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }

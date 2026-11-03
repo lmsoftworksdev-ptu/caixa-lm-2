@@ -23,6 +23,9 @@ import kotlin.math.sqrt
  *    os comandos fixos e o texto ao vivo. O Vosk só é mexido por essa thread.
  * Ao fim do pedido entrega o WAV completo (para o Gemini) e o JSON do reconhecedor de comandos (para a via rápida).
  */
+/** EXPERIMENTO: liga o microfone no modo "comunicação" (com cancelamento de eco do Android) quando existe o arquivo mic_comunicacao na pasta do app. */
+@Volatile var MIC_COMUNICACAO = false
+
 class EscutaAssistente(
     private val reconhecedor: Recognizer,
     private val comandos: Recognizer?,
@@ -88,7 +91,7 @@ class EscutaAssistente(
         val gr = AudioRecord(
             // VOICE_COMMUNICATION faz o rádio do aparelho trocar o microfone por "speaker-mic" (surdo) assim que sai qualquer som pelo alto-falante
             // (o toquinho da chamada): a caixa ouvia só a primeira chamada. VOICE_RECOGNITION mantém o microfone digital (dmic-endfire).
-            MediaRecorder.AudioSource.VOICE_RECOGNITION, TAXA, AudioFormat.CHANNEL_IN_MONO,
+            if (MIC_COMUNICACAO) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION, TAXA, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, max(minimo * 4, TAXA * 2)
         )
         if (gr.state != AudioRecord.STATE_INITIALIZED) { gr.release(); return false }
@@ -96,7 +99,7 @@ class EscutaAssistente(
             if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(gr.audioSessionId)?.also { it.enabled = true; efeitos += it }
             if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(gr.audioSessionId)?.also { it.enabled = true; efeitos += it }
             if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(gr.audioSessionId)?.also { it.enabled = true; efeitos += it }
-            Log.d(TAG, "microfone: ${efeitos.size} efeitos ligados (eco/ruido/ganho)")
+            Log.d(TAG, "microfone: fonte=${if (MIC_COMUNICACAO) "COMUNICACAO" else "RECONHECIMENTO"}, ${efeitos.size} efeitos ligados (eco/ruido/ganho), AEC disponivel=${AcousticEchoCanceler.isAvailable()}")
         } catch (e: Throwable) { Log.d(TAG, "microfone: sem efeitos: $e") }
         rodando = true
         threadVosk = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT); lacoVosk() }, "escuta-vosk").also { it.start() }
