@@ -1713,7 +1713,7 @@ class InicioActivity : Activity() {
     // ---------------------------------------------------------------- botão físico de energia
     //
     // O Android não entrega a tecla de energia aos apps, mas avisa o que ela fez:
-    //  - toque curto: apaga a tela (ACTION_SCREEN_OFF). A caixa acende a tela de novo na hora e abre a janela Desligar / Reiniciar;
+    //  - toque curto: o Android apaga a tela (economiza bateria) e a caixa não interfere; apertar de novo acende;
     //  - segurar: o sistema anuncia o menu de energia dele (ACTION_CLOSE_SYSTEM_DIALOGS com motivo "globalactions"). A caixa fecha esse menu
     //    e vai direto para a contagem de "Desligando".
     private var energiaEmCurso = false
@@ -1721,7 +1721,6 @@ class InicioActivity : Activity() {
     private val receptorEnergia = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: android.content.Context, i: android.content.Intent) {
             when (i.action) {
-                android.content.Intent.ACTION_SCREEN_OFF -> botaoEnergiaCurto()
                 android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS -> if (i.getStringExtra("reason") == "globalactions") botaoEnergiaLongo()
             }
         }
@@ -1730,7 +1729,6 @@ class InicioActivity : Activity() {
     private fun registrarBotaoEnergia() {
         try {
             registerReceiver(receptorEnergia, android.content.IntentFilter().apply {
-                addAction(android.content.Intent.ACTION_SCREEN_OFF)
                 addAction(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
             })
         } catch (e: Exception) { Falhas.gravar("Botão de energia", e) }
@@ -1741,26 +1739,12 @@ class InicioActivity : Activity() {
         super.onDestroy()
     }
 
-    @Suppress("DEPRECATION")
-    private fun acordarTela() {
-        try {
-            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
-            pm.newWakeLock(android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or android.os.PowerManager.ON_AFTER_RELEASE, "caixa:energia").acquire(5000L)
-        } catch (e: Exception) { Falhas.gravar("Acordar a tela", e) }
-    }
-
-    private fun botaoEnergiaCurto() {
-        acordarTela()      // a caixa nunca fica de tela apagada: o botão só abre a janela de energia
-        if (energiaEmCurso || alarmeTocando != null) return
-        ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
-        relogio.postDelayed({ if (!energiaEmCurso) { painelVolume.fechar(); modalEnergia.abrir() } }, 250L)
-    }
-
     private fun botaoEnergiaLongo() {
-        // o menu de energia do sistema aparece logo depois deste aviso: manda fechá-lo (algumas vezes, para pegar a hora certa)
-        for (ms in longArrayOf(120L, 350L, 800L)) relogio.postDelayed({
+        // o menu de energia do sistema aparece logo depois deste aviso (o aviso vem ANTES de ele existir): manda fechá-lo a cada 30 ms até ele
+        // sumir, para a piscada ser a menor possível
+        for (k in 0..24) relogio.postDelayed({
             try { sendBroadcast(android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) { }
-        }, ms)
+        }, k * 30L)
         if (energiaEmCurso || alarmeTocando != null) return
         ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
         painelVolume.fechar()
