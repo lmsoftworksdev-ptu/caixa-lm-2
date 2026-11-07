@@ -72,6 +72,18 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
 
     fun abrir() {
         if (aberto) return
+        mostrar()
+        mostrarEscolha()
+    }
+
+    /** Botão físico de energia apertado e segurado: já vai direto para a contagem de "Desligando em 5 s" (com Cancelar). */
+    fun abrirDesligando() {
+        if (executandoJa || contagem != null) return
+        if (!aberto) mostrar()
+        contar(true)
+    }
+
+    private fun mostrar() {
         executandoJa = false
         if (cartao.parent == null) addView(cartao, LayoutParams(640.d(), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         setBackgroundColor(Tema.SCRIM)
@@ -79,7 +91,6 @@ class ModalEnergia(private val c: Context, private val executar: (Boolean) -> Un
         alpha = 0f; cartao.scaleX = .96f; cartao.scaleY = .96f
         animate().alpha(1f).setDuration(Tema.MODAL_MS).setInterpolator(Tema.CURVA).start()
         cartao.animate().scaleX(1f).scaleY(1f).setDuration(Tema.MODAL_MS).setInterpolator(Tema.CURVA).start()
-        mostrarEscolha()
     }
 
     fun fechar() {

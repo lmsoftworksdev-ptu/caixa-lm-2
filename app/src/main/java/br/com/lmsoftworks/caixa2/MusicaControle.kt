@@ -139,6 +139,9 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     val erroLocal: String? get() = local?.takeIf { it.ativo && !it.ehVideo }?.erro
     fun tentarDeNovoLocal() { local?.alternar() }
 
+    /** A música do app que toca agora é uma rádio ao vivo. */
+    val ehRadio: Boolean get() = emLocal && local?.ehRadio == true
+
     val temMusica: Boolean get() = titulo.isNotEmpty()
     val tocando: Boolean get() = estado == PlaybackState.STATE_PLAYING || estado == PlaybackState.STATE_BUFFERING
     val conectado: Boolean get() = controle != null

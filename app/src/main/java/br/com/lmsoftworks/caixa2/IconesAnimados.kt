@@ -50,6 +50,15 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
         2f, 12f, 4f, 12f, 20f, 12f, 22f, 12f, 6.34f, 17.66f, 4.93f, 19.07f, 19.07f, 4.93f, 17.66f, 6.34f
     )
 
+    private val figura: android.graphics.drawable.Drawable? by lazy {
+        val id = when (tipo) {
+            "parcial" -> R.drawable.ic_t_parcial; "parcialnoite" -> R.drawable.ic_t_parcial_noite; "neblina" -> R.drawable.ic_t_neblina
+            "garoa" -> R.drawable.ic_t_garoa; "trovoada" -> R.drawable.ic_t_trovoada; "neve" -> R.drawable.ic_t_neve; "pancadas" -> R.drawable.ic_t_pancadas
+            else -> 0
+        }
+        if (id == 0) null else context.getDrawable(id)?.mutate()
+    }
+
     private fun ativo() = isShown && !Animacao.pausada
 
     override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(tam.d(), tam.d())
@@ -97,6 +106,11 @@ class IconeAnimado(c: Context, private val tipo: String, private val cor: Int, p
                     canvas.drawLine(x, y0 + dy, x, y0 + 3f + dy, p)
                 }
                 p.alpha = 255
+            }
+            "parcial", "parcialnoite", "neblina", "garoa", "trovoada", "neve", "pancadas" -> {
+                // desenhado no tamanho real da tela (o vetor guarda um bitmap do tamanho que recebe: num quadro de 24 e ampliado ficava borrado)
+                canvas.restore(); canvas.save()
+                figura?.let { it.setBounds(0, 0, width, height); it.draw(canvas) }
             }
             "eq" -> {
                 canvas.restore(); canvas.save()          // em px do projeto (o ícone é um quadro de 56)

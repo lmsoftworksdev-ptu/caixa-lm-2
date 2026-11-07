@@ -80,7 +80,7 @@ class TelaVideo(
     private val redeVideo = texto(c, "", 19, Color.parseColor("#CCFFFFFF"))      // velocidade de download, entre o tempo e o volume
     private val rodinha = Carregando(c)
     private val mensagem = LinearLayout(c)
-    private val textoErro = texto(c, "", 28, Color.WHITE, true)
+    private val textoErro = texto(c, "", 28, Color.WHITE, true).apply { gravity = Gravity.CENTER; maxWidth = 900.d(); setSingleLine(false); maxLines = 2 }
     private val handler = Handler(Looper.getMainLooper())
     private val esconder = Runnable { mostrarControles(false) }
     private val tique = object : Runnable {
@@ -176,10 +176,11 @@ class TelaVideo(
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             visibility = View.GONE
-            addView(textoErro)
-            addView(botao(c, "Tentar de novo", Cfg.AZUL) { player.alternar() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 20.d() })
+            // largura fixa: com largura "do conteúdo" o texto era medido duas vezes e quebrava na largura do botão, escondendo "reproduzir"
+            addView(textoErro, LinearLayout.LayoutParams(-1, -2))
+            addView(botao(c, "Tentar de novo", Cfg.AZUL) { player.alternar() }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 20.d(); gravity = Gravity.CENTER_HORIZONTAL })
         }
-        addView(mensagem, LayoutParams(-2, -2, Gravity.CENTER))
+        addView(mensagem, LayoutParams(700.d(), -2, Gravity.CENTER))
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -351,7 +352,10 @@ class TelaVideo(
         rodinha.visibility = if (player.carregando && erro == null) View.VISIBLE else View.GONE
         mensagem.visibility = if (erro != null) View.VISIBLE else View.GONE
         textoErro.text = erro ?: ""
-        botaoAnterior?.alpha = if (player.temAnterior || player.posicaoMs > 4000) 1f else .4f
+        val ao_vivo = player.ehCanalTv
+        botaoAnterior?.alpha = if (player.temAnterior || (!ao_vivo && player.posicaoMs > 4000)) 1f else .4f
+        botaoVoltar10?.visibility = if (ao_vivo || lateralAberta) View.GONE else View.VISIBLE      // canal ao vivo: sem pular 10 s
+        botaoAvancar10?.visibility = if (ao_vivo || lateralAberta) View.GONE else View.VISIBLE
         botaoProxima?.alpha = if (player.temProxima) 1f else .4f
         botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE
         // vídeo muito longo (mais de 10 min) não é uma música: o botão da nota fica indisponível

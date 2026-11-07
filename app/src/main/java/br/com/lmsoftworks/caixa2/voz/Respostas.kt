@@ -408,25 +408,9 @@ object Respostas {
     /** Previsão de hoje pela cidade aproximada (IP), sem passar pela fala. null se a internet falhar. */
     fun climaHoje(ctx: Context): ClimaHoje? {
         val loc = localizacao(ctx) ?: return null
-        val lat = loc.second; val lon = loc.third
-        val m = getJson(
-            ctx,
-            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&current=temperature_2m,weather_code,is_day" +
-                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
-                "&timezone=auto&forecast_days=1"
-        ) ?: return null
-        val atual = m.optJSONObject("current") ?: return null
-        val d = m.optJSONObject("daily")
-        return ClimaHoje(
-            loc.first,
-            Math.round(atual.optDouble("temperature_2m")).toInt(),
-            d?.optJSONArray("temperature_2m_min")?.optDouble(0)?.let { Math.round(it).toInt() },
-            d?.optJSONArray("temperature_2m_max")?.optDouble(0)?.let { Math.round(it).toInt() },
-            d?.optJSONArray("precipitation_probability_max")?.optInt(0),
-            atual.optInt("weather_code"),
-            atual.optInt("is_day", 1) == 0
-        )
+        val p = previsaoCompleta(ctx, loc) ?: return null
+        val hoje = p.dias.firstOrNull()
+        return ClimaHoje(p.cidade, p.temp, hoje?.min, hoje?.max, hoje?.chuva, p.codigo, !p.dia)
     }
 
     /** Onde a caixa está para o clima: a cidade escolhida em Configurações ou, se não houver, a aproximada pelo IP. (nome, latitude, longitude) */
@@ -456,50 +440,90 @@ object Respostas {
         val min: Int, val max: Int, val chuva: Int, val horas: List<HoraPrevisao>, val dias: List<DiaPrevisao>, val dia: Boolean = true
     )
 
-    /** Previsão completa (agora, 36 horas, 15 dias) pela cidade aproximada (IP). null se a internet falhar. */
-    fun previsaoCompleta(ctx: Context): PrevisaoCompleta? {
-        val loc = localizacao(ctx) ?: return null
+    // Os três modelos globais de previsão (europeu, americano e alemão) quase nunca concordam num ponto só: a média deles erra menos que qualquer um.
+    private val MODELOS = listOf("ecmwf_ifs025", "gfs_seamless", "icon_seamless")
+
+    private fun mediaSerie(o: JSONObject, chave: String, i: Int): Double? {
+        var soma = 0.0; var n = 0
+        for (m in MODELOS) { val a = o.optJSONArray("${chave}_$m") ?: continue; if (i < a.length() && !a.isNull(i)) { soma += a.optDouble(i); n++ } }
+        return if (n == 0) null else soma / n
+    }
+
+    private fun algumCodigoAlto(o: JSONObject, i: Int): Boolean {
+        for (m in MODELOS) { val a = o.optJSONArray("weather_code_$m") ?: continue; if (i < a.length() && !a.isNull(i) && a.optInt(i) >= 95) return true }
+        return false
+    }
+
+    /** O código do tempo a partir da média dos modelos: chuva pela quantidade (mm), senão pela nebulosidade (%). */
+    private fun codigoDaMedia(nuvens: Double?, chuvaMm: Double?, chance: Double?, trovoada: Boolean): Int {
+        if (chuvaMm != null && chuvaMm >= 0.2 && (chance == null || chance >= 30)) {
+            return if (trovoada) 95 else when { chuvaMm >= 4.0 -> 65; chuvaMm >= 1.0 -> 63; else -> 61 }
+        }
+        return when { nuvens == null -> 3; nuvens < 12 -> 0; nuvens < 35 -> 1; nuvens < 60 -> 2; else -> 3 }
+    }
+
+    /** Previsão completa (agora, 36 horas, 15 dias) pela cidade escolhida ou aproximada (IP), pela média de três modelos. null se a internet falhar. */
+    fun previsaoCompleta(ctx: Context): PrevisaoCompleta? = localizacao(ctx)?.let { previsaoCompleta(ctx, it) }
+
+    private fun previsaoCompleta(ctx: Context, loc: Triple<String, Double, Double>): PrevisaoCompleta? {
         val lat = loc.second; val lon = loc.third
         val m = getJson(
             ctx,
-            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&current=temperature_2m,weather_code,wind_speed_10m,is_day" +
-                "&hourly=temperature_2m,weather_code,is_day" +
-                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+            "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&models=${MODELOS.joinToString(",")}" +
+                "&current=temperature_2m,cloud_cover,precipitation,weather_code,wind_speed_10m,is_day" +
+                "&hourly=temperature_2m,cloud_cover,precipitation,precipitation_probability,weather_code,is_day" +
+                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,cloud_cover_mean,weather_code" +
                 "&wind_speed_unit=kmh&timezone=auto&forecast_days=15"
         ) ?: return null
         val atual = m.optJSONObject("current") ?: return null
         val d = m.optJSONObject("daily") ?: return null
         val h = m.optJSONObject("hourly") ?: return null
         val datas = d.optJSONArray("time") ?: return null
-        val dMin = d.optJSONArray("temperature_2m_min"); val dMax = d.optJSONArray("temperature_2m_max")
-        val dChuva = d.optJSONArray("precipitation_probability_max"); val dCod = d.optJSONArray("weather_code")
         val dias = ArrayList<DiaPrevisao>()
         for (i in 0 until datas.length()) {
-            dias.add(DiaPrevisao(i, datas.getString(i), Math.round(dMin?.optDouble(i) ?: 0.0).toInt(), Math.round(dMax?.optDouble(i) ?: 0.0).toInt(), dChuva?.optInt(i) ?: 0, dCod?.optInt(i) ?: 0))
+            val mn = mediaSerie(d, "temperature_2m_min", i); val mx = mediaSerie(d, "temperature_2m_max", i)
+            if (mn == null || mx == null) continue      // além do alcance dos modelos
+            val chance = mediaSerie(d, "precipitation_probability_max", i)
+            val soma = mediaSerie(d, "precipitation_sum", i) ?: 0.0
+            val nuvens = mediaSerie(d, "cloud_cover_mean", i) ?: 50.0
+            val choveu = (chance ?: 0.0) >= 40 || soma >= 1.0
+            val cod = when {
+                !choveu -> codigoDaMedia(nuvens, null, null, false)
+                algumCodigoAlto(d, i) -> 95
+                soma >= 10.0 -> 63
+                else -> 80      // chuva provável de pouco volume: pancadas
+            }
+            dias.add(DiaPrevisao(i, datas.getString(i), Math.round(mn).toInt(), Math.round(mx).toInt(), Math.round(chance ?: 0.0).toInt(), cod))
         }
         // próximas horas: a partir da hora atual (a primeira é "agora", com a temperatura de agora)
-        val tempos = h.optJSONArray("time"); val hT = h.optJSONArray("temperature_2m"); val hC = h.optJSONArray("weather_code"); val hD = h.optJSONArray("is_day")
+        val tempos = h.optJSONArray("time")
         val agoraTxt = atual.optString("time").take(13)        // yyyy-MM-ddTHH
         var inicio = 0
         if (tempos != null) for (i in 0 until tempos.length()) if (tempos.getString(i).startsWith(agoraTxt)) { inicio = i; break }
+        // com vários modelos o Open-Meteo devolve o "current" já sem o nome do modelo (um só): o "agora" vem da média da série por hora
+        val ehDiaAgora = atual.optInt("is_day", 1) == 1
+        val tempAgora = mediaSerie(h, "temperature_2m", inicio) ?: (if (atual.has("temperature_2m")) atual.optDouble("temperature_2m") else return null)
+        val nuvensAgora = mediaSerie(h, "cloud_cover", inicio); val chuvaAgora = mediaSerie(h, "precipitation", inicio)
+        val trovoadaAgora = algumCodigoAlto(h, inicio)
         val horas = ArrayList<HoraPrevisao>()
         if (tempos != null) for (k in 0 until 36) {
             val i = inicio + k
             if (i >= tempos.length()) break
             val hora = tempos.getString(i).substring(11, 13).toInt()
-            val temp = if (k == 0) Math.round(atual.optDouble("temperature_2m")).toInt() else Math.round(hT?.optDouble(i) ?: 0.0).toInt()
-            val cod = if (k == 0) atual.optInt("weather_code") else (hC?.optInt(i) ?: 0)
-            val ehDia = if (k == 0) atual.optInt("is_day", 1) == 1 else (hD?.optInt(i, 1) ?: 1) == 1
+            val temp = if (k == 0) Math.round(tempAgora).toInt() else Math.round(mediaSerie(h, "temperature_2m", i) ?: continue).toInt()
+            val ehDia = if (k == 0) ehDiaAgora else (mediaSerie(h, "is_day", i) ?: 1.0) >= .5
+            val cod = if (k == 0) codigoDaMedia(nuvensAgora, chuvaAgora, null, trovoadaAgora)
+                      else codigoDaMedia(mediaSerie(h, "cloud_cover", i), mediaSerie(h, "precipitation", i), mediaSerie(h, "precipitation_probability", i), algumCodigoAlto(h, i))
             horas.add(HoraPrevisao(hora, temp, cod, ehDia))
         }
         val hoje = dias.firstOrNull()
+        val vento = atual.optDouble("wind_speed_10m", 0.0)
         return PrevisaoCompleta(
-            loc.first, Math.round(atual.optDouble("temperature_2m")).toInt(), atual.optInt("weather_code"),
-            Math.round(atual.optDouble("wind_speed_10m")).toInt(), hoje?.min ?: 0, hoje?.max ?: 0, hoje?.chuva ?: 0, horas, dias,
-            atual.optInt("is_day", 1) == 1
+            loc.first, Math.round(tempAgora).toInt(), codigoDaMedia(nuvensAgora, chuvaAgora, null, trovoadaAgora),
+            Math.round(vento).toInt(), hoje?.min ?: 0, hoje?.max ?: 0, hoje?.chuva ?: 0, horas, dias, ehDiaAgora
         )
     }
+
 
     /** A previsão de hoje direto do Open-Meteo, pela cidade aproximada (IP). Sem busca na web: serve para as rotinas ("bom dia"). */
     fun climaDeHoje(ctx: Context): String? = clima(ctx, "tempo")

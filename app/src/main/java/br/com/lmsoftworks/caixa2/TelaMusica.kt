@@ -218,6 +218,7 @@ class TelaMusica(
     private val artista = texto(c, "", 28, Color.parseColor("#E3EAFB"))
     private val album = texto(c, "", 21, Tema.TEXTO2)
     private val barra = BarraProgresso(c)
+    private val tempos = LinearLayout(c)
     private val tempoAtual = texto(c, "0:00", 19, Tema.TEXTO2).apply { fontFeatureSettings = "tnum" }
     private val tempoTotal = texto(c, "", 19, Tema.TEXTO2).apply { fontFeatureSettings = "tnum" }
     private val botaoPlay = FrameLayout(c)
@@ -255,7 +256,7 @@ class TelaMusica(
         barra.aoArrastar = { f -> if (musica.duracaoMs > 0) tempoAtual.text = formatar((f * musica.duracaoMs).toLong()) }
         barra.aoSoltar = { f -> if (musica.duracaoMs > 0) musica.buscar((f * musica.duracaoMs).toLong()) }
         conteudo.addView(barra, LayoutParams(1216.d() - COLUNA_X.d() + 24.d(), 44.d()).apply { leftMargin = COLUNA_X.d() - 12.d(); topMargin = (BARRA_Y - 22 - 64).d() })
-        val tempos = LinearLayout(c).apply { addView(tempoAtual, LinearLayout.LayoutParams(0, -2, 1f)); addView(tempoTotal) }
+        tempos.apply { addView(tempoAtual, LinearLayout.LayoutParams(0, -2, 1f)); addView(tempoTotal) }
         conteudo.addView(tempos, LayoutParams(1216.d() - COLUNA_X.d(), -2).apply { leftMargin = COLUNA_X.d(); topMargin = (BARRA_Y + 24 - 64).d() })
 
         val controles = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -347,7 +348,7 @@ class TelaMusica(
         seletor.visibility = if ((tem || painel) && !proximasAbertas) View.VISIBLE else View.GONE
         if (painel) { seletor.ativo = "musica"; seletor.videoDisponivel = false }
         findMenu()?.visibility = if (tem || painel) View.VISIBLE else View.GONE
-        val local = tem && musica.emLocal && musica.filaLocal.size > 1
+        val local = tem && musica.emLocal && musica.filaLocal.size > 1 && !musica.ehRadio
         if (!local && proximasAbertas) alternarProximas(false)
         botaoProximas.visibility = if (local && !proximasAbertas) View.VISIBLE else View.GONE
         if (proximasAbertas) proximas.atualizar(musica.filaLocal, musica.indiceLocal)
@@ -362,17 +363,19 @@ class TelaMusica(
             artista.text = musica.artista.ifEmpty { "Artista desconhecido" }
             album.text = musica.album
             album.visibility = if (musica.album.isEmpty()) View.GONE else View.VISIBLE
-            rotulo.text = "TOCANDO AGORA · " + if (musica.emLocal) "YOUTUBE" else "BLUETOOTH"
+            rotulo.text = "TOCANDO AGORA · " + if (musica.ehRadio) "RÁDIO AO VIVO" else if (musica.emLocal) "YOUTUBE" else "BLUETOOTH"
             capa.imagem = musica.capa
             capa.semente = musica.titulo + musica.artista
             iconePlay.setImageResource(if (musica.tocando) R.drawable.ic_pausar else R.drawable.ic_tocar)
             seletor.ativo = "musica"
-            seletor.videoDisponivel = musica.emLocal       // só a música tocada pelo app tem o clipe para abrir
+            seletor.videoDisponivel = musica.emLocal && !musica.ehRadio       // só a música tocada pelo app tem o clipe para abrir
             barra.corPreenchida = Cfg.AZUL                  // a cor do trecho tocado é a da capa
         }
         val pos = musica.posicaoMs()
         // O celular não aceita pular para um ponto da música pelo Bluetooth (testado), então a barra só mostra o tempo.
-        barra.ativa = (PODE_BUSCAR || musica.emLocal) && musica.duracaoMs > 0
+        barra.ativa = (PODE_BUSCAR || musica.emLocal) && musica.duracaoMs > 0 && !musica.ehRadio
+        barra.visibility = if (musica.ehRadio) View.INVISIBLE else View.VISIBLE      // rádio ao vivo: sem barra nem tempos
+        tempos.visibility = if (musica.ehRadio) View.INVISIBLE else View.VISIBLE
         tempoAtual.text = formatar(pos)
         if (musica.duracaoMs > 0) {
             tempoTotal.text = formatar(musica.duracaoMs)

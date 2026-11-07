@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
@@ -76,6 +77,7 @@ class FitaBle(
     private var esperandoDesde = 0L
     private var reconexaoImediata = false
     private var scanRodando = false
+    private var falhasSeguidas = 0      // tentativas que terminaram sem a fita ficar pronta
     private var proximoScan = 0L
     private var receptorRegistrado = false
 
@@ -136,6 +138,7 @@ class FitaBle(
             if (!ativo) return
             val a = adaptador
             if (a != null && a.isEnabled) {
+                if (pronta && scanRodando) pararScan()      // conectada: a busca não serve mais (e ocupava o rádio que o Wi-Fi divide com o Bluetooth)
                 if (!scanRodando && agora() >= proximoScan && !pronta) iniciarScan(a)
                 decidir()
             }
@@ -149,6 +152,8 @@ class FitaBle(
         if (!a.isEnabled) return
         val t = agora()
         val d = dispositivo
+        // fita sumida (desligada, longe): a espera entre tentativas diretas dobra (20 s, 40 s, 80 s... até 5 min) para não ocupar o rádio à toa
+        val espera = minOf(SEM_ANUNCIO_MS shl minOf(falhasSeguidas, 4), 300_000L)
         if (reconexaoImediata) {
             reconexaoImediata = false
             log("link caiu: reconectando na hora, como o Zengge")
@@ -158,8 +163,8 @@ class FitaBle(
         if (t - fimUltima < PAUSA_ENTRE_TENTATIVAS_MS) return
         if (d != null && t - ultimoVisto < VISTO_RECENTE_MS) {
             abrir(d)
-        } else if (t - esperandoDesde > SEM_ANUNCIO_MS) {
-            log("fita nao apareceu na busca ha ${SEM_ANUNCIO_MS / 1000} s: tentando direto")
+        } else if (t - esperandoDesde > espera) {
+            log("fita nao apareceu na busca ha ${espera / 1000} s: tentando direto")
             esperandoDesde = t
             abrir(d ?: a.getRemoteDevice(endereco))
         }
@@ -185,6 +190,7 @@ class FitaBle(
         conexao = null
         fimUltima = agora(); esperandoDesde = fimUltima
         proximoScan = 0
+        if (c.foiPronta) falhasSeguidas = 0 else falhasSeguidas++
         if (c.foiPronta && !c.porMim && ativo) reconexaoImediata = true
         ouvinte.aoDesconectar()
         ouvinte.aoMudarEstado()
@@ -218,9 +224,12 @@ class FitaBle(
         try {
             val s = a.bluetoothLeScanner
             if (s == null) { proximoScan = agora() + 2000; return }
-            s.startScan(null, ScanSettings.Builder().setReportDelay(0L).setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCb)
+            // só o endereço da fita (o filtro vale no próprio chip) e no modo de pouco uso do rádio: a busca contínua em LOW_LATENCY sem filtro
+            // deixava o Wi-Fi da caixa com 1/6 da velocidade, porque os dois dividem o mesmo chip
+            val filtro = ScanFilter.Builder().setDeviceAddress(endereco).build()
+            s.startScan(listOf(filtro), ScanSettings.Builder().setReportDelay(0L).setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build(), scanCb)
             scanRodando = true
-            log("busca continua ligada (LOW_LATENCY, sem filtro)")
+            log("busca ligada (LOW_POWER, so a fita)")
         } catch (e: Exception) {
             log("nao foi possivel ligar a busca: ${e.message}")
             proximoScan = agora() + 3000

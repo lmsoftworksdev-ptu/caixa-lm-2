@@ -137,9 +137,10 @@ class TelaAlarmes(
     // ------------------------------------------------------------------ navegação
 
     /** Abre numa aba ("alarmes", "lembretes" ou "listas"), já com o item de [id] selecionado (se houver). */
-    fun abrirAba(nome: String, id: Long? = null) {
+    fun abrirAba(nome: String, id: Long? = null, lista: String? = null) {
         val i = ids.indexOf(nome).coerceAtLeast(0)
         aba = i
+        if (lista != null && lista in listas.nomes) listaSel = lista
         if (id != null) when (i) { 0 -> alarmeSel = id.toInt(); 1 -> lembreteSel = id }
         atualizar()
     }

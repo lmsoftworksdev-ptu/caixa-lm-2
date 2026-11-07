@@ -35,6 +35,7 @@ object Miniaturas {
         override fun sizeOf(chave: String, b: Bitmap) = b.byteCount
     }
     private val fila = Executors.newFixedThreadPool(4) { r -> Thread { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() } }
+    private val filaRapida = Executors.newFixedThreadPool(8) { r -> Thread { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() } }
     private val principal = Handler(Looper.getMainLooper())
     private var pasta: java.io.File? = null
     private var gravadas = 0
@@ -68,7 +69,7 @@ object Miniaturas {
      * Tenta cada endereço da lista, do melhor para o pior, até um funcionar. [ladoMax] é a largura a partir da qual a imagem ainda é
      * reduzida pela metade ao decodificar: cartões pequenos (Mídia) usam um valor baixo, para não estourar a memória do Moto G3.
      */
-    fun carregar(urls: List<String>, alvo: ImageView, ladoMax: Int = 480) {
+    fun carregar(urls: List<String>, alvo: ImageView, ladoMax: Int = 480, rapido: Boolean = false) {
         val lista = ajustar(urls, ladoMax)
         val url = lista.firstOrNull()
         alvo.tag = url
@@ -76,17 +77,18 @@ object Miniaturas {
         val chave = "$ladoMax|$url"
         cache.get(chave)?.let { alvo.setImageBitmap(it); return }      // já na memória: aparece na hora, sem piscar
         alvo.setImageDrawable(null)
-        fila.execute {
+        (if (rapido) filaRapida else fila).execute {
             try {
                 val arquivo = pasta?.let { java.io.File(it, nomeDe(url)) }
                 var bytes: ByteArray? = try { arquivo?.takeIf { it.isFile && it.length() > 0 }?.readBytes() } catch (e: Exception) { null }
                 if (bytes == null) {
                     // se nenhum endereço responder, tenta de novo (a rede da caixa oscila): até 4 rodadas, com pausa crescente
-                    for (rodada in 0 until 4) {
+                    // rádios: logos quebrados são comuns; uma só tentativa e tempos curtos, para não segurar a fila das outras imagens
+                    for (rodada in 0 until (if (rapido) 1 else 4)) {
                         for (u in lista) {
-                            try { bytes = URL(u).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.getInputStream().use { it.readBytes() }; break } catch (e: Exception) { }
+                            try { bytes = URL(u).openConnection().apply { connectTimeout = if (rapido) 3000 else 5000; readTimeout = if (rapido) 5000 else 8000 }.getInputStream().use { it.readBytes() }; break } catch (e: Exception) { }
                         }
-                        if (bytes != null) break
+                        if (bytes != null || rapido) break
                         Thread.sleep(1500L * (rodada + 1))
                     }
                     if (bytes == null) return@execute

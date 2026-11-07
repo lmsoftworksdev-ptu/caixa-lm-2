@@ -31,6 +31,8 @@ class EscutaAssistente(
     private val comandos: Recognizer?,
     private val livre: Recognizer?,
     private val aoParcial: (String) -> Unit,
+    private val oww: OpenWakeWord?,
+    private val aoChamadaOww: (Float) -> Unit,
     private val aoTexto: (campo: String, json: String) -> Unit
 ) {
     private companion object {
@@ -41,6 +43,7 @@ class EscutaAssistente(
         const val NIVEL_SILENCIO = 25f
         const val SILENCIO_FINAL_MS = 1200L     // quanto silêncio depois da fala encerra o pedido
         const val SILENCIO_COMANDO_MS = 700L    // idem, quando o reconhecimento offline já fechou um comando fixo completo
+        const val LIMITE_OWW = 0.5f             // nota do openWakeWord a partir da qual vale como "Alexa"
         const val ESPERA_FALA_MS = 9000L        // quanto espera a pessoa começar a falar
         const val PEDIDO_MAXIMO_MS = 16000L
         const val BLOCOS_FALA_MINIMOS = 4       // menos que isso (0,4 s de voz) é ruído, não pedido: nada vai ao Gemini
@@ -55,6 +58,8 @@ class EscutaAssistente(
     private var threadMic: Thread? = null
     private var threadVosk: Thread? = null
     private val fila = LinkedBlockingQueue<Bloco>()
+    private val filaOww = LinkedBlockingQueue<ShortArray>(60)      // áudio contínuo para o openWakeWord (descarta se a thread atrasar)
+    private var threadOww: Thread? = null
     private val efeitos = ArrayList<android.media.audiofx.AudioEffect>()
 
     // estado do pedido em andamento (mexido só pela thread do microfone)
@@ -103,6 +108,7 @@ class EscutaAssistente(
         } catch (e: Throwable) { Log.d(TAG, "microfone: sem efeitos: $e") }
         rodando = true
         threadVosk = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT); lacoVosk() }, "escuta-vosk").also { it.start() }
+        if (oww != null) threadOww = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT); lacoOww(oww) }, "escuta-oww").also { it.start() }
         threadMic = Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO); lacoMicrofone(gr) }, "escuta-mic").also { it.start() }
         return true
     }
@@ -147,6 +153,7 @@ class EscutaAssistente(
                     bloco[i] = when { v > Short.MAX_VALUE -> Short.MAX_VALUE; v < Short.MIN_VALUE -> Short.MIN_VALUE; else -> v.toInt().toShort() }
                 }
                 nivel = min(1f, rmsBruto / 3000f)
+                if (oww != null && !pedindo) filaOww.offer(bloco.copyOf(n))
                 if (++blocosLog % 15 == 0) Log.d(TAG, "mic: nivel=${rmsBruto.toInt()} ganho=${"%.1f".format(ganho)} piso=${pisoSala.toInt()} k=${"%.2f".format(Ajustes.fatorMic())} pedindo=$pedindo")
 
                 if (pedidoNovo) { pedidoNovo = false; iniciarGravacao() }
@@ -161,7 +168,9 @@ class EscutaAssistente(
                     val voz = rmsBruto > max(45f * k, pisoSala * 1.8f * k)      // sensível: pega voz mais baixa ou mais longe
                     if (voz) restoVoz = 10 else if (restoVoz > 0) restoVoz--
                     val copia = bloco.copyOf(n)
-                    if (voz || restoVoz > 0) {
+                    if (oww != null) {
+                        // quem detecta "Alexa" é o openWakeWord: o Vosk não recebe o áudio da chamada (gastava um núcleo decodificando a música)
+                    } else if (voz || restoVoz > 0) {
                         if (!enviandoChamada) { enviandoChamada = true; for (a in antes) fila.offer(Bloco(a, Bloco.CHAMADA)); antes.clear() }
                         if (fila.size > 25) fila.poll()
                         fila.offer(Bloco(copia, Bloco.CHAMADA))
@@ -179,6 +188,31 @@ class EscutaAssistente(
             efeitos.forEach { try { it.release() } catch (_: Throwable) {} }
             efeitos.clear()
             fila.offer(Bloco(null, Bloco.ENCERRAR))      // acorda e encerra a thread do reconhecimento
+        }
+    }
+
+    /** Thread do openWakeWord: recebe o áudio contínuo, calcula a nota de "Alexa" a cada 80 ms e avisa quando passa do limite. */
+    private fun lacoOww(d: OpenWakeWord) {
+        var ultimoLog = 0L
+        var maximo = 0f
+        var estavaPedindo = false
+        try {
+            while (rodando) {
+                val dados = filaOww.poll(300, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+                // durante o pedido o detector não ouve; ao voltar, começa do zero (o som antigo não pode chamar de novo)
+                if (pedindo) { estavaPedindo = true; filaOww.clear(); continue }
+                if (estavaPedindo) { estavaPedindo = false; d.reiniciar(); filaOww.clear(); continue }
+                val nota = d.alimentar(dados, dados.size)
+                if (nota < 0f) continue
+                if (nota > maximo) maximo = nota
+                val agora = System.currentTimeMillis()
+                if (nota >= LIMITE_OWW) { aoChamadaOww(nota); d.reiniciar(); filaOww.clear() }      // a mesma fala não chama duas vezes
+                if (agora - ultimoLog > 3000L) { Log.d(TAG, "oww: maior nota nos ultimos 3 s=${"%.2f".format(maximo)} (${"%.0f".format(d.msMedio)} ms por chunk, fila=${filaOww.size})"); ultimoLog = agora; maximo = 0f }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "openWakeWord parou: $e")
+        } finally {
+            d.fechar()
         }
     }
 
@@ -296,6 +330,7 @@ class EscutaAssistente(
         rodando = false
         try { threadMic?.join(1500) } catch (_: InterruptedException) {}
         try { threadVosk?.join(3000) } catch (_: InterruptedException) {}
-        threadMic = null; threadVosk = null
+        try { threadOww?.join(1500) } catch (_: InterruptedException) {}
+        threadMic = null; threadVosk = null; threadOww = null
     }
 }

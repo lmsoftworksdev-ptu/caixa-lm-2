@@ -41,6 +41,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     var indice = -1; private set
     var item: Resultado? = null; private set
     var ehVideo = false; private set
+    /** O que toca é uma rádio da internet (fluxo ao vivo, sem duração nem fila). */
+    val ehRadio: Boolean get() = !ehVideo && item?.let { ehFluxoDireto(it.url) } == true
+    /** O que toca é um canal de TV ao vivo (vídeo de endereço direto, fora do YouTube). */
+    val ehCanalTv: Boolean get() = ehVideo && item?.let { ehFluxoDireto(it.url) } == true
     var carregando = false; private set
     var erro: String? = null; private set
     var capa: Bitmap? = null; private set
@@ -84,7 +88,16 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun novoExo(): ExoPlayer {
         val controle = ControleCarga()
         ultimoControle = controle
-        val p = ExoPlayer.Builder(ctx).setLoadControl(controle).build()
+        // o som passa pelo equalizador de software do menu Equalizador (sem os efeitos do Android, que fazem estalo)
+        val renderers = object : androidx.media3.exoplayer.DefaultRenderersFactory(ctx) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
+                androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessors(arrayOf(EqualizadorSoftware()))
+                    .build()
+        }
+        val p = ExoPlayer.Builder(ctx, renderers).setLoadControl(controle).build()
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (p !== player) return
@@ -99,6 +112,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 aoMudar()
             }
             override fun onRenderedFirstFrame() { if (p === player) { primeiroQuadro = true; aoMudar() } }
+            override fun onMediaMetadataChanged(m: androidx.media3.common.MediaMetadata) {
+                // rádio: a música que está passando agora (o fluxo manda "Artista - Música") aparece no lugar do nome da cidade
+                if (p !== player || !ehRadio) return
+                val t = m.title?.toString()?.trim().orEmpty()
+                if (t.isNotEmpty() && t != item?.titulo) { item = item?.copy(canal = t); aoMudar() }
+            }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; if (isPlaying) aoComecou?.invoke(); aoMudar() } }
             override fun onPlayerError(e: PlaybackException) {
                 if (p !== player) { if (p === proximoPlayer) cancelarFade() else if (p === preVideo?.player) liberarPreVideo(); return }
@@ -106,7 +125,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 // endereço vencido ou rede que caiu: pede um novo e retoma de onde parou (até 3 vezes)
                 val r = item
                 if (r != null && recuperacoes < 3) { recuperacoes++; retomarEm = p.currentPosition; iniciarItem(r, ehVideo, true); return }
-                carregando = false; tocando = false; erro = "Não foi possível reproduzir"; aoMudar()
+                carregando = false; tocando = false; erro = if (ehCanalTv) "Canal indisponível no momento" else "Não foi possível reproduzir"; aoMudar()
             }
         })
         p.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
@@ -205,7 +224,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     private fun verificarPreVideo() {
         val p = player ?: return
-        if (!tocando || erro != null || !primeiroQuadro || repetindo || p.currentPosition < 3000) return
+        if (ehCanalTv || !tocando || erro != null || !primeiroQuadro || repetindo || p.currentPosition < 3000) return      // canal de TV: nada de pré-carga
         val proximo = fila.getOrNull(indice + 1) ?: relacionadosNovos().firstOrNull() ?: return
         // etapa 1: descobre o endereço dos dois próximos (só texto, quase não gasta internet)
         prefetchVideo(proximo)      // o seguinte primeiro, sem pausa
@@ -302,18 +321,20 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             try {
                 val t0 = SystemClock.uptimeMillis()
                 // música é música e vídeo é vídeo: o áudio vem sempre da própria faixa pedida
-                val fonte = pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video)
+                val fonte = if (ehFluxoDireto(r.url)) Fonte(null, null, r.url, musica = true) else (pronta?.fonte ?: videoPronto ?: YouTube.resolver(r.url, soAudio = !video))
                 Log.d(TAG, "faixa '${r.titulo}': abrir ${if (video) "o vídeo" else "o áudio"} ${SystemClock.uptimeMillis() - t0} ms")
+                if (!ehFluxoDireto(r.url)) Falhas.youtubeOk()
                 handler.post { if (minha == geracao) { relacionados = fonte.relacionados; modoMusica = fonte.musica; infoExtra = infoDe(fonte); tocarFonte(fonte); aoMudar() } }
             } catch (e: Exception) {
                 Log.w(TAG, "nao foi possivel abrir ${r.url}", e)
+                if (!ehFluxoDireto(r.url)) Falhas.youtubeFalhou(e)
                 handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível reproduzir"; aoMudar() } }
             }
         }.start()
     }
 
     /** Capas já baixadas (por endereço da faixa): ao voltar para uma música, a capa aparece na hora, sem o quadrado de cor sólida. */
-    private val capas = android.util.LruCache<String, Bitmap>(24)
+    private val capas = android.util.LruCache<String, Bitmap>(8)
     private var capaProvisoria: Pair<String, Bitmap>? = null
 
     /** Capa para mostrar enquanto a de verdade ainda não chegou (ex.: a imagem do vídeo de onde a música veio). */
@@ -332,7 +353,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 val b = BitmapFactory.decodeByteArray(bytes, 0, bytes!!.size) ?: return@Thread
                 // o YouTube manda 16:9 (às vezes com tarja preta em cima e embaixo): recorta o centro, quadrado, para a capa
                 val lado = minOf(b.width, b.height)
-                val quadrada = Bitmap.createBitmap(b, (b.width - lado) / 2, (b.height - lado) / 2, lado, lado)
+                val recorte = Bitmap.createBitmap(b, (b.width - lado) / 2, (b.height - lado) / 2, lado, lado)
+                // a capa aparece em 400 px: 512 basta (a original tem até 720 px e ocupava 2 MB cada)
+                val quadrada = if (recorte.width > 512) Bitmap.createScaledBitmap(recorte, 512, 512, true).also { if (recorte !== b) recorte.recycle() } else recorte
+                if (b !== quadrada && b !== recorte) b.recycle()
                 handler.post { capas.put(r.url, quadrada); if (minha == geracao) { capa = quadrada; aoMudar() } }
             } catch (e: Exception) { Log.w(TAG, "sem capa", e) }
         }.start()
@@ -373,7 +397,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val p = criar()
         val origem = origemDe(fonte)
         p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !ehVideo).build()
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !ehVideo).setMaxVideoSize(if (ehCanalTv) 1280 else Int.MAX_VALUE, if (ehCanalTv) 720 else Int.MAX_VALUE).build()      // canal ao vivo: no máximo 720p (o aparelho e a internet agradecem)
         p.setMediaSource(origem, retomarEm)
         retomarEm = 0L
         cancelarRampa(); fracaoVolume = 1f
@@ -386,8 +410,21 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (vaiTocar) { p.volume = 0f; rampa(0f, 1f, 1000L) { } } else p.volume = volumeBase
     }
 
+    /** Rádio da internet: a URL do fluxo (mp3, aac, HLS...) não é do YouTube. */
+    private fun ehFluxoDireto(url: String) = !(url.contains("youtube.com") || url.contains("youtu.be"))
+
+    private fun origemRadio(url: String): MediaSource {
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 7.1) CaixaLM2/1.0")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000)
+        return androidx.media3.exoplayer.source.DefaultMediaSourceFactory(DefaultDataSource.Factory(ctx, http)).createMediaSource(MediaItem.fromUri(url))
+    }
+
     private fun origemDe(fonte: Fonte): MediaSource {
-        val origem: MediaSource = if (fonte.unicaUrl != null) {
+        val origem: MediaSource = if (fonte.unicaUrl != null && ehFluxoDireto(fonte.unicaUrl)) {
+            origemRadio(fonte.unicaUrl)
+        } else if (fonte.unicaUrl != null) {
             fabricaPara(fonte.unicaUrl).createMediaSource(MediaItem.fromUri(fonte.unicaUrl))
         } else {
             MergingMediaSource(
@@ -398,18 +435,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         return origem
     }
 
-    /** As URLs do YouTube só aceitam o "nome de aplicativo" (User-Agent) do cliente que as gerou (c= na URL). */
-    private fun agenteDe(url: String): String {
-        val cliente = Uri.parse(url).getQueryParameter("c").orEmpty()
-        return try {
-            when (cliente) {
-                "ANDROID", "ANDROID_VR", "ANDROID_TESTSUITE" -> org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.getAndroidUserAgent(null)
-                "IOS" -> org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.getIosUserAgent(null)
-                "VISIONOS" -> org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.getVisionOsUserAgent(null)
-                else -> AppDownloader.USER_AGENT
-            }
-        } catch (e: Throwable) { AppDownloader.USER_AGENT }
-    }
+    /** O "nome de aplicativo" das requisições ao YouTube: o mesmo do extrator (a partir da versão 0.27 ele só gera endereços do cliente web). */
+    private fun agenteDe(url: String): String = AppDownloader.USER_AGENT
 
     private fun fabricaPara(url: String): ProgressiveMediaSource.Factory {
         val http = DefaultHttpDataSource.Factory()
@@ -528,6 +555,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     fun anterior() {
+        if (ehRadio || ehCanalTv) { if (indice > 0) trocarSuave { indice--; iniciarItem(fila[indice], ehVideo) }; return }      // rádio ao vivo: não há começo para voltar
         if (posicaoMs > 4000 || indice == 0) player?.seekTo(0)
         else trocarSuave { indice--; iniciarItem(fila[indice], ehVideo) }
     }

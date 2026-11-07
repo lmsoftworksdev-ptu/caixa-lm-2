@@ -6,6 +6,7 @@ import android.app.Application
 class AppCaixa : Application() {
     override fun onCreate() {
         super.onCreate()
+        Falhas.iniciar(this)
         Ajustes.iniciar(this)
         FusoHorario.aplicar()
     }

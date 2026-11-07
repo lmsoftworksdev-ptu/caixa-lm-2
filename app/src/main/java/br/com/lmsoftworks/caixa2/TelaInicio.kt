@@ -112,18 +112,7 @@ class CapaMini(c: Context) : View(c) {
 /** Tipo de ícone animado do clima ("sol", "nublado" ou "chuva") para o código do tempo do Open-Meteo. */
 fun Respostas.ClimaHoje.tipo(): String = tipoDoCodigo(codigo, noite)
 
-fun Respostas.ClimaHoje.descricao(): String = when (codigo) {
-    0, 1 -> if (noite) "Céu limpo" else "Ensolarado"
-    2 -> "Parcialmente nublado"
-    3 -> "Nublado"
-    45, 48 -> "Neblina"
-    in 51..57 -> "Garoa"
-    in 61..67 -> "Chuva"
-    in 71..77 -> "Neve"
-    in 80..82 -> "Pancadas de chuva"
-    in 95..99 -> "Tempestade"
-    else -> "Tempo"
-}
+fun Respostas.ClimaHoje.descricao(): String = descricaoDoCodigo(codigo, noite)
 
 /**
  * Botão do Início da v3: quadrado de 104 com degradê a 145°, linha clara no topo interno, leve escurecido embaixo e reflexo
@@ -195,7 +184,7 @@ class BotaoInicio(c: Context, private val cor1: Int, private val cor2: Int, icon
  */
 class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) : FrameLayout(c) {
 
-    private companion object { const val LARGURA_FILEIRA = 592 }
+    private companion object { const val LARGURA_FILEIRA = 694 }
 
     private val relogio = texto(c, "00:00", 208, Color.WHITE).apply {
         typeface = Tema.OUTFIT
@@ -231,27 +220,32 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     /** Toque no play/pause do cartão de música. */
     var aoPlayPause: (() -> Unit)? = null
     private var chave = ""
+    private var padV = 20      // espaço de cima/baixo de cada linha do cartão (menor quando a lista de compras está presente, para caber)
+    private var avisoId: String? = null; private var avisoTitulo: String? = null; private var avisoDetalhe: String? = null
+    private var listaNome: String? = null; private var listaItens: List<String> = emptyList()
+    private val corAviso = Color.parseColor("#FF6B7A")
+    private val corLista = Color.parseColor("#7CE0A0")
 
     init {
         clipChildren = false
         clipToPadding = false
-        // a hora e a data ficam centralizadas sobre a fileira dos 5 botões (5 × 104 + 4 × 18 = 592)
+        // a hora e a data ficam centralizadas sobre a fileira dos 6 botões (6 × 104 + 5 × 14 = 694)
         addView(relogio, LayoutParams(LARGURA_FILEIRA.d(), -2).apply { leftMargin = 64.d(); topMargin = 78.d() })
         addView(data, LayoutParams(LARGURA_FILEIRA.d(), -2).apply { leftMargin = 64.d(); topMargin = 321.d() })
 
         val fila = LinearLayout(c).apply { clipChildren = false; clipToPadding = false }
         val botoes = listOf(
-            Triple("midia", "Mídia", "#FF7A5C" to "#D3264B"), Triple("led", "Luzes LED", "#8BE36B" to "#1E9E4A"),
+            Triple("midia", "Mídia", "#FF7A5C" to "#D3264B"), Triple("radios", "Rádios", "#5FDCEB" to "#1B8FB8"), Triple("amplificador", "Equalizador", "#FF7AC0" to "#C2257D"),
             Triple("alarmes", "Alarmes", "#B48CFF" to "#6232E0"), Triple("receitas", "Receitas", "#FF9A3D" to "#E8731F"),
             Triple("config", "Configurações", "#9AA6BE" to "#46506A")
         )
-        val icones = mapOf("led" to R.drawable.ic_bulb, "alarmes" to R.drawable.ic_alarme,
+        val icones = mapOf("amplificador" to R.drawable.ic_equalizador, "radios" to R.drawable.ic_radio, "alarmes" to R.drawable.ic_alarme,
             "receitas" to R.drawable.ic_chef, "config" to R.drawable.ic_config)
         for ((i, b) in botoes.withIndex()) {
             val icone: View = if (b.first == "midia") IconeMidia(c) else ImageView(c).apply { setImageResource(icones.getValue(b.first)); setColorFilter(Color.WHITE) }
             val bt = BotaoInicio(c, Color.parseColor(b.third.first), Color.parseColor(b.third.second), icone, b.second)
             bt.setOnClickListener { aoAbrir(b.first) }
-            fila.addView(bt, LinearLayout.LayoutParams(104.d(), 104.d()).apply { if (i > 0) leftMargin = 18.d() })
+            fila.addView(bt, LinearLayout.LayoutParams(104.d(), 104.d()).apply { if (i > 0) leftMargin = 14.d() })
         }
         addView(fila, LayoutParams(-2, -2).apply { leftMargin = 64.d(); topMargin = (720 - 62 - 104).d() })
 
@@ -271,7 +265,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private fun linha(id: String, icone: View, corte: Boolean, miolo: View): LinearLayout = LinearLayout(c).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, 20.d(), 0, 20.d())
+        setPadding(0, padV.d(), 0, padV.d())
         isClickable = true
         addView(icone, LinearLayout.LayoutParams(56.d(), 56.d()))
         addView(miolo, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 18.d() })
@@ -305,7 +299,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
             val detalhe = listOfNotNull(cl.min?.let { "Mín $it°" }, cl.max?.let { "Máx $it°" }, cl.chuva?.let { "Chuva $it%" }).joinToString(" · ")
             if (detalhe.isNotEmpty()) addView(TextoRolante(c, detalhe, 18, Tema.TEXTO2), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
         }
-        return linha("clima", caixaIcone(cor, fundo, IconeAnimado(c, tipo, cor, 30)), false, miolo)
+        return linha("clima", caixaIcone(cor, fundo, IconeClima(c, tipo, 46)), false, miolo)
     }
 
     private fun linhaMusica(titulo: String): View {
@@ -330,7 +324,7 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
         return LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 20.d(), 0, 20.d())
+            setPadding(0, padV.d(), 0, padV.d())
             isClickable = true
             addView(capa, LinearLayout.LayoutParams(88.d(), 88.d()))
             addView(textos, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 16.d(); rightMargin = 12.d() })
@@ -378,11 +372,17 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
     /** Refaz o cartão só com os itens que existem; quem some libera o lugar e os de baixo sobem (sem buraco no meio). */
     private fun refazer() {
-        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista|$musicaTocando|${musicaCapa?.hashCode()}|$semDadosModo"
+        val nova = "${clima?.temp}|${clima?.codigo}|${clima?.min}|${clima?.max}|${clima?.chuva}|${clima?.cidade}|$alarmeTxt|$alarmeNome|$lembreteTxt|$lembreteQuando|$musicaTxt|$musicaArtista|$musicaTocando|${musicaCapa?.hashCode()}|$semDadosModo|$avisoId|$avisoTitulo|$avisoDetalhe|$listaNome|${listaItens.joinToString("¦")}"
         if (nova == chave) return
         chave = nova
         cartao.removeAllViews()
         val linhas = ArrayList<View>()
+        padV = if (listaNome != null && listaItens.isNotEmpty()) 12 else 20
+        // aviso de falha: sempre no alto, para ser visto
+        if (avisoId != null && avisoTitulo != null) {
+            val id = "aviso:$avisoId"
+            linhas.add(linha(id, caixaIcone(corAviso, Color.parseColor("#33FF4D5E"), icone(c, R.drawable.ic_alerta, 28, corAviso)), false, textoLinha(avisoTitulo!!, avisoDetalhe ?: "")))
+        }
         clima?.let { linhas.add(linhaClima(it)) }
         // tocando agora: cartão logo abaixo do clima (miniatura, título, artista e play/pause); alarme e lembrete ficam depois
         musicaTxt?.let { linhas.add(linhaMusica(it)) }
@@ -394,9 +394,52 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
             linhas.add(linha("lembretes", caixaIcone(corLembrete, Color.parseColor("#29FFBE5A"), icone(c, R.drawable.ic_sino, 28, corLembrete)), false,
                 textoLinha(it, "Lembrete" + (lembreteQuando?.let { q -> " · ${q.replaceFirstChar { ch -> ch.lowercase() }}" } ?: ""))))
         }
+        val temLista = listaNome != null && listaItens.isNotEmpty()
         for ((i, l) in linhas.withIndex()) {
             cartao.addView(l, LinearLayout.LayoutParams(-1, -2))
-            if (i < linhas.size - 1) cartao.addView(View(c).apply { setBackgroundColor(Cfg.DIVISOR) }, LinearLayout.LayoutParams(-1, 1.d().coerceAtLeast(1)))
+            if (i < linhas.size - 1 || temLista) cartao.addView(View(c).apply { setBackgroundColor(Cfg.DIVISOR) }, LinearLayout.LayoutParams(-1, 1.d().coerceAtLeast(1)))
+        }
+        montarLista()
+    }
+
+    /** Mostra a lista de compras no fim do cartão: só os itens pendentes; o que não couber rola com o dedo. */
+    private fun montarLista() {
+        val nome = listaNome ?: return
+        if (listaItens.isEmpty()) return
+        val caixa = CartaoLista(nome, listaItens)
+        cartao.addView(caixa, LinearLayout.LayoutParams(-1, 0, 1f))
+    }
+
+    /** Cartão da lista de compras: título e contagem em cima, e os itens numa área que rola. Ocupa só o espaço que sobrou no cartão (até 190). */
+    private inner class CartaoLista(nome: String, itens: List<String>) : LinearLayout(c) {
+        init {
+            orientation = VERTICAL
+            isClickable = true
+            setPadding(0, 12.d(), 0, 12.d())
+            val cab = LinearLayout(c).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(caixaIcone(corLista, Color.parseColor("#2A7CE0A0"), icone(c, R.drawable.ic_lista, 24, corLista)), LinearLayout.LayoutParams(44.d(), 44.d()))
+                addView(texto(c, nome, 25, Tema.TEXTO, true), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 16.d() })
+                addView(texto(c, if (itens.size == 1) "1 item" else "${itens.size} itens", 18, Tema.TEXTO2))
+            }
+            addView(cab, LinearLayout.LayoutParams(-1, -2))
+            val rol = RolagemFina(c)
+            val coluna = LinearLayout(c).apply { orientation = VERTICAL }
+            for (it in itens) coluna.addView(
+                texto(c, "•  " + it.replaceFirstChar { ch -> ch.uppercase() }, 22, Tema.TEXTO2).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = 7.d() }
+            )
+            rol.addView(coluna, FrameLayout.LayoutParams(-1, -2))
+            rol.setOnClickListener { aoAbrir("listas") }
+            addView(rol, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = 4.d(); leftMargin = 60.d() })
+            setOnClickListener { aoAbrir("listas") }
+            efeitoToque()
+        }
+
+        override fun onMeasure(w: Int, h: Int) {
+            val max = 190.d()
+            val modo = MeasureSpec.getMode(h); val tam = MeasureSpec.getSize(h)
+            super.onMeasure(w, if (modo == MeasureSpec.EXACTLY) MeasureSpec.makeMeasureSpec(Math.min(tam, max), MeasureSpec.EXACTLY) else MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST))
         }
     }
 
@@ -405,6 +448,12 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
     /** Clima de hoje (some se ainda não há previsão). */
     fun definirClima(cl: Respostas.ClimaHoje?) { clima = cl; refazer() }
+
+    /** Aviso de falha (ver [Falhas]); [id] nulo some com ele. */
+    fun definirAviso(id: String?, titulo: String?, detalhe: String?) { avisoId = id; avisoTitulo = titulo; avisoDetalhe = detalhe; refazer() }
+
+    /** Lista de compras: [nome] nulo (ou sem itens) some com o cartão; [itens] são os pendentes. */
+    fun definirLista(nome: String?, itens: List<String>) { listaNome = nome; listaItens = itens; refazer() }
 
     /** Próximo lembrete: [texto] e quando ("hoje às 09:00"); some se não há nenhum. */
     fun definirLembrete(texto: String?, quando: String?) { lembreteTxt = texto; lembreteQuando = quando; refazer() }

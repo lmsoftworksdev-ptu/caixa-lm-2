@@ -16,30 +16,48 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** "sol", "nublado" ou "chuva" para o código do tempo do Open-Meteo. */
+/** O tipo do ícone para o código do tempo (WMO, do Open-Meteo): sol, lua, parcial, parcialnoite, nublado, neblina, garoa, chuva, pancadas, trovoada ou neve. */
 fun tipoDoCodigo(codigo: Int, noite: Boolean = false): String = when (codigo) {
     0, 1 -> if (noite) "lua" else "sol"
-    in 51..67, in 80..82, in 95..99 -> "chuva"
+    2 -> if (noite) "parcialnoite" else "parcial"
+    3 -> "nublado"
+    45, 48 -> "neblina"
+    in 51..57 -> "garoa"
+    in 61..67 -> "chuva"
+    in 71..77, 85, 86 -> "neve"
+    in 80..82 -> if (noite) "chuva" else "pancadas"
+    in 95..99 -> "trovoada"
     else -> "nublado"
 }
 
 fun descricaoDoCodigo(codigo: Int, noite: Boolean = false): String = when (codigo) {
-    0, 1 -> if (noite) "Céu limpo" else "Ensolarado"
+    0 -> if (noite) "Céu limpo" else "Ensolarado"
+    1 -> "Pouco nublado"
     2 -> "Parcialmente nublado"
     3 -> "Nublado"
     45, 48 -> "Neblina"
-    in 51..57 -> "Garoa"
-    in 61..67 -> "Chuva"
+    in 51..55 -> "Garoa"
+    56, 57 -> "Garoa gelada"
+    61, 63 -> "Chuva"
+    65 -> "Chuva forte"
+    66, 67 -> "Chuva gelada"
     in 71..77 -> "Neve"
-    in 80..82 -> "Pancadas de chuva"
-    in 95..99 -> "Tempestade"
+    80 -> "Pancadas de chuva"
+    81, 82 -> "Pancadas fortes"
+    85, 86 -> "Pancadas de neve"
+    95 -> "Trovoadas"
+    96, 99 -> "Trovoadas com granizo"
     else -> "Tempo"
 }
 
 /** Cores do ícone e do quadradinho por tipo de tempo (as mesmas do cartão do Início). */
 fun coresDoTipo(tipo: String): Pair<Int, Int> = when (tipo) {
     "sol" -> Color.parseColor("#FFC94D") to Color.parseColor("#29FFBE3C")
-    "chuva" -> Color.parseColor("#9CC8FF") to Color.parseColor("#294FAAFF")
+    "chuva", "garoa", "pancadas" -> Color.parseColor("#9CC8FF") to Color.parseColor("#294FAAFF")
+    "parcial" -> Color.parseColor("#FFD27A") to Color.parseColor("#29FFBE3C")
+    "parcialnoite" -> Color.parseColor("#C8D4FF") to Color.parseColor("#2A7C8CFF")
+    "trovoada" -> Color.parseColor("#FFD166") to Color.parseColor("#29FFC94D")
+    "neve" -> Color.parseColor("#E6F0FF") to Color.parseColor("#26DCE8FF")
     "lua" -> Color.parseColor("#C8D4FF") to Color.parseColor("#2A7C8CFF")
     else -> Color.parseColor("#C9D4EE") to Color.parseColor("#24C8D4EE")
 }
@@ -141,7 +159,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
             gravity = Gravity.CENTER_VERTICAL
             addView(FrameLayout(c).apply {
                 background = fundoArredondado(fundo, 34.d())
-                addView(IconeAnimado(c, tipo, cor, 64), LayoutParams(64.d(), 64.d(), Gravity.CENTER))
+                addView(IconeClima(c, tipo, 92), LayoutParams(92.d(), 92.d(), Gravity.CENTER))
             }, LinearLayout.LayoutParams(112.d(), 112.d()))
             addView(LinearLayout(c).apply {
                 orientation = LinearLayout.VERTICAL
@@ -172,7 +190,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
                 background = fundoArredondado(Color.parseColor("#0FFFFFFF"), 18.d())
                 setPadding(14.d(), 10.d(), 14.d(), 10.d())
                 addView(texto(c, if (i == 0) "Agora" else "${h.hora}h", 17, Tema.TEXTO3))
-                addView(IconeAnimado(c, tipoH, corH, 24), LinearLayout.LayoutParams(24.d(), 24.d()).apply { leftMargin = 10.d(); rightMargin = 10.d() })
+                addView(IconeAnimado(c, tipoH, corH, 24, animado = false), LinearLayout.LayoutParams(24.d(), 24.d()).apply { leftMargin = 10.d(); rightMargin = 10.d() })
                 addView(texto(c, "${h.temp}°", 20, Tema.TEXTO, true))
             }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 8.d() })
         }
@@ -194,7 +212,7 @@ class TelaPrevisao(private val c: Context, private val aoTentarDeNovo: () -> Uni
             dias.addView(LinearLayout(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(texto(c, nome, 22, Tema.TEXTO, d.indice == 0), LinearLayout.LayoutParams(118.d(), -2))
-                addView(IconeAnimado(c, tipoDoCodigo(d.codigo), cor, 28), LinearLayout.LayoutParams(28.d(), 28.d()))
+                addView(IconeAnimado(c, tipoDoCodigo(d.codigo), cor, 28, animado = false), LinearLayout.LayoutParams(28.d(), 28.d()))
                 addView(texto(c, if (d.chuva >= 20) "${d.chuva}%" else "", 17, Color.parseColor("#8FC2FF")).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(64.d(), -2).apply { leftMargin = 16.d() })
                 // mínima e máxima do dia, escritas (sem barra)
                 addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))

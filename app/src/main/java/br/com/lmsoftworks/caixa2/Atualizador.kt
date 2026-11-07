@@ -58,6 +58,7 @@ object Atualizador {
     /** A busca de vídeos falhou: pode ser o YouTube que mudou. Confere se já existe motor novo (no máximo a cada 10 minutos). */
     fun aoFalhar(c: Context, e: Exception) {
         Log.w(TAG, "busca falhou: ${e.javaClass.simpleName}: ${e.message}")
+        Falhas.youtubeFalhou(e)
         val ult = prefs(c).getLong("ultimaFalha", 0L)
         if (System.currentTimeMillis() - ult < ESPERA_FALHA) return
         prefs(c).edit().putLong("ultimaFalha", System.currentTimeMillis()).apply()

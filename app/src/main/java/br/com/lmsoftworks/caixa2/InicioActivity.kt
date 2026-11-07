@@ -39,6 +39,8 @@ class InicioActivity : Activity() {
     private lateinit var telaMusica: TelaMusica
     private lateinit var telaMidia: TelaMidia
     private lateinit var telaReceitas: TelaReceitas
+    private lateinit var telaAmplificador: TelaAmplificador
+    private lateinit var telaRadios: TelaRadios
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
     private lateinit var modalAtualizacao: ModalAtualizacao
@@ -98,10 +100,10 @@ class InicioActivity : Activity() {
             val c = try { br.com.lmsoftworks.caixa2.voz.Respostas.climaHoje(this) } catch (e: Throwable) { null }
             relogio.post {
                 climaBuscando = false
-                if (c != null) { inicio.definirClima(c); climaMostrado = true; climaFalhas = 0 }
+                if (c != null) { inicio.definirClima(c); climaMostrado = true; climaFalhas = 0; Falhas.climaOk() }
                 else {
                     val espera = Math.min(15_000L shl Math.min(climaFalhas, 3), 120_000L)      // 15 s, 30 s, 60 s, 2 min...
-                    climaFalhas++
+                    climaFalhas++; Falhas.climaFalhou()
                     climaEm = android.os.SystemClock.uptimeMillis() - 30 * 60_000L + espera
                 }
             }
@@ -130,6 +132,15 @@ class InicioActivity : Activity() {
         relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.Fala.falar(this, frase) { acoesAssistente.abafar(false) } }, 1500)
     }
 
+    private var ticksBluetooth = 0
+
+    /** O equalizador do Android (para o som do celular) só liga quando é o celular que está tocando; com o app tocando, vale o equalizador do player. */
+    private fun atualizarFonteDoEqualizador() {
+        val celular = !playerMidia.tocando && bluetooth.algumConectado && (bluetooth.celularTocando || (musica.tocando && !musica.emLocal))
+        if (celular) { if (ticksBluetooth < 3) ticksBluetooth++ } else ticksBluetooth = 0
+        if (celular && ticksBluetooth >= 2) Amplificador.definirFonteBluetooth(true) else if (!celular) Amplificador.definirFonteBluetooth(false)
+    }
+
     private val tique = object : Runnable {
         override fun run() {
             inicio.atualizar()
@@ -138,6 +149,7 @@ class InicioActivity : Activity() {
             if (atual == "alarmes") telaAlarmes.tique()
             barra.atualizarHora()
             UsoRede.amostrar()
+            atualizarFonteDoEqualizador()
             barra.atualizarRede()
             if (atual == "inicio") aplicarTema("inicio")      // o fundo do Início acompanha a hora do dia
             alarmes.verificar()?.let { tocarAlarme(it) }
@@ -162,7 +174,7 @@ class InicioActivity : Activity() {
             if (apareceu && !girando && !ocioso && !telaVideo.aberto) {
                 val atualView = tela(atual)
                 var sobrando = false
-                for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "led", "alarmes", "config", "clima")) {
+                for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "amplificador", "radios", "led", "alarmes", "config", "clima")) {
                     val v = tela(nome)
                     if (v !== atualView && v.visibility == View.VISIBLE) { sobrando = true; if (agoraMs - sobreposicaoDesde > 600L) { v.visibility = View.INVISIBLE; Cubo.limpar(v) } }
                 }
@@ -187,6 +199,10 @@ class InicioActivity : Activity() {
             val proximoLembrete = lembretes.todos.firstOrNull()
             inicio.definirLembrete(proximoLembrete?.texto, proximoLembrete?.let { LembreteControle.quando(it.quandoMs) })
             atualizarClimaInicio()
+            val avisoFalha = Falhas.atual()
+            inicio.definirAviso(avisoFalha?.id, avisoFalha?.titulo, avisoFalha?.detalhe)
+            val compras = listas.itens("compras").filter { !it.marcado }.map { it.texto }
+            inicio.definirLista(if (compras.isEmpty()) null else "Lista de compras", compras)
             if (!ocioso) {
                 if (android.os.SystemClock.uptimeMillis() - ultimoToque > Ajustes.ociosoMs() && !ocupado()) entrarOcioso()
             } else {
@@ -199,6 +215,7 @@ class InicioActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Miniaturas.iniciar(this)
+        Amplificador.iniciar(this)
         SomTeclado.iniciar(this)
         TecladoView.aoMudarVisibilidade = { aberto -> if (::fundo.isInitialized) fundo.segurar(aberto) }
         // o YouTube bloqueia o IPv6 da operadora ("confirme que não é um robô"): toda a rede do app sai pelo IPv4
@@ -238,6 +255,7 @@ class InicioActivity : Activity() {
         painelVolume = PainelVolume(this) { p, mudo -> barra.definirVolume(p, mudo) }
         cobertura = CoberturaEnergia(this)
         modalEnergia = ModalEnergia(this) { desligar -> sequenciaEnergia(desligar) }
+        registrarBotaoEnergia()
         painelVolume.aoMostrar = { sairOcioso() }
         br.com.lmsoftworks.caixa2.voz.Fala.aoMexerNoVolume = { painelVolume.ignorarMudancas() }
         barra = BarraTopo(this, { ir("wifi") }, { ir("bluetooth") }, { ir("led") }, { painelVolume.alternar() }, { painelVolume.fechar(); modalEnergia.abrir() })
@@ -256,7 +274,7 @@ class InicioActivity : Activity() {
         telaWifi.visibility = View.GONE
         telaBluetooth = TelaBluetooth(this, bluetooth)
         telaBluetooth.visibility = View.GONE
-        telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir("midia") }) { videoDaMusica() }
+        telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir(if (musica.ehRadio) "radios" else "midia") }) { videoDaMusica() }
         telaMusica.fundoCapa = fundoCapa
         telaMusica.semDados.aoCor = { a, b -> if (atual == "musica") fundo.tema(a, b, 1.9f) }      // sem os dados da música: as cores do fundo mudam sozinhas
         telaMusica.visibility = View.GONE
@@ -269,6 +287,10 @@ class InicioActivity : Activity() {
         relogio.postDelayed({ telaMidia.preCarregar() }, 4_000L)      // a Mídia já abre pronta (e fica montada até a caixa reiniciar)
         telaReceitas = TelaReceitas(this)
         telaReceitas.visibility = View.GONE
+        telaAmplificador = TelaAmplificador(this)
+        telaAmplificador.visibility = View.GONE
+        telaRadios = TelaRadios(this, { lista, i -> tocarRadio(lista, i) }, { lista, i -> tocarCanalTv(lista, i) })
+        telaRadios.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
@@ -351,6 +373,8 @@ class InicioActivity : Activity() {
             addView(telaMusica, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaReceitas, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(telaAmplificador, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(telaRadios, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
@@ -482,6 +506,8 @@ class InicioActivity : Activity() {
         "musica" -> telaMusica
         "midia" -> telaMidia
         "receitas" -> telaReceitas
+        "amplificador" -> telaAmplificador
+        "radios" -> telaRadios
         "led" -> telaLed
         "alarmes" -> telaAlarmes
         "config" -> telaConfig
@@ -490,10 +516,20 @@ class InicioActivity : Activity() {
     }
 
     private fun abrir(id: String) {
+        if (id == "listas") { telaAlarmes.abrirAba("listas", lista = "compras"); ir("alarmes"); return }
+        if (id.startsWith("aviso:")) {
+            when (val a = id.removePrefix("aviso:")) {
+                "youtube" -> Atualizador.verificarAgora(this) { msg -> Aviso.mostrar(this, msg) }
+                "clima" -> { climaEm = 0L; climaFalhas = 0; Aviso.mostrar(this, "Buscando a previsão…") }
+                else -> Falhas.dispensar(a)
+            }
+            return
+        }
         if (id == "lembretes") { telaAlarmes.abrirAba("lembretes", lembretes.todos.firstOrNull()?.id); ir("alarmes") }
         else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
-        else if (id == "midia") ir(if (musica.temMusica || telaMusica.semDadosAtivo()) "musica" else "midia")      // tocando algo (com ou sem os dados da música): Tocando agora; senão, a busca
-        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima" || id == "receitas") ir(id)
+        else if (id == "midia") ir(if ((musica.temMusica && !musica.ehRadio) || telaMusica.semDadosAtivo()) "musica" else "midia")      // tocando uma rádio, a Mídia abre a Mídia (a rádio é do outro aplicativo)
+        else if (id == "radios") ir(if (musica.ehRadio) "musica" else "radios")      // a rádio que toca abre o player da rádio; senão, o menu de Rádios      // tocando algo (com ou sem os dados da música): Tocando agora; senão, a busca
+        else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima" || id == "receitas" || id == "amplificador") ir(id)
         else Aviso.mostrar(this, "Em breve")
     }
 
@@ -535,6 +571,8 @@ class InicioActivity : Activity() {
             "musica" -> temaMusica()
             "midia" -> Triple("#FF5A4E", "#7A1E5A", "#FF5A5F")
             "receitas" -> Triple("#FF9A3D", "#8A2E1A", "#FF9A3D")
+            "amplificador" -> Triple("#E83E8C", "#4A1458", "#FF5FA8")
+            "radios" -> Triple("#14B8D6", "#0B3C7A", "#2DD4E6")
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
             "alarmes" -> Triple("#8B5CFF", "#3A1FA8", "#8B5CFF")
             "config" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
@@ -558,6 +596,7 @@ class InicioActivity : Activity() {
     private fun preencher(destino: String) {
         when (destino) {
             "led" -> telaLed.atualizar()
+            "amplificador" -> telaAmplificador.atualizar()
             "alarmes" -> telaAlarmes.atualizar()
             "config" -> { atualizarConfig(); telaConfig.atualizar() }
         }
@@ -599,6 +638,7 @@ class InicioActivity : Activity() {
         if (destino == "bluetooth") { telaBluetooth.reiniciar(); bluetooth.definirVisivel(true) }
         else bluetooth.definirVisivel(false)
         if (destino == "midia") telaMidia.aoMostrar()
+        if (destino == "radios") telaRadios.aoMostrar()
         if (destino == "clima") {
             // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
             if (previsao != null && android.os.SystemClock.uptimeMillis() - previsaoEm < 15 * 60_000L) telaPrevisao.definir(previsao) else buscarPrevisao()
@@ -625,9 +665,11 @@ class InicioActivity : Activity() {
 
     private fun metade(): Float = conteudo.width / 2f
 
-    /** Gira o cubo de [desde] até [ate] graus (640 ms no giro inteiro; nos parciais, proporcional, no mínimo 240 ms). */
+    private val DURACAO_GIRO_MS = 320L      // o giro do cubo entre menus (era 500 ms: parecia lento)
+
+    /** Gira o cubo de [desde] até [ate] graus (320 ms no giro inteiro; nos parciais, proporcional, no mínimo 160 ms). */
     private fun animarCubo(de: View, para: View, dir: Int, desde: Float, ate: Float, aoFim: () -> Unit) {
-        val dur = if (desde == 0f && ate == 90f) 500L else maxOf(200L, (500f * Math.abs(ate - desde) / 90f).toLong())
+        val dur = if (desde == 0f && ate == 90f) DURACAO_GIRO_MS else maxOf(160L, (DURACAO_GIRO_MS * Math.abs(ate - desde) / 90f).toLong())
         // giro inteiro (abrir menu, botão voltar): começa e termina devagar (ease in-out cúbico).
         // Terminar um arrasto: o dedo já vinha rápido, então a caixa continua na mesma velocidade e só freia (sem "paradinha").
         val interpolador = if (desde == 0f && ate == 90f) android.view.animation.PathInterpolator(0.3f, 0.7f, 0.2f, 1f)
@@ -679,6 +721,7 @@ class InicioActivity : Activity() {
 
     /** Para onde o "voltar" leva: música do YouTube volta à busca (Mídia); Mídia e os demais menus voltam à tela inicial. */
     private fun destinoVoltar() = when {
+        atual == "musica" && musica.ehRadio -> "radios"      // tocando uma rádio: voltar leva ao menu de Rádios (e dele, ao início), nunca à Mídia
         atual == "musica" && musica.emLocal -> "midia"
         origemConfig && (atual == "wifi" || atual == "bluetooth" || atual == "alarmes") -> "config"
         else -> "inicio"
@@ -693,7 +736,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "receitas" && telaReceitas.emDetalhe) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
+        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "receitas" && telaReceitas.emDetalhe) || (atual == "radios" && telaRadios.emTexto) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -1389,6 +1432,25 @@ class InicioActivity : Activity() {
         if (!n.buscando && playerMidia.ativo && playerMidia.fila.size - playerMidia.indice <= 4) carregarPlaylistDoNicho()
     }
 
+    /** Toca uma rádio da internet: aparece na tela Tocando agora, ao vivo. */
+    private fun tocarRadio(estacoes: List<Radios.Estacao>, i: Int) {
+        nicho = null      // nada de fila de YouTube atrás de uma rádio
+        // a lista da tela é a fila: "próxima" e "anterior" passam para a rádio de baixo e a de cima
+        val fila = estacoes.map { e -> Resultado(e.nome, e.local(), 0L, e.url, listOfNotNull(e.logo.takeIf { it.isNotBlank() })) }
+        musica.marcarPorVoz()
+        musica.tocarDoYoutube(fila, i)
+        estacoes.getOrNull(i)?.let { Radios.registrarAudicao(this, it.uuid) }
+        ir("musica")
+    }
+
+    /** Abre um canal de TV ao vivo no player de vídeo; a lista da tela vira a fila (anterior/próximo trocam de canal). */
+    private fun tocarCanalTv(canais: List<TV.Canal>, i: Int) {
+        nicho = null
+        val fila = canais.map { Resultado(it.nome, listOf(it.categorias.firstOrNull()?.let { c -> TV.nomeDaCategoria(c) }, "TV ao vivo").filterNotNull().joinToString(" · "), 0L, it.url, listOfNotNull(it.logo.takeIf { l -> l.isNotBlank() })) }
+        abrirVideo(fila, i)
+        telaVideo.mostrarSeletor(false)      // canal ao vivo não tem versão em música
+    }
+
     private fun tocarMusicaDoYoutube(lista: List<Resultado>, i: Int) {
         telaMidia.fecharTeclado()
         musica.tocarDoYoutube(lista, i)
@@ -1648,7 +1710,65 @@ class InicioActivity : Activity() {
      * Desligar ou reiniciar: cobre a tela com a nossa (por cima da janela do Android), apaga a fita, solta o celular que
      * está tocando, toca o som de desligar e só então manda o aparelho desligar ou reiniciar.
      */
+    // ---------------------------------------------------------------- botão físico de energia
+    //
+    // O Android não entrega a tecla de energia aos apps, mas avisa o que ela fez:
+    //  - toque curto: apaga a tela (ACTION_SCREEN_OFF). A caixa acende a tela de novo na hora e abre a janela Desligar / Reiniciar;
+    //  - segurar: o sistema anuncia o menu de energia dele (ACTION_CLOSE_SYSTEM_DIALOGS com motivo "globalactions"). A caixa fecha esse menu
+    //    e vai direto para a contagem de "Desligando".
+    private var energiaEmCurso = false
+
+    private val receptorEnergia = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+            when (i.action) {
+                android.content.Intent.ACTION_SCREEN_OFF -> botaoEnergiaCurto()
+                android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS -> if (i.getStringExtra("reason") == "globalactions") botaoEnergiaLongo()
+            }
+        }
+    }
+
+    private fun registrarBotaoEnergia() {
+        try {
+            registerReceiver(receptorEnergia, android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_SCREEN_OFF)
+                addAction(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+            })
+        } catch (e: Exception) { Falhas.gravar("Botão de energia", e) }
+    }
+
+    override fun onDestroy() {
+        try { unregisterReceiver(receptorEnergia) } catch (_: Exception) { }
+        super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acordarTela() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            pm.newWakeLock(android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or android.os.PowerManager.ON_AFTER_RELEASE, "caixa:energia").acquire(5000L)
+        } catch (e: Exception) { Falhas.gravar("Acordar a tela", e) }
+    }
+
+    private fun botaoEnergiaCurto() {
+        acordarTela()      // a caixa nunca fica de tela apagada: o botão só abre a janela de energia
+        if (energiaEmCurso || alarmeTocando != null) return
+        ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
+        relogio.postDelayed({ if (!energiaEmCurso) { painelVolume.fechar(); modalEnergia.abrir() } }, 250L)
+    }
+
+    private fun botaoEnergiaLongo() {
+        // o menu de energia do sistema aparece logo depois deste aviso: manda fechá-lo (algumas vezes, para pegar a hora certa)
+        for (ms in longArrayOf(120L, 350L, 800L)) relogio.postDelayed({
+            try { sendBroadcast(android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) { }
+        }, ms)
+        if (energiaEmCurso || alarmeTocando != null) return
+        ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
+        painelVolume.fechar()
+        modalEnergia.abrirDesligando()
+    }
+
     private fun sequenciaEnergia(desligar: Boolean) {
+        energiaEmCurso = true
         painelVolume.fechar()
         cobertura.mostrar(if (desligar) "Desligando…" else "Reiniciando…")
         // Tudo termina direito ANTES de desligar, para a caixa voltar limpa: Alexa e microfone, música e vídeo, a fita, o Bluetooth
@@ -1692,6 +1812,7 @@ class InicioActivity : Activity() {
 
     /** O aparelho não desligou: volta tudo o que foi fechado (rede, Bluetooth, Alexa). */
     private fun recuperarDepoisDeFalhaDeEnergia() {
+        energiaEmCurso = false
         Ajustes.definirRestaurarRedes(false)
         wifi.definirLigado(true)
         bluetooth.definirLigado(true)
@@ -1724,6 +1845,8 @@ class InicioActivity : Activity() {
             "bluetooth" -> if (!telaBluetooth.voltar()) ir("inicio")
             "musica" -> ir(destinoVoltar())
             "led" -> ir("inicio")
+            "amplificador" -> ir("inicio")
+            "radios" -> if (!telaRadios.voltar()) ir("inicio")
             "alarmes" -> if (!telaAlarmes.voltar()) ir("inicio")
             "clima" -> ir("inicio")
             "config" -> if (!telaConfig.voltar()) ir("inicio")

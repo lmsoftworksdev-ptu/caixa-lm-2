@@ -208,7 +208,11 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             val cmd = try { Recognizer(m, TAXA, gramaticaCmd).also { it.setWords(true) } } catch (e: Throwable) { Log.w(TAG, "sem comandos rapidos", e); null }
             // O texto ao vivo (reconhecedor sem gramática) não roda em tempo real neste aparelho e acertava pouco: desligado.
             val livre: Recognizer? = try { Recognizer(m, TAXA) } catch (e: Throwable) { Log.w(TAG, "sem texto ao vivo", e); null }
-            val e = EscutaAssistente(rec, cmd, livre, { parcial -> main.post { aoPalavras(parcial) } }) { campo, json -> verificarChamada(json, campo) }
+            // Quem detecta "Alexa" é o openWakeWord (o Vosk só cuida dos comandos). Para voltar ao Vosk: arquivo wake_vosk na pasta do app.
+            OWW_ATIVO = try { !File(ctx.getExternalFilesDir(null), "wake_vosk").exists() } catch (t: Throwable) { true }
+            val oww = if (OWW_ATIVO) try { OpenWakeWord(ctx) } catch (t: Throwable) { Log.w(TAG, "openWakeWord nao carregou", t); OWW_ATIVO = false; null } else null
+            Log.d(TAG, "detector da chamada: ${if (OWW_ATIVO) "openWakeWord" else "Vosk"}")
+            val e = EscutaAssistente(rec, cmd, livre, { parcial -> main.post { aoPalavras(parcial) } }, oww, { nota -> chamadaPorOww(nota) }) { campo, json -> verificarChamada(json, campo) }
             if (!e.iniciar()) { rec.close(); cmd?.close(); livre?.close(); estado = EstadoVoz.ERRO; Log.w(TAG, "microfone ocupado ou sem permissao"); return }
             escuta = e
             estado = EstadoVoz.ESPERANDO_CHAMADA
@@ -234,7 +238,20 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     private var ultimoParcial = ""
     private var parciaisIguais = 0
 
+    @Volatile private var OWW_ATIVO = false
+
+    /** "Alexa" detectada pelo openWakeWord (chamada da thread dele). */
+    private fun chamadaPorOww(nota: Float) {
+        val agora = System.currentTimeMillis()
+        if (agora - ultimaChamada < ESPERA_ENTRE_CHAMADAS_MS) return
+        if (Fala.falando) return
+        ultimaChamada = agora
+        Log.d(TAG, "chamada (openWakeWord): nota=${"%.2f".format(nota)}")
+        main.post { if (ativo && (estado == EstadoVoz.ESPERANDO_CHAMADA || estado == EstadoVoz.RESPONDENDO || estado == EstadoVoz.PENSANDO)) acordou() }
+    }
+
     private fun verificarChamada(json: String?, campo: String) {
+        if (OWW_ATIVO) return      // quem chama é o openWakeWord
         val texto = lerCampo(json, campo)
         if (texto.isBlank() || texto == "[unk]") { parciaisIguais = 0; return }
         // Frase terminada: vale com confiança. Parcial (mais rápido, ~0,3 s): só se a MESMA palavra estável aparecer 3 vezes seguidas.

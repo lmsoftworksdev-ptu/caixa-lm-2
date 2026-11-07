@@ -28,14 +28,8 @@ class FundoView(c: Context) : View(c) {
 
     private val quadroL = 320f
     private val quadroA = 180f
-    private val img = Bitmap.createBitmap(128, 72, Bitmap.Config.ARGB_8888)
-    private val tela = Canvas(img)
     private val pMancha = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD); isDither = true }
-    private val pImagem = Paint(Paint.FILTER_BITMAP_FLAG)
     private val pVeu = Paint()
-    private val origem = Rect(0, 0, 128, 72)
-    private val destino = Rect()
-    private val matriz = Matrix()
 
     // posições base (fração do quadro) e raios (no quadro de 320 x 180)
     private val bx = floatArrayOf(.15f, .42f, .70f, .90f, .28f, .58f)
@@ -113,7 +107,6 @@ class FundoView(c: Context) : View(c) {
     )
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        destino.set(0, 0, w, h)
         val r = hypot(w.toFloat(), h.toFloat()) / 2f
         pVeu.shader = RadialGradient(
             w / 2f, h / 2f, r, Color.parseColor("#26050A18"), Color.parseColor("#B3050A18"), Shader.TileMode.CLAMP
@@ -135,26 +128,26 @@ class FundoView(c: Context) : View(c) {
 
         baseOpaca += ((if (sobreCapa) 0f else 1f) - baseOpaca) * .06f
         if (Math.abs(baseOpaca - (if (sobreCapa) 0f else 1f)) < .004f) baseOpaca = if (sobreCapa) 0f else 1f
-        img.eraseColor((Tema.FUNDO and 0xFFFFFF) or ((baseOpaca * 255f).toInt() shl 24))
-        tela.save()
-        tela.scale(.4f, .4f)
+
+        // As manchas são desenhadas DIRETO na tela pela placa de vídeo (círculos com degradê, somados), sem o bitmap intermediário de 128 x 72 que
+        // era pintado pelo processador e enviado à placa a cada quadro: aquilo pesava na thread da tela e fazia o fundo travar.
+        canvas.drawColor((Tema.FUNDO and 0xFFFFFF) or ((baseOpaca * 255f).toInt() shl 24))
+        val ex = width / quadroL
+        val ey = height / quadroA
         for (i in 0 until 6) {
             val sp = 1f + (i % 4) * .15f
             val x = quadroL * bx[i] + sin(t * .00056f * sp + i * 1.9f) * quadroL * .15f
             val y = quadroA * by[i] + cos(t * .0007f * sp + i * 2.4f) * quadroA * .24f
             val raio = br[i] * (1f + .2f * sin(t * .001f + i * 1.3f))
             val alfa = ((.27f + .13f * sin(t * .0013f + i * 1.1f)) * brilho).coerceIn(0f, 1f)
-            val sh = if (i % 2 == 0) shader1 else shader2
-            matriz.setScale(raio, raio)
-            matriz.postTranslate(x, y)
-            sh!!.setLocalMatrix(matriz)
-            pMancha.shader = sh
+            pMancha.shader = if (i % 2 == 0) shader1 else shader2
             pMancha.alpha = (alfa * 255f).toInt()
-            tela.drawCircle(x, y, raio, pMancha)
+            canvas.save()
+            canvas.translate(x * ex, y * ey)
+            canvas.scale(raio * ex, raio * ey)      // o degradê unitário vira o círculo (ou elipse) deste tamanho
+            canvas.drawCircle(0f, 0f, 1f, pMancha)
+            canvas.restore()
         }
-        tela.restore()
-
-        canvas.drawBitmap(img, origem, destino, pImagem)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pVeu)
     }
 }

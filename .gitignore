@@ -22,3 +22,4 @@ docs/
 sons/
 compilar.cmd
 simulador/
+build-*.txt

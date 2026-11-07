@@ -107,7 +107,8 @@ class BarraTopo(
         const val TOPO = 14
         const val X_WIFI = 36
         const val X_BLUETOOTH = 126
-        const val X_VOLUME = 216      // a luz (LED) não fica mais aqui: só no menu da tela inicial
+        const val X_LED = 216
+        const val X_VOLUME = 306      // Wi-Fi, Bluetooth, luz (LED) e volume
     }
 
     init {
@@ -118,7 +119,7 @@ class BarraTopo(
         volume.setOnClickListener { aoAbrirVolume() }
         energia.setOnClickListener { aoAbrirEnergia() }
 
-        for ((v, x) in listOf(wifi to X_WIFI, bluetooth to X_BLUETOOTH, volume to X_VOLUME))
+        for ((v, x) in listOf(wifi to X_WIFI, bluetooth to X_BLUETOOTH, led to X_LED, volume to X_VOLUME))
             addView(v, LayoutParams(TAM.d(), TAM.d()).apply { leftMargin = x.d(); topMargin = TOPO.d() })
         addView(hora, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 134.d(); topMargin = 28.d() })
         addView(rede, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply { rightMargin = 134.d(); topMargin = 38.d() })
@@ -144,10 +145,10 @@ class BarraTopo(
         if (conectado) bluetooth.estado(Tema.CONECTADO, false, false, "conectado") else bluetooth.estado(Tema.ERRO, true, false, "desconectado")
     }
 
-    /** Azul = conectada e ligada; vermelha = desconectada ou com as luzes desligadas; anel girando enquanto conecta. */
+    /** Azul = conectada e ligada; vermelha = desconectada, conectando/reconectando ou com as luzes desligadas (sem anel girando). */
     fun definirLed(conectada: Boolean, ligada: Boolean, conectando: Boolean) {
         when {
-            conectando -> led.estado(Tema.CONECTADO, false, true, "conectando")
+            conectando -> led.estado(Tema.ERRO, true, false, "conectando")
             conectada && ligada -> led.estado(Tema.CONECTADO, false, false, "conectada")
             conectada -> led.estado(Tema.ERRO, true, false, "desligada")
             else -> led.estado(Tema.ERRO, true, false, "desconectada")
