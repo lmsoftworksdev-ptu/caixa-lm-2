@@ -40,6 +40,7 @@ class InicioActivity : Activity() {
     private lateinit var telaMidia: TelaMidia
     private lateinit var telaReceitas: TelaReceitas
     private lateinit var telaAmplificador: TelaAmplificador
+    private lateinit var telaDiagnostico: TelaDiagnostico
     private lateinit var telaRadios: TelaRadios
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
@@ -174,7 +175,7 @@ class InicioActivity : Activity() {
             if (apareceu && !girando && !ocioso && !telaVideo.aberto) {
                 val atualView = tela(atual)
                 var sobrando = false
-                for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "amplificador", "radios", "led", "alarmes", "config", "clima")) {
+                for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "amplificador", "radios", "led", "alarmes", "config", "clima", "diagnostico")) {
                     val v = tela(nome)
                     if (v !== atualView && v.visibility == View.VISIBLE) { sobrando = true; if (agoraMs - sobreposicaoDesde > 600L) { v.visibility = View.INVISIBLE; Cubo.limpar(v) } }
                 }
@@ -289,6 +290,8 @@ class InicioActivity : Activity() {
         telaReceitas.visibility = View.GONE
         telaAmplificador = TelaAmplificador(this)
         telaAmplificador.visibility = View.GONE
+        telaDiagnostico = TelaDiagnostico(this)
+        telaDiagnostico.visibility = View.GONE
         telaRadios = TelaRadios(this, { lista, i -> tocarRadio(lista, i) }, { lista, i -> tocarCanalTv(lista, i) })
         telaRadios.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
@@ -316,6 +319,7 @@ class InicioActivity : Activity() {
         telaConfig.aoMudarBrilho = { aplicarBrilho() }
         telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Aviso.mostrar(this, msg) } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
+        telaConfig.aoDiagnostico = { ir("diagnostico") }
         // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
         bluetooth.aoCelularTocando = {
             if (!musica.appRecente()) celularAssumiu()
@@ -374,6 +378,7 @@ class InicioActivity : Activity() {
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaReceitas, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAmplificador, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(telaDiagnostico, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaRadios, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
@@ -507,6 +512,7 @@ class InicioActivity : Activity() {
         "midia" -> telaMidia
         "receitas" -> telaReceitas
         "amplificador" -> telaAmplificador
+        "diagnostico" -> telaDiagnostico
         "radios" -> telaRadios
         "led" -> telaLed
         "alarmes" -> telaAlarmes
@@ -575,7 +581,7 @@ class InicioActivity : Activity() {
             "radios" -> Triple("#14B8D6", "#0B3C7A", "#2DD4E6")
             "led" -> Triple("#2F7BFF", "#2A1A7A", "#2F7BFF")
             "alarmes" -> Triple("#8B5CFF", "#3A1FA8", "#8B5CFF")
-            "config" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
+            "config", "diagnostico" -> Triple("#5B6B8C", "#1A2340", "#3D8BFF")
             // previsão do tempo: o fundo segue o tempo de hoje (sol, nublado ou chuva)
             "clima" -> when (telaPrevisao.tipoHoje) {
                 "sol" -> Triple("#FFB547", "#1F5BFF", "#3D8BFF")
@@ -597,6 +603,7 @@ class InicioActivity : Activity() {
         when (destino) {
             "led" -> telaLed.atualizar()
             "amplificador" -> telaAmplificador.atualizar()
+            "diagnostico" -> telaDiagnostico.aoMostrar()
             "alarmes" -> telaAlarmes.atualizar()
             "config" -> { atualizarConfig(); telaConfig.atualizar() }
         }
@@ -723,6 +730,7 @@ class InicioActivity : Activity() {
     private fun destinoVoltar() = when {
         atual == "musica" && musica.ehRadio -> "radios"      // tocando uma rádio: voltar leva ao menu de Rádios (e dele, ao início), nunca à Mídia
         atual == "musica" && musica.emLocal -> "midia"
+        atual == "diagnostico" -> "config"
         origemConfig && (atual == "wifi" || atual == "bluetooth" || atual == "alarmes") -> "config"
         else -> "inicio"
     }
@@ -736,7 +744,7 @@ class InicioActivity : Activity() {
 
     /** Há uma camada aberta dentro da tela (detalhes, senha do Wi-Fi, teclado da Mídia): o gesto de voltar fecha só ela e fica no mesmo menu. */
     private fun emDetalheAtual() = (atual == "wifi" && (telaWifi.emDetalhe || telaWifi.emSenha)) || (atual == "bluetooth" && telaBluetooth.emDetalhe) ||
-        (atual == "midia" && telaMidia.tecladoVisivel) || (atual == "receitas" && telaReceitas.emDetalhe) || (atual == "radios" && telaRadios.emTexto) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
+        (atual == "midia" && (telaMidia.tecladoVisivel || telaMidia.emBusca)) || (atual == "receitas" && telaReceitas.emDetalhe) || (atual == "radios" && telaRadios.emTexto) || (atual == "alarmes" && (telaAlarmes.emTexto || telaAlarmes.emModal)) || (atual == "config" && telaConfig.emTexto)
 
     // ------------------------------------------------------------------ assistente de voz
 
@@ -1703,7 +1711,7 @@ class InicioActivity : Activity() {
 
     /** Toca o som de início do começo ao fim (só chamado quando o aparelho acabou de ligar). */
     private fun tocarSomDeInicio() {
-        Som.tocar(this, R.raw.som_inicio) { relogio.postDelayed({ pararAquecimento() }, 300) }
+        Som.tocar(this, R.raw.som_inicio, volumeDaVoz = true) { relogio.postDelayed({ pararAquecimento() }, 300) }
     }
 
     /**
@@ -1764,7 +1772,7 @@ class InicioActivity : Activity() {
         led.apagarParaDesligar {
             bluetooth.desligarLimpo {
                 wifi.desligarLimpo {
-                    Som.tocar(this, R.raw.som_desligar) { executarEnergia(desligar) }
+                    Som.tocar(this, R.raw.som_desligar, volumeDaVoz = true) { executarEnergia(desligar) }
                 }
             }
         }
@@ -1830,6 +1838,7 @@ class InicioActivity : Activity() {
             "musica" -> ir(destinoVoltar())
             "led" -> ir("inicio")
             "amplificador" -> ir("inicio")
+            "diagnostico" -> ir("config")
             "radios" -> if (!telaRadios.voltar()) ir("inicio")
             "alarmes" -> if (!telaAlarmes.voltar()) ir("inicio")
             "clima" -> ir("inicio")

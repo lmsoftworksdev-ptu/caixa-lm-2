@@ -21,23 +21,52 @@ import android.widget.ProgressBar
  */
 object Som {
     private const val TAG = "CaixaSom"
-    private const val TEMPO_MAXIMO_MS = 7000L
+    private const val TEMPO_MAXIMO_MS = 15_000L      // só uma rede de segurança: os sons têm poucos segundos
+    private const val FOLGA_FIM_MS = 500L      // depois do fim do arquivo, o resto ainda está no buffer da saída de áudio: espera esvaziar
+    /** Quem toca precisa ficar preso aqui: um MediaPlayer sem ninguém segurando é recolhido pelo coletor de lixo e o som corta no meio. */
+    private val tocando = HashSet<MediaPlayer>()
     private val principal = Handler(Looper.getMainLooper())
 
-    /** Toca [recurso] e chama [aoFim] uma única vez quando terminar (ou se falhar, ou depois de 7 s: nunca trava o fluxo). */
-    fun tocar(ctx: Context, recurso: Int, aoFim: () -> Unit = {}) {
+    /**
+     * Põe o volume do aparelho no "Volume da voz" de Configurações enquanto o som toca (como a resposta do assistente) e devolve o volume da
+     * música depois. Devolve a função que devolve o volume. A barra de volume não acompanha essas trocas.
+     */
+    private fun volumeDaVoz(ctx: Context): () -> Unit {
+        try {
+            val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val canal = AudioManager.STREAM_MUSIC
+            val antes = audio.getStreamVolume(canal)
+            val alvo = Math.round(audio.getStreamMaxVolume(canal) * Ajustes.volumeVoz / 10f).coerceAtLeast(1)
+            if (antes != alvo) { br.com.lmsoftworks.caixa2.voz.Fala.aoMexerNoVolume?.invoke(); audio.setStreamVolume(canal, alvo, 0) }
+            return {
+                try {
+                    // só devolve se ninguém mexeu no volume enquanto o som tocava
+                    if (antes != alvo && audio.getStreamVolume(canal) == alvo) { br.com.lmsoftworks.caixa2.voz.Fala.aoMexerNoVolume?.invoke(); audio.setStreamVolume(canal, antes, 0) }
+                } catch (_: Throwable) { }
+            }
+        } catch (e: Throwable) { Log.w(TAG, "volume da voz", e) }
+        return {}
+    }
+
+    /**
+     * Toca [recurso] e chama [aoFim] uma única vez quando terminar (ou se falhar, ou depois de 15 s: nunca trava o fluxo).
+     * Com [volumeDaVoz] o som sai no "Volume da voz" (o dos sons de ligar e desligar), não no volume da música.
+     */
+    fun tocar(ctx: Context, recurso: Int, volumeDaVoz: Boolean = false, aoFim: () -> Unit = {}) {
         var chamado = false
-        val fim = { if (!chamado) { chamado = true; aoFim() } }
+        val devolver = if (volumeDaVoz) volumeDaVoz(ctx) else ({})
+        val fim = { if (!chamado) { chamado = true; devolver(); aoFim() } }
         principal.postDelayed({ fim() }, TEMPO_MAXIMO_MS)
         try {
             val mp = MediaPlayer()
+            tocando.add(mp)
             val afd = ctx.resources.openRawResourceFd(recurso)
             mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             afd.close()
             @Suppress("DEPRECATION")
             mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
-            mp.setOnCompletionListener { it.release(); fim() }
-            mp.setOnErrorListener { p, _, _ -> p.release(); fim(); true }
+            mp.setOnCompletionListener { p -> principal.postDelayed({ tocando.remove(p); p.release(); fim() }, FOLGA_FIM_MS) }      // soltar o player e avisar "terminou" só depois da folga: fazer isso na hora cortava o final do som
+            mp.setOnErrorListener { p, _, _ -> tocando.remove(p); p.release(); fim(); true }
             mp.setOnPreparedListener { it.start() }
             mp.prepareAsync()
         } catch (e: Throwable) {

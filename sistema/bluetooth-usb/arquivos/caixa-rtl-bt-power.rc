@@ -1,0 +1,5 @@
+on property:sys.rtl8821cu.status=usb-ready
+    write /sys/bus/usb/devices/1-1/power/control on
+
+on property:sys.boot_completed=1 && property:sys.rtl8821cu.status=usb-ready
+    write /sys/bus/usb/devices/1-1/power/control on

@@ -783,7 +783,15 @@ class TelaMidia(
     }
 
     /** O teclado fecha primeiro quando o usuário volta. Devolve true se havia teclado aberto. */
-    fun voltar(): Boolean { if (tecladoAberto) { fecharTeclado(); return true }; return false }
+    fun voltar(): Boolean {
+        if (tecladoAberto) { fecharTeclado(); return true }
+        // mostrando uma pesquisa: voltar leva de novo ao menu da Mídia (em alta e gêneros), não ao menu principal
+        if (consulta.isNotBlank()) { consulta = ""; atualizarBarra(); buscar(); return true }
+        return false
+    }
+
+    /** Tem uma pesquisa na tela (resultados, carregando ou "nada encontrado"): o gesto de voltar volta ao menu da Mídia. */
+    val emBusca: Boolean get() = consulta.isNotBlank()
 
     /**
      * O gesto de voltar (puxar da borda esquerda) não pode começar em cima do teclado nem de uma fileira que já rolou:

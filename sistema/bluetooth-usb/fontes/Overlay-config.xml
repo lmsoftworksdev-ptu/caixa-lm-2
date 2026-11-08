@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A caixa RECEBE audio de outros celulares: perfil A2DP Sink no lugar do A2DP normal -->
+    <bool name="profile_supported_a2dp">false</bool>
+    <bool name="profile_supported_a2dp_sink">true</bool>
+    <bool name="profile_supported_avrcp_controller">true</bool>
+</resources>

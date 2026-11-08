@@ -64,12 +64,13 @@ jobs:
           FP=$(keytool -printcert -jarfile CaixaLM2.apk | grep -i "SHA256" || true)
           echo "::notice::Chave do APK gerado: $FP"
 
-      - name: Publicar o APK
+      - name: Publicar o APK e o pacote Bluetooth USB
         if: steps.np.outputs.publicar == 'sim'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSAO" CaixaLM2.apk --title "Versão $VERSAO (NewPipe ${{ steps.np.outputs.ultima }})" --notes "Gerado automaticamente."
+          (cd sistema/bluetooth-usb && zip -qr ../../CaixaLM2-BluetoothUSB.zip .)
+          gh release create "v$VERSAO" CaixaLM2.apk CaixaLM2-BluetoothUSB.zip --title "Versão $VERSAO (NewPipe ${{ steps.np.outputs.ultima }})" --notes "Gerado automaticamente."
 
       - name: Guardar a versão nova do NewPipe no repositório
         if: steps.np.outputs.publicar == 'sim' && steps.np.outputs.mudou == 'sim'

@@ -1,0 +1,40 @@
+{
+  "rom": "14.1-20190220-NIGHTLY-osprey",
+  "kernel": "3.10.49-g415000d",
+  "aparelho": "osprey_udstv",
+  "bootSha256": "edf5972704ab8b05b84513574fd6fec279328cf2c85e44389dd4d08df021f7ba",
+  "bootsAceitos": [
+    "8d7957c14f7fc4971ccfc5c2a5870b9a94f7224275530896e0439d05f4d7c190",
+    "7cbc87eeb0fca04afbcffd04109d8f49dfe4143f7ad269c16001902d0549c4a2",
+    "d86a86588d5876c93d16a35e886d2a3e8b6a5d683863f2ba3e1d5fe508212855",
+    "edf5972704ab8b05b84513574fd6fec279328cf2c85e44389dd4d08df021f7ba"
+  ],
+  "arquivos": [
+    {
+      "nome": "caixa-boot.img.gz",
+      "sha256": "98679d3fc78e4a2802a6a56155be0a8b0b9af40834cf8428b0ec06ea4c7508a8"
+    },
+    {
+      "nome": "caixa-rtl-bt-power.rc",
+      "sha256": "c3b782b932a48f1b649b9be66353c85195469f034c09316643c23cab5015859a"
+    },
+    {
+      "nome": "CaixaBluetooth.apk",
+      "sha256": "7a04024fdfd18653e7caf71575e25ef3d8b53c6321abfd13504e99b177456dff"
+    },
+    {
+      "nome": "libbt-rtl-usb.so",
+      "sha256": "b10fd5310c10b86b5b94a237dd7dbdfcb924271f8c82835c60d5a88f84c039ae"
+    },
+    {
+      "nome": "rtl_bt_h4",
+      "sha256": "c8134d50d348a01fde0722d7048f0de5a29dcff1286fe7e7261e30a222104fd2"
+    },
+    {
+      "nome": "rtl_usb_eject",
+      "sha256": "f0b1113a87edfd7591ad8dc2e412e13c752812692d283a4291c66a76e1d6cf31"
+    }
+  ],
+  "bootOriginalPaginas": 3498,
+  "bootOriginalSha256": "46652e12dbfe5c5f02be325c15a27e75942c65887fd2325cdaa568279c77120e"
+}

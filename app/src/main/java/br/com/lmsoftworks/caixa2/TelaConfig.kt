@@ -1,6 +1,7 @@
 package br.com.lmsoftworks.caixa2
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.text.TextUtils
 import android.view.Gravity
@@ -9,6 +10,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.os.SystemClock
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Tela Configurações da v3: à esquerda o título e as cinco seções (Tela, Som, Assistente, Conexões, Sistema); à direita as opções da
@@ -22,6 +26,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     var aoMudarBrilho: () -> Unit = {}
     var aoVerificarAtualizacao: () -> Unit = {}
     var aoEnergia: () -> Unit = {}
+    var aoDiagnostico: () -> Unit = {}
     var versao: String = ""
     /** Procura a cidade (em segundo plano) e devolve (nome, latitude, longitude) ou null. */
     var buscarCidade: (String, (Triple<String, Double, Double>?) -> Unit) -> Unit = { _, volta -> volta(null) }
@@ -53,6 +58,9 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     private val telaTexto = TelaTexto(c)
     private val modal = ModalV3(c)
     private lateinit var raizView: View
+    private var testeInternetEmAndamento = false
+    private var resultadoTesteInternet = "Toque em Medir para testar a internet."
+
 
     val emTexto: Boolean get() = telaTexto.aberto || modal.aberto
 
@@ -172,6 +180,80 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
 
     private fun estadoTexto(s: String, cor: Int = Tema.TEXTO2): View = texto(c, s, 20, cor).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.END }
 
+
+    private fun abrirAjustesAndroid() {
+        val itens = listOf(
+            "Wi-Fi" to android.provider.Settings.ACTION_WIFI_SETTINGS,
+            "Bluetooth" to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS,
+            "Localização" to android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS,
+            "Aplicativos" to android.provider.Settings.ACTION_APPLICATION_SETTINGS,
+            "Tela" to android.provider.Settings.ACTION_DISPLAY_SETTINGS,
+            "Som" to android.provider.Settings.ACTION_SOUND_SETTINGS,
+            "Data e hora" to android.provider.Settings.ACTION_DATE_SETTINGS,
+            "Armazenamento" to android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
+            "Segurança" to android.provider.Settings.ACTION_SECURITY_SETTINGS,
+            "Acessibilidade" to android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS,
+            "Sobre o aparelho" to android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS
+        )
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        conteudo.addView(texto(c, "Configurações do Android", 30, Tema.TEXTO, true))
+        val opcoesSistema = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        for ((nome, acao) in itens) {
+            opcoesSistema.addView(botao(c, nome, Tema.BOTAO) {
+                try {
+                    c.startActivity(Intent(acao).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: Exception) {
+                    Toast.makeText(c, "Essa tela não está disponível.", Toast.LENGTH_LONG).show()
+                }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8.d() })
+        }
+        conteudo.addView(RolagemFina(c).apply { addView(opcoesSistema) }, LinearLayout.LayoutParams(-1, 500.d()).apply { topMargin = 12.d() })
+        modal.mostrar(700, conteudo)
+    }
+    /** Mede o download real por uma transferência curta, sem bloquear a tela. */
+    private fun iniciarTesteInternet() {
+        testeInternetEmAndamento = true
+        resultadoTesteInternet = "Baixando dados de teste (até 5 MB)…"
+        montar()
+        Thread {
+            val resultado = try {
+                val conexao = (URL("https://speed.cloudflare.com/__down?bytes=5000000").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000
+                    readTimeout = 15000
+                    useCaches = false
+                    instanceFollowRedirects = true
+                }
+                try {
+                    val codigo = conexao.responseCode
+                    if (codigo !in 200..299) throw java.io.IOException("HTTP $codigo")
+                    val inicio = SystemClock.elapsedRealtime()
+                    var total = 0L
+                    val buffer = ByteArray(32768)
+                    conexao.inputStream.use { entrada ->
+                        while (total < 5_000_000L) {
+                            val lidos = entrada.read(buffer, 0, minOf(buffer.size.toLong(), 5_000_000L - total).toInt())
+                            if (lidos < 0) break
+                            total += lidos
+                        }
+                    }
+                    val duracaoMs = (SystemClock.elapsedRealtime() - inicio).coerceAtLeast(1L)
+                    if (total == 0L) throw java.io.IOException("Resposta vazia")
+                    val mbps = total * 8.0 / duracaoMs / 1000.0
+                    "Download: ${String.format(java.util.Locale("pt", "BR"), "%.1f", mbps)} Mbps"
+                } finally {
+                    conexao.disconnect()
+                }
+            } catch (_: Throwable) {
+                "Falha no teste. Confira a conexão e tente novamente."
+            }
+            post {
+                testeInternetEmAndamento = false
+                resultadoTesteInternet = resultado
+                if (atual == "sistema") montar()
+            }
+        }.start()
+    }
+
     // ------------------------------------------------------------------ conteúdo de cada seção
 
     private fun montar() {
@@ -207,7 +289,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
             "assistente" -> {
                 opcoes.addView(linha("Mostrar resposta na tela", "A resposta escrita no alto da tela do assistente",
                     interruptor(Ajustes.mostrarResposta) { Ajustes.definirMostrarResposta(it) }))
-                opcoes.addView(linha("Volume da voz", "Da resposta e dos toquinhos; não muda o volume da música",
+                opcoes.addView(linha("Volume da voz", "Da resposta, dos toquinhos e dos sons de ligar e desligar; não muda o volume da música",
                     deslizador((Ajustes.volumeVoz - 1) / 9f, { "${1 + Math.round(it * 9)}" }) { f ->
                         Ajustes.definirVolumeVoz(1 + Math.round(f * 9)); br.com.lmsoftworks.caixa2.voz.Fala.aplicarVolume(c)
                     }))
@@ -257,12 +339,18 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 }) { aoAbrir("led") })
             }
             else -> {
+                opcoes.addView(linha("Configurações do Android", "Wi-Fi, Bluetooth, localização e opções do sistema", botao(c, "Abrir", Tema.BOTAO) { abrirAjustesAndroid() }))
                 opcoes.addView(linha("Nome do aparelho", "Como a caixa aparece no Bluetooth", LinearLayout(c).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     addView(estadoTexto(Ajustes.nomeAparelho, Tema.TEXTO), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 14.d() })
                     addView(botao(c, "Mudar", Tema.BOTAO) { pedirNome() })
                 }))
                 opcoes.addView(linha("Versão", versao.ifBlank { "—" }, botao(c, "Verificar atualização", Tema.BOTAO) { aoVerificarAtualizacao() }))
+                opcoes.addView(linha("Velocidade da internet", resultadoTesteInternet,
+                    botao(c, if (testeInternetEmAndamento) "Medindo…" else "Medir", Cfg.AZUL) {
+                        if (!testeInternetEmAndamento) iniciarTesteInternet()
+                    }))
+                opcoes.addView(linha("Teste de conexões", "USB (OTG), Wi-Fi, Bluetooth e redes em tempo real", botao(c, "Abrir", Tema.BOTAO) { aoDiagnostico() }))
                 opcoes.addView(linha("Registro do app", "As últimas linhas do diagnóstico, para achar problemas", botao(c, "Ver registro", Tema.BOTAO) { abrirRegistro() }))
                 opcoes.addView(linha("Limpar cache", "Apaga miniaturas guardadas, arquivos temporários e registros antigos", botao(c, "Limpar", Tema.BOTAO) {
                     Aviso.mostrar(c, "Limpando…")
