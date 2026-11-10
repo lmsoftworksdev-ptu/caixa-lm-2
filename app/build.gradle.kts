@@ -46,7 +46,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
 
     // Busca e extração de streams do YouTube
-    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.0")
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Palavra de ativação offline ("Alexa")
