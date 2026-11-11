@@ -50,7 +50,13 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         principal.addView(cartaoLista, LinearLayout.LayoutParams(0, -1, 1f).apply { leftMargin = 24.d() })
         addView(principal, LayoutParams(-1, -1))
 
-        interruptor.aoMudar = { v -> bt.definirLigado(v) }
+        interruptor.aoMudar = { v ->
+            pendente = v; pendenteAte = android.os.SystemClock.uptimeMillis() + 10_000L
+            interruptor.bloqueado = true
+            bt.definirLigado(v)
+            atualizar(true)
+            removeCallbacks(tiquePendente); postDelayed(tiquePendente, 300)
+        }
 
         addView(detalhe, LayoutParams(-1, -1))
         atualizar(true)
@@ -59,19 +65,27 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
     fun reiniciar() {
         fecharDetalhe()
         bt.limparErro()
+        bt.sincronizar()
         atualizar(true)
     }
 
+    /** O que a pessoa pediu (ligar/desligar) e ainda não terminou: o botão e os textos já mostram isso. */
+    private var pendente: Boolean? = null
+    private var pendenteAte = 0L
+    private val tiquePendente = object : Runnable { override fun run() { if (pendente != null) { atualizar(true); postDelayed(this, 300) } } }
+
     fun atualizar(forcar: Boolean = false) {
+        pendente?.let { if (bt.ligado == it || android.os.SystemClock.uptimeMillis() > pendenteAte) { pendente = null; interruptor.bloqueado = false } }
         val aps = bt.aparelhos()
         val ass = buildString {
+            append(pendente).append('|')
             append(bt.ligado).append('|').append(bt.visivel).append('|').append(bt.buscando).append('|').append(bt.erro).append('|').append(Cfg.AZUL)
             append('|').append(bt.transmissor).append('|').append(bt.trocandoModo).append('|').append(bt.modosDisponiveis)
-            aps.forEach { append('|').append(it.endereco).append(it.nome).append(it.pareado).append(it.conectado).append(it.pareando) }
+            aps.forEach { append('|').append(it.endereco).append(it.nome).append(it.pareado).append(it.conectado).append(it.pareando).append(it.conectando) }
         }
         if (!forcar && ass == assinatura) return
         assinatura = ass
-        interruptor.ligado = bt.ligado
+        interruptor.ligado = pendente ?: bt.ligado
         interruptor.isEnabled = !bt.trocandoModo
         montarHero()
         montarLista(aps)
@@ -84,7 +98,11 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         hero.removeAllViews()
         val gap = LinearLayout.LayoutParams(-2, -2).apply { topMargin = 12.d() }
         fun t(s: String, tam: Int, cor: Int, media: Boolean = false) = texto(c, s, tam, cor, media).apply { setLineSpacing(0f, 1.15f) }
-        if (!bt.ligado) {
+        val p = pendente
+        if (p != null) {
+            hero.addView(AnelIcone(c, R.drawable.ic_caixa, 96, Color.parseColor("#7FB4FF"), Color.parseColor("#293D8BFF"), 0))
+            hero.addView(t(if (p) "Ligando…" else "Desligando…", 20, Color.parseColor("#7FB4FF"), true), gap)
+        } else if (!bt.ligado) {
             hero.addView(AnelIcone(c, R.drawable.ic_caixa, 96, Tema.TEXTO3, Color.parseColor("#12FFFFFF"), 0))
             hero.addView(t("Desligado", 20, Tema.TEXTO3, true), gap)
             hero.addView(t("Ligue o Bluetooth para tocar a música do seu celular nesta caixa.", 18, Tema.TEXTO2), gap)
@@ -101,13 +119,13 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         if (bt.trocandoModo) hero.addView(t("Trocando o modo Bluetooth…", 18, Tema.TEXTO2), gap)
         if (bt.modosDisponiveis) {
             hero.addView(View(c), LinearLayout.LayoutParams(1, 0, 1f))
-            val seletor = LinearLayout(c)
+            val seletor = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }      // um botão embaixo do outro: o texto não quebra
             for ((nome, transmissor) in listOf("Receptor" to false, "Transmissor" to true)) {
                 val ativo = bt.transmissor == transmissor
                 val escolha = botao(c, nome, if (ativo) Cfg.AZUL else Tema.BOTAO) { confirmarModo(nome, transmissor) }
                 escolha.isEnabled = !bt.trocandoModo && !ativo
-                seletor.addView(escolha, LinearLayout.LayoutParams(0, 52.d(), 1f).apply {
-                    if (transmissor) leftMargin = 8.d()
+                seletor.addView(escolha, LinearLayout.LayoutParams(-1, 50.d()).apply {
+                    if (transmissor) topMargin = 8.d()
                 })
             }
             hero.addView(seletor, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12.d() })
@@ -116,6 +134,17 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
 
     private fun montarLista(aps: List<BluetoothControle.Aparelho>) {
         lista.removeAllViews()
+        pendente?.let {
+            lista.addView(FrameLayout(c).apply {
+                addView(LinearLayout(c).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    addView(Carregando(c), LinearLayout.LayoutParams(48.d(), 48.d()))
+                    addView(texto(c, if (it) "Ligando…" else "Desligando…", 22, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 14.d() })
+                }, LayoutParams(-2, -2, Gravity.CENTER))
+            }, LinearLayout.LayoutParams(-1, 480.d()))
+            return
+        }
         if (!bt.ligado) {
             lista.addView(FrameLayout(c).apply { addView(texto(c, "Bluetooth desligado", 22, Tema.TEXTO3), LayoutParams(-2, -2, Gravity.CENTER)) }, LinearLayout.LayoutParams(-1, 480.d()))
             return
@@ -141,11 +170,12 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         val subtitulo = when {
             a.conectado && bt.transmissor -> "Saída de áudio da Caixa"
             a.conectado -> "Tocando áudio nesta caixa"
+            a.conectando -> "Conectando…"
             a.pareando -> "Pareando…"
             a.pareado -> "Pareado · toque para conectar"
             else -> "Toque para parear"
         }
-        val cor = when { a.conectado -> Tema.OK; a.pareando -> Color.parseColor("#7FB4FF"); else -> Tema.TEXTO3 }
+        val cor = when { a.conectado -> Tema.OK; a.pareando || a.conectando -> Color.parseColor("#7FB4FF"); else -> Tema.TEXTO3 }
         val nome = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
             addView(texto(c, a.nome, 25, Tema.TEXTO, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
@@ -158,12 +188,13 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         val linha = LinearLayout(c).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(18.d(), 0, 18.d(), 0)
-            if (a.conectado) background = fundoArredondado(Color.argb(46, Color.red(Cfg.AZUL), Color.green(Cfg.AZUL), Color.blue(Cfg.AZUL)), 20.d())
+            if (a.conectado || a.conectando || a.pareando) background = fundoArredondado(Color.argb(if (a.conectado) 46 else 30, Color.red(Cfg.AZUL), Color.green(Cfg.AZUL), Color.blue(Cfg.AZUL)), 20.d())
             isClickable = true
             setOnClickListener { escolher(a) }
             addView(caixaIcone, LinearLayout.LayoutParams(52.d(), 52.d()).apply { rightMargin = 18.d() })
             addView(nome, LinearLayout.LayoutParams(0, -2, 1f))
-            if (a.conectado) addView(icone(c, R.drawable.ic_bluetooth, 26, Tema.CONECTADO), LinearLayout.LayoutParams(26.d(), 26.d()))
+            if (a.conectando || a.pareando) addView(Carregando(c), LinearLayout.LayoutParams(30.d(), 30.d()))      // rodinha no canto: está conectando/pareando
+            else if (a.conectado) addView(icone(c, R.drawable.ic_bluetooth, 26, Tema.CONECTADO), LinearLayout.LayoutParams(26.d(), 26.d()))
         }
         lista.addView(linha, LinearLayout.LayoutParams(-1, 86.d()))
     }
@@ -172,7 +203,7 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         if (bt.trocandoModo) return
         bt.limparErro()
         when {
-            a.pareando -> { }
+            a.pareando || a.conectando -> { }
             a.pareado -> mostrarDetalhe(a)
             else -> bt.parear(a.endereco)
         }

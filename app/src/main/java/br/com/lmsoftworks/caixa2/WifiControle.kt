@@ -134,9 +134,28 @@ class WifiControle(contexto: Context, private val aoMudar: () -> Unit) {
     fun definirLigado(v: Boolean) {
         // ainda desligando: espera acabar antes de ligar de novo (nova conexão limpa)
         if (v && wm.wifiState == WifiManager.WIFI_STATE_DISABLING) { handler.postDelayed({ definirLigado(true) }, 1500); return }
-        wm.isWifiEnabled = v
         if (!v) { conectadoSsid = null; conectando = null; redes = emptyList() }
+        // a chamada ao sistema pode levar 1-2 s: fora da thread da tela, para o botão não congelar no meio do movimento
+        Thread {
+            try { wm.isWifiEnabled = v } catch (e: Exception) { Log.w("CaixaWifi", "ligar/desligar falhou", e) }
+            handler.post { aoMudar() }
+        }.start()
         aoMudar()
+    }
+
+    /** Ao abrir a tela: lê já a conexão e a lista guardadas pelo sistema, para não mostrar "sem conexão" e depois mudar. */
+    fun sincronizar() {
+        if (!ligado) return
+        ssidAtual()?.let { conectadoSsid = it }
+        lerResultados()
+    }
+
+    /** Está no meio de conectar (associando/autenticando): a tela mostra "Conectando…" em vez de "Sem conexão". */
+    fun tentando(): Boolean {
+        if (conectando != null) return true
+        val st = try { wm.connectionInfo?.supplicantState } catch (e: Exception) { null }
+        return st == SupplicantState.ASSOCIATING || st == SupplicantState.ASSOCIATED || st == SupplicantState.AUTHENTICATING ||
+            st == SupplicantState.FOUR_WAY_HANDSHAKE || st == SupplicantState.GROUP_HANDSHAKE
     }
 
     fun varrer() {

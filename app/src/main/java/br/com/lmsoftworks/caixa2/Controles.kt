@@ -99,8 +99,17 @@ class Interruptor(c: Context) : View(c) {
     private var pos = 1f          // 0 = desligado, 1 = ligado
     private var anim: android.animation.ValueAnimator? = null
 
+    /** Enquanto a tela processa o pedido (ligando/desligando), novos toques são ignorados: evita o "clicou duas vezes e embolou". */
+    var bloqueado = false
+
     init {
-        setOnClickListener { aoMudar?.invoke(!ligado) }
+        // o botão já anda na hora do toque (não espera o sistema confirmar) e só depois avisa quem manda no Wi-Fi/Bluetooth
+        setOnClickListener {
+            if (bloqueado) return@setOnClickListener
+            val novo = !ligado
+            ligado = novo
+            aoMudar?.invoke(novo)
+        }
     }
 
     private fun animar() {

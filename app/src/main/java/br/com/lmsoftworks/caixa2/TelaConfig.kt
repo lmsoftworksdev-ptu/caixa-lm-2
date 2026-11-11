@@ -321,6 +321,35 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     opcoes.addView(linha("Brasília", "UTC−3, sem horário de verão", botao(c, "Usar", Cfg.AZUL) {
                         Ajustes.definirFusoManual(-180); FusoHorario.aplicar(); aoMudarFuso(); montar()
                     }))
+                    // Ajuste manual da hora e da data (a caixa não guarda o relógio sem bateria): só aparece com o fuso automático desligado
+                    fun acertar(campo: Int, passo: Int) {
+                        val cal = java.util.Calendar.getInstance()
+                        cal.add(campo, passo)
+                        try {
+                            (c.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager).setTime(cal.timeInMillis)
+                            aoMudarFuso(); montar()
+                        } catch (e: Throwable) { Aviso.mostrar(c, "Não consegui acertar a hora neste aparelho.") }
+                    }
+                    fun passador(valor: String, campo: Int, largura: Int): View = LinearLayout(c).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(FrameLayout(c).apply { background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA); isClickable = true; setOnClickListener { acertar(campo, -1) }; efeitoToque(); addView(icone(c, R.drawable.ic_menos, 24, Color.WHITE), FrameLayout.LayoutParams(24.d(), 24.d(), Gravity.CENTER)) }, LinearLayout.LayoutParams(56.d(), 56.d()))
+                        addView(texto(c, valor, 23, Tema.TEXTO, true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(largura.d(), -2))
+                        addView(FrameLayout(c).apply { background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA); isClickable = true; setOnClickListener { acertar(campo, 1) }; efeitoToque(); addView(icone(c, R.drawable.ic_mais, 24, Color.WHITE), FrameLayout.LayoutParams(24.d(), 24.d(), Gravity.CENTER)) }, LinearLayout.LayoutParams(56.d(), 56.d()))
+                    }
+                    val cal0 = java.util.Calendar.getInstance()
+                    opcoes.addView(linha("Hora", "Acerte a hora da caixa", LinearLayout(c).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(passador("%02d".format(cal0.get(java.util.Calendar.HOUR_OF_DAY)), java.util.Calendar.HOUR_OF_DAY, 56))
+                        addView(texto(c, "h", 20, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 8.d(); rightMargin = 16.d() })
+                        addView(passador("%02d".format(cal0.get(java.util.Calendar.MINUTE)), java.util.Calendar.MINUTE, 56))
+                        addView(texto(c, "min", 20, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 8.d() })
+                    }))
+                    opcoes.addView(linha("Data", "Dia, mês e ano", LinearLayout(c).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(passador("%02d".format(cal0.get(java.util.Calendar.DAY_OF_MONTH)), java.util.Calendar.DAY_OF_MONTH, 56))
+                        addView(passador("%02d".format(cal0.get(java.util.Calendar.MONTH) + 1), java.util.Calendar.MONTH, 56), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+                        addView(passador(cal0.get(java.util.Calendar.YEAR).toString(), java.util.Calendar.YEAR, 84), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+                    }))
                 }
             }
             "conexoes" -> {

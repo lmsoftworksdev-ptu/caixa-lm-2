@@ -21,6 +21,13 @@ import android.widget.Toast
  * Tela principal da caixa (launcher). Fica preta até o Android girar para a horizontal,
  * depois a interface aparece com um fade.
  */
+/** Cria a tela só na primeira vez que ela é usada (menos views e menos memória parados); [criada] é nulo enquanto ninguém abriu. */
+private class TelaSobDemanda<T : View>(private val criar: () -> T) {
+    private var tela: T? = null
+    val criada: T? get() = tela
+    fun obter(): T = tela ?: criar().also { tela = it }
+}
+
 class InicioActivity : Activity() {
     private var retornoAjustesAndroid: View? = null
     private lateinit var miniVideo: FrameLayout
@@ -36,8 +43,10 @@ class InicioActivity : Activity() {
     private lateinit var modalEnergia: ModalEnergia
     private lateinit var cobertura: CoberturaEnergia
     private lateinit var inicio: TelaInicio
-    private lateinit var telaWifi: TelaWifi
-    private lateinit var telaBluetooth: TelaBluetooth
+    private val sobWifi = TelaSobDemanda { montarTela(TelaWifi(this, wifi)) }
+    private val telaWifi: TelaWifi get() = sobWifi.obter()
+    private val sobBluetooth = TelaSobDemanda { montarTela(TelaBluetooth(this, bluetooth)) }
+    private val telaBluetooth: TelaBluetooth get() = sobBluetooth.obter()
     private lateinit var bluetooth: BluetoothControle
 
     /** O celular acabou de conectar ou de começar a tocar: reafirma o volume da caixa depois que ele manda o dele. */
@@ -46,20 +55,26 @@ class InicioActivity : Activity() {
     }
     private lateinit var musica: MusicaControle
     private lateinit var led: LedControle
-    private lateinit var telaLed: TelaLed
+    private val sobLed = TelaSobDemanda { montarTela(TelaLed(this, led)) }
+    private val telaLed: TelaLed get() = sobLed.obter()
     private lateinit var telaMusica: TelaMusica
     private lateinit var telaMidia: TelaMidia
-    private lateinit var telaReceitas: TelaReceitas
-    private lateinit var telaAmplificador: TelaAmplificador
-    private lateinit var telaDiagnostico: TelaDiagnostico
-    private lateinit var telaRadios: TelaRadios
+    private val sobReceitas = TelaSobDemanda { montarTela(TelaReceitas(this)) }
+    private val telaReceitas: TelaReceitas get() = sobReceitas.obter()
+    private val sobAmplificador = TelaSobDemanda { montarTela(TelaAmplificador(this)) }
+    private val telaAmplificador: TelaAmplificador get() = sobAmplificador.obter()
+    private val sobDiagnostico = TelaSobDemanda { montarTela(TelaDiagnostico(this)) }
+    private val telaDiagnostico: TelaDiagnostico get() = sobDiagnostico.obter()
+    private val sobRadios = TelaSobDemanda { montarTela(TelaRadios(this, { lista, i -> tocarRadio(lista, i) }, { lista, i -> tocarCanalTv(lista, i) })) }
+    private val telaRadios: TelaRadios get() = sobRadios.obter()
     private lateinit var telaVideo: TelaVideo
     private lateinit var playerMidia: PlayerMidia
     private lateinit var modalAtualizacao: ModalAtualizacao
     private lateinit var faixaAssistente: br.com.lmsoftworks.caixa2.voz.FaixaAssistente
     private lateinit var assistente: br.com.lmsoftworks.caixa2.voz.Assistente
     private lateinit var alarmes: AlarmeControle
-    private lateinit var telaAlarmes: TelaAlarmes
+    private val sobAlarmes = TelaSobDemanda { montarTela(TelaAlarmes(this, alarmes, lembretes, listas, dormir) { a -> tocarAlarme(a, teste = true) }) }
+    private val telaAlarmes: TelaAlarmes get() = sobAlarmes.obter()
     private lateinit var telaConfig: TelaConfig
     private lateinit var telaPrevisao: TelaPrevisao
     private var previsao: br.com.lmsoftworks.caixa2.voz.Respostas.PrevisaoCompleta? = null
@@ -190,7 +205,7 @@ class InicioActivity : Activity() {
                 val atualView = tela(atual)
                 var sobrando = false
                 for (nome in listOf("inicio", "wifi", "bluetooth", "musica", "midia", "receitas", "amplificador", "radios", "led", "alarmes", "config", "clima", "diagnostico")) {
-                    val v = tela(nome)
+                    val v = telaOuNula(nome) ?: continue      // tela que nunca foi aberta nem existe
                     if (v !== atualView && v.visibility == View.VISIBLE) { sobrando = true; if (agoraMs - sobreposicaoDesde > 600L) { v.visibility = View.INVISIBLE; Cubo.limpar(v) } }
                 }
                 if (!sobrando) sobreposicaoDesde = agoraMs
@@ -263,6 +278,8 @@ class InicioActivity : Activity() {
         }
         bluetooth.aoAntesDeDesligar = { musica.desligar() }
         bluetooth.aoReiniciarParaTrocarModo = { sequenciaEnergia(false) }
+        bluetooth.aoTrocaIniciada = { cobertura.mostrar("Trocando o modo Bluetooth… a caixa vai reiniciar") }      // tela de carregamento já ao apertar
+        bluetooth.aoTrocaFalhou = { cobertura.esconder() }
         bluetooth.aoTravado = {
             Aviso.mostrar(this, "O Bluetooth do aparelho travou: reiniciar a caixa resolve")
             modalEnergia.abrir()
@@ -291,10 +308,6 @@ class InicioActivity : Activity() {
             semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000
             if (videoRecolhido) playerMidia.alternar() else musica.alternar()
         }
-        telaWifi = TelaWifi(this, wifi)
-        telaWifi.visibility = View.GONE
-        telaBluetooth = TelaBluetooth(this, bluetooth)
-        telaBluetooth.visibility = View.GONE
         telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir(if (musica.ehRadio) "radios" else "midia") }) { videoDaMusica() }
         telaMusica.fundoCapa = fundoCapa
         telaMusica.semDados.aoCor = { a, b -> if (atual == "musica") fundo.tema(a, b, 1.9f) }      // sem os dados da música: as cores do fundo mudam sozinhas
@@ -306,14 +319,6 @@ class InicioActivity : Activity() {
         telaMidia.aoAbrirWifi = { ir("wifi") }
         telaMidia.visibility = View.GONE
         relogio.postDelayed({ telaMidia.preCarregar() }, 4_000L)      // a Mídia já abre pronta (e fica montada até a caixa reiniciar)
-        telaReceitas = TelaReceitas(this)
-        telaReceitas.visibility = View.GONE
-        telaAmplificador = TelaAmplificador(this)
-        telaAmplificador.visibility = View.GONE
-        telaDiagnostico = TelaDiagnostico(this)
-        telaDiagnostico.visibility = View.GONE
-        telaRadios = TelaRadios(this, { lista, i -> tocarRadio(lista, i) }, { lista, i -> tocarCanalTv(lista, i) })
-        telaRadios.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
         imagemMiniVideo = SurfaceView(this)
         miniVideo = FrameLayout(this).apply {
@@ -345,14 +350,10 @@ class InicioActivity : Activity() {
                 if (texto != null) telaMidia.pesquisar(texto) else telaMidia.avisoBusca("Não ouvi. Toque no microfone e fale de novo.")
             }, { telaMidia.pesquisandoVoz() })
         }
-        telaLed = TelaLed(this, led)
-        telaLed.visibility = View.GONE
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
         lembretes = LembreteControle(this)
         listas = ListaControle(this)
         dormir = HoraDeDormir(this)
-        telaAlarmes = TelaAlarmes(this, alarmes, lembretes, listas, dormir) { a -> tocarAlarme(a, teste = true) }
-        telaAlarmes.visibility = View.GONE
         telaConfig = TelaConfig(this) { abrir(it) }
         telaConfig.lerVolume = { Math.round(painelVolume.porcento / 10f) }
         telaConfig.definirVolume = { n -> painelVolume.definirSilencioso(n * 10, true) }
@@ -419,16 +420,9 @@ class InicioActivity : Activity() {
             addView(fundoCapa, FrameLayout.LayoutParams(-1, -1))      // a capa desfocada fica ATRÁS das manchas de luz
             addView(fundo, FrameLayout.LayoutParams(-1, -1))
             addView(inicio, FrameLayout.LayoutParams(-1, -1))      // a v2 posiciona tudo no quadro inteiro de 1280x720
-            addView(telaWifi, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaBluetooth, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+            addView(marcadorTelas, FrameLayout.LayoutParams(1, 1))      // as telas criadas sob demanda entram aqui
             addView(telaMusica, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaMidia, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaReceitas, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaAmplificador, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaDiagnostico, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaRadios, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaLed, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
-            addView(telaAlarmes, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(telaConfig, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
             addView(AvisoView(this@InicioActivity).also { Aviso.tela = it; it.translationZ = 40f }, FrameLayout.LayoutParams(-1, -1))
             addView(telaPrevisao, FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
@@ -600,7 +594,7 @@ class InicioActivity : Activity() {
         fundo.tema(corFita, Color.rgb((Color.red(corFita) * .45f).toInt(), (Color.green(corFita) * .45f).toInt(), (Color.blue(corFita) * .45f).toInt()))
         val antes = Cfg.AZUL
         Cfg.AZUL = if (corFita == Color.WHITE) Cfg.COR_FIXA else corFita      // o destaque da tela é a cor da fita (branca: azul)
-        if (Cfg.AZUL != antes) telaLed.atualizar()      // os cartões e deslizadores seguem a cor sem precisar mexer neles
+        if (Cfg.AZUL != antes) sobLed.criada?.atualizar()      // os cartões e deslizadores seguem a cor sem precisar mexer neles
     }
 
     private fun aoMudarLed() {
@@ -634,6 +628,28 @@ class InicioActivity : Activity() {
     private fun aoMudarBluetooth() {
         barra.definirBluetooth(bluetooth.ligado && bluetooth.nomeConectado() != null)
         if (atual == "bluetooth") telaBluetooth.atualizar()
+    }
+
+    /** Marca o lugar na pilha onde as telas criadas sob demanda entram (mesma posição de antes). */
+    private val marcadorTelas by lazy(LazyThreadSafetyMode.NONE) { View(this) }
+
+    private fun <T : View> montarTela(v: T): T {
+        v.visibility = View.GONE
+        conteudo.addView(v, conteudo.indexOfChild(marcadorTelas), FrameLayout.LayoutParams(-1, -1).apply { topMargin = 64.d() })
+        return v
+    }
+
+    /** A tela se já foi criada; nulo se ninguém abriu ainda (para quem só quer mexer no que já existe). */
+    private fun telaOuNula(nome: String): View? = when (nome) {
+        "wifi" -> sobWifi.criada
+        "bluetooth" -> sobBluetooth.criada
+        "receitas" -> sobReceitas.criada
+        "amplificador" -> sobAmplificador.criada
+        "diagnostico" -> sobDiagnostico.criada
+        "radios" -> sobRadios.criada
+        "led" -> sobLed.criada
+        "alarmes" -> sobAlarmes.criada
+        else -> tela(nome)
     }
 
     private fun tela(nome: String): View = when (nome) {
@@ -782,10 +798,10 @@ class InicioActivity : Activity() {
         if (destino == "radios") telaRadios.aoMostrar()
         if (destino == "inicio") {
             telaMidia.fecharTeclado()
-            telaReceitas.fecharMenu()
-            telaAlarmes.fecharMenu()
-            repeat(2) { telaWifi.voltar(); telaConfig.voltar() }
-            telaBluetooth.voltar()
+            sobReceitas.criada?.fecharMenu()
+            sobAlarmes.criada?.fecharMenu()
+            repeat(2) { sobWifi.criada?.voltar(); telaConfig.voltar() }
+            sobBluetooth.criada?.voltar()
         }
         if (destino == "clima") {
             // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
@@ -2051,6 +2067,10 @@ class InicioActivity : Activity() {
 
     private fun sequenciaEnergia(desligar: Boolean) {
         energiaEmCurso = true
+        // O silêncio contínuo (AudioTrack estático em repetição) aborta o app quando a saída muda no meio do desligamento (queda em
+        // AudioTrack::restoreTrack_l ao descer o Bluetooth): solta antes de apagar a fita e desligar o Bluetooth e o Wi-Fi.
+        try { silencioContinuo?.stop(); silencioContinuo?.release() } catch (_: Throwable) { }
+        silencioContinuo = null
         painelVolume.fechar()
         cobertura.mostrar(if (desligar) "Desligando…" else "Reiniciando…")
         // Tudo termina direito ANTES de desligar, para a caixa voltar limpa: Alexa e microfone, música e vídeo, a fita, o Bluetooth

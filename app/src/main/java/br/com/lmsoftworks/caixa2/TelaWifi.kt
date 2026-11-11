@@ -28,6 +28,10 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
     private var redeSenha: WifiControle.Rede? = null
     private var assinatura = ""
     private var detalheEstado = ""
+    /** O que a pessoa pediu (ligar/desligar) e ainda não terminou: o botão e os textos já mostram isso. */
+    private var pendente: Boolean? = null
+    private var pendenteAte = 0L
+    private val tiquePendente = object : Runnable { override fun run() { if (pendente != null) { atualizar(true); postDelayed(this, 300) } } }
 
     val emSenha: Boolean get() = telaTexto.aberto
     val emDetalhe: Boolean get() = detalhe.aberto
@@ -57,7 +61,13 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         principal.addView(cartaoLista, LinearLayout.LayoutParams(0, -1, 1f).apply { leftMargin = 24.d() })
         addView(principal, LayoutParams(-1, -1))
 
-        interruptor.aoMudar = { v -> wifi.definirLigado(v) }
+        interruptor.aoMudar = { v ->
+            pendente = v; pendenteAte = android.os.SystemClock.uptimeMillis() + 8_000L
+            interruptor.bloqueado = true
+            wifi.definirLigado(v)
+            atualizar(true)
+            removeCallbacks(tiquePendente); postDelayed(tiquePendente, 300)
+        }
 
         telaTexto.aoFechar = { cancelarSenha() }
         addView(telaTexto, LayoutParams(-1, -1))
@@ -96,18 +106,21 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         if (emSenha) { telaTexto.fechar(); principal.visibility = View.VISIBLE }
         fecharDetalhe()
         wifi.limparErro()
+        wifi.sincronizar()
         atualizar(true)
     }
 
     fun atualizar(forcar: Boolean = false) {
+        pendente?.let { if (wifi.ligado == it || android.os.SystemClock.uptimeMillis() > pendenteAte) { pendente = null; interruptor.bloqueado = false } }
         val ass = buildString {
+            append(pendente).append('|').append(wifi.tentando()).append('|')
             append(wifi.ligado).append('|').append(wifi.conectadoSsid).append('|').append(wifi.conectando)
             append('|').append(wifi.erro).append('|').append(wifi.erroSsid).append('|').append(Cfg.AZUL)
             wifi.redes.forEach { append('|').append(it.ssid).append(it.nivel) }
         }
         if (!forcar && ass == assinatura) return
         assinatura = ass
-        interruptor.ligado = wifi.ligado
+        interruptor.ligado = pendente ?: wifi.ligado
         montarHero()
         montarLista()
         // a janela de detalhes só fecha se a conexão mudar enquanto ela está aberta
@@ -122,7 +135,11 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         fun cartaoTexto(s: String, tam: Int, cor: Int, media: Boolean = false) =
             texto(c, s, tam, cor, media).apply { setLineSpacing(0f, 1.15f) }
         val gap = LinearLayout.LayoutParams(-2, -2).apply { topMargin = 12.d() }
-        if (!wifi.ligado) {
+        val p = pendente
+        if (p != null) {
+            hero.addView(AnelIcone(c, if (p) R.drawable.ic_wifi else R.drawable.ic_wifi_off, 96, Color.parseColor("#7FB4FF"), Color.parseColor("#293D8BFF"), 0))
+            hero.addView(cartaoTexto(if (p) "Ligando…" else "Desligando…", 20, Color.parseColor("#7FB4FF"), true), gap)
+        } else if (!wifi.ligado) {
             hero.addView(AnelIcone(c, R.drawable.ic_wifi_off, 96, Tema.TEXTO3, Color.parseColor("#12FFFFFF"), 0))
             hero.addView(cartaoTexto("Desligado", 20, Tema.TEXTO3, true), gap)
             hero.addView(cartaoTexto("Ligue o Wi-Fi para ouvir músicas, vídeos e usar o assistente.", 18, Tema.TEXTO2), gap)
@@ -132,6 +149,9 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
             hero.addView(cartaoTexto("● Conectado", 20, Tema.OK, true), gap)
             hero.addView(cartaoTexto(ssid, 32, Tema.TEXTO, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, gap)
             hero.addView(cartaoTexto("Sinal ${qualidade[wifi.nivelAtual().coerceIn(0, 4)].lowercase()} · IP ${wifi.ip()}", 18, Tema.TEXTO2), gap)
+        } else if (wifi.tentando()) {
+            hero.addView(AnelIcone(c, R.drawable.ic_wifi, 96, Color.parseColor("#7FB4FF"), Color.parseColor("#293D8BFF"), 0))
+            hero.addView(cartaoTexto("Conectando…", 20, Color.parseColor("#7FB4FF"), true), gap)
         } else {
             hero.addView(AnelIcone(c, R.drawable.ic_wifi_off, 96, Tema.VERMELHO_SUAVE, Color.parseColor("#24FF4D5E"), 0))
             hero.addView(cartaoTexto("Sem conexão", 20, Tema.VERMELHO_SUAVE, true), gap)
@@ -141,15 +161,22 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         if (msg != null) hero.addView(cartaoTexto("${wifi.erroSsid ?: "Rede"}: $msg", 18, Tema.VERMELHO_SUAVE), gap)
     }
 
-    private fun vazio(s: String): View = FrameLayout(c).apply {
-        addView(texto(c, s, 22, Tema.TEXTO3), LayoutParams(-2, -2, Gravity.CENTER))
+    private fun vazio(s: String, carregando: Boolean = false): View = FrameLayout(c).apply {
+        if (carregando) addView(LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(Carregando(c), LinearLayout.LayoutParams(48.d(), 48.d()))
+            addView(texto(c, s, 22, Tema.TEXTO2), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 14.d() })
+        }, LayoutParams(-2, -2, Gravity.CENTER))
+        else addView(texto(c, s, 22, Tema.TEXTO3), LayoutParams(-2, -2, Gravity.CENTER))
         minimumHeight = 400.d()
     }
 
     private fun montarLista() {
         lista.removeAllViews()
+        pendente?.let { lista.addView(vazio(if (it) "Ligando…" else "Desligando…", true), LinearLayout.LayoutParams(-1, 480.d())); return }
         if (!wifi.ligado) { lista.addView(vazio("Wi-Fi desligado"), LinearLayout.LayoutParams(-1, 480.d())); return }
-        if (wifi.redes.isEmpty()) { lista.addView(vazio("Procurando redes…"), LinearLayout.LayoutParams(-1, 480.d())); return }
+        if (wifi.redes.isEmpty()) { lista.addView(vazio("Procurando redes…", true), LinearLayout.LayoutParams(-1, 480.d())); return }
         // a rede conectada fica no topo
         val ordenadas = wifi.redes.sortedByDescending { it.ssid == wifi.conectadoSsid }
         for ((i, r) in ordenadas.withIndex()) {
