@@ -339,8 +339,7 @@ class TelaMusica(
     fun atualizar(forcar: Boolean = false) {
         val tem = musica.temMusica
         // o celular tocou sem mandar os dados: a tela "Tocando em ..." fica até o aparelho sair ou os dados chegarem
-        if (tem || !bt.algumConectado) sessaoSemDados = false else if (bt.celularTocando || musica.tocando) sessaoSemDados = true
-        val painel = !tem && sessaoSemDados
+        val painel = semDadosAtivo()
         semDados.visibility = if (painel) View.VISIBLE else View.GONE
         if (painel) semDados.atualizar()
         fundoCapa?.definir(if (tem) musica.capa else null)
@@ -405,10 +404,9 @@ class TelaMusica(
         }
     }
 
-    /** O celular está tocando sem mandar os dados da música (a tela "Tocando de ..." é a que vale). Também liga a sessão, se ainda não estava. */
     fun semDadosAtivo(): Boolean {
         if (musica.temMusica || !bt.algumConectado) { sessaoSemDados = false; return false }
-        if (bt.celularTocando || musica.tocando) sessaoSemDados = true
+        if (bt.celularConfirmado) sessaoSemDados = true
         return sessaoSemDados
     }
 

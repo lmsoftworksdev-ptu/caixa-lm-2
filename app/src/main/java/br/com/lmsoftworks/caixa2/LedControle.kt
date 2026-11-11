@@ -18,6 +18,7 @@ import android.os.SystemClock
 import java.util.ArrayDeque
 import java.util.Calendar
 import java.util.UUID
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -175,6 +176,19 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Fade-out da rotina "boa noite": multiplica o brilho por [f] (1 = normal, 0 = preto) sem mexer no brilho guardado. Não é gravado. */
     @Volatile private var escalaFade = 1f
+    private var pulsoAssistenteDesde: Long? = null
+
+    fun definirPulsoAssistente(ativo: Boolean) {
+        if (ativo == (pulsoAssistenteDesde != null)) return
+        pulsoAssistenteDesde = if (ativo) SystemClock.uptimeMillis() else null
+        corPendente = null
+        pendenteUrgente = false
+        pendenteClara = false
+        ultimaCorEnviada = -1
+        aplicar()
+        handler.removeCallbacks(ciclo)
+        if (this.ativo) handler.postDelayed(ciclo, ESPACO_COR_MS)
+    }
 
     fun definirEscalaFade(f: Float) {
         escalaFade = f.coerceIn(0f, 1f)
@@ -185,6 +199,11 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Cor que a fita mostra agora (com brilho e efeito aplicados). A prévia da tela usa a mesma. */
     fun corFinal(t: Float): Int {
+        pulsoAssistenteDesde?.let { desde ->
+            val fase = (SystemClock.uptimeMillis() - desde) % 2400L / 2400.0
+            val intensidade = 0.10f + 0.90f * (0.5 - 0.5 * cos(2 * Math.PI * fase)).toFloat()
+            return escalar(Color.rgb(0, 65, 255), brilho / 100f * intensidade)
+        }
         if (!ligado) return Color.BLACK
         val base = brilho / 100f * escalaFade
         return when (modo) {
@@ -336,13 +355,20 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     private val ciclo = object : Runnable {
         override fun run() {
             if (!ativo) return
+            val pulsoAssistente = pulsoAssistenteDesde != null
             // o Fade manda em intervalos fixos: só quando mudava 3+ pontos ele engasgava perto do pico da onda
-            if (conectado && ligado && modo != "fixo") {
+            if (conectado && (pulsoAssistente || (ligado && modo != "fixo"))) {
                 val c = corFinal(SystemClock.uptimeMillis() / 1000f)
                 val parado = SystemClock.uptimeMillis() - ultimoEnvioCor > REPETIR_MS
-                if (mudouMuito(c, ultimaCorEnviada) || (modoContinuo() && parado) || modo == "respira") {   if (enviarCor(c)) ultimaCorEnviada = c }
+                if (pulsoAssistente || mudouMuito(c, ultimaCorEnviada) || (modoContinuo() && parado) || modo == "respira") {
+                    if (enviarCor(c)) ultimaCorEnviada = c
+                }
             }
-            handler.postDelayed(this, if (modo == "ritmo") INTERVALO_RITMO_MS else if (modo == "respira") ESPACO_COR_MS else INTERVALO_EFEITO_MS)
+            handler.postDelayed(this, when {
+                pulsoAssistente || modo == "respira" -> ESPACO_COR_MS
+                modo == "ritmo" -> INTERVALO_RITMO_MS
+                else -> INTERVALO_EFEITO_MS
+            })
         }
     }
 
@@ -450,7 +476,7 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     private fun enfileirar(q: ByteArray) { fila.add(q); bombear() }
 
     /** Efeitos mudam a cor muitas vezes por segundo: usam o modo música da fita (comando 36), como o app oficial. */
-    private fun modoContinuo() = modo == "ritmo" || modo == "arco" || modo == "respira" || modo == "ambilight"
+    private fun modoContinuo() = pulsoAssistenteDesde != null || modo == "ritmo" || modo == "arco" || modo == "respira" || modo == "ambilight"
     private var emContinuo = false
 
     private var pendenteClara = false
@@ -462,13 +488,20 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Devolve false se ficou de fora: um pulso aceso do Rítmico que ainda não saiu não pode ser trocado por "apagado" (a batida sumiria). */
     private fun enviarCor(c: Int, urgente: Boolean = false): Boolean {
+        val pulsoAssistente = pulsoAssistenteDesde != null
+        if (pulsoAssistente && urgente) return false
         val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
         val clara = max(r, max(g, b)) > 40
-        if (modo == "ritmo" && corPendente != null && pendenteClara && !clara) return false
+        if (!pulsoAssistente && modo == "ritmo" && corPendente != null && pendenteClara && !clara) return false
         pendenteClara = clara
         pendenteUrgente = urgente && modo == "ritmo"
         // último byte do quadro 36 = tempo do fade da fita: curto no rítmico, longo nos efeitos suaves
-        val fade = if (modo == "ritmo") SUAVIZAR else if (modo == "ambilight") SUAVIZAR_AMBI else if (modo == "respira") SUAVIZAR_FADE else SUAVIZAR_LENTO
+        val fade = when {
+            pulsoAssistente || modo == "respira" -> SUAVIZAR_FADE
+            modo == "ritmo" -> SUAVIZAR
+            modo == "ambilight" -> SUAVIZAR_AMBI
+            else -> SUAVIZAR_LENTO
+        }
         corPendente = if (modoContinuo()) quadro(0x0b, intArrayOf(0x36, 0xd1, r, g, b, 0x00, 0x00, fade))
         else quadro(0x0b, intArrayOf(0x31, r, g, b, 0x00, 0x00, 0x0f))
         bombear()
@@ -526,7 +559,7 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     /** Manda para a fita o estado atual (ligado/desligado e a cor). */
     private fun aplicar() {
         if (!conectado) return
-        if (!ligado) {
+        if (!ligado && pulsoAssistenteDesde == null) {
             enfileirar(quadro(0x0b, intArrayOf(0x3b, 0x24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
             emContinuo = false
             ultimaCorEnviada = -1
@@ -628,27 +661,7 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** Pergunta ao Android (dumpsys) qual faixa de áudio está tocando agora e devolve a sessão dela. */
-    private fun acharSessaoTocando(): Int {
-        try {
-            val proc = Runtime.getRuntime().exec(arrayOf("dumpsys", "media.audio_flinger"))
-            val regra = Regex("""\b(yes|no)\s+(\d+)\s+(\d+)\s+[0-9a-fA-F]{8}\s+[0-9a-fA-F]{8}\s+(\d+)\s+(\d+)\s""")
-            val minhaPid = android.os.Process.myPid()
-            var sessao = -1
-            proc.inputStream.bufferedReader().useLines { linhas ->
-                for (l in linhas) {
-                    val m = regra.find(l) ?: continue
-                    if (m.groupValues[1] == "yes" && m.groupValues[2].toInt() != minhaPid && sessao < 0) {
-                        sessao = m.groupValues[4].toInt()
-                    }
-                }
-            }
-            proc.waitFor()
-            return sessao
-        } catch (e: Exception) {
-            Log.w(TAG, "nao foi possivel consultar o audio", e)
-            return -1
-        }
-    }
+    private fun acharSessaoTocando(): Int = SessaoAudioAndroid.externa(android.os.Process.myPid())
 
     private fun trocarSessao(nova: Int) {
         if (!monitorAtivo) return

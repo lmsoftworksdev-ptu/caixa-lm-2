@@ -3,13 +3,14 @@ package br.com.lmsoftworks.caixa2
 import android.content.Context
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 
 /**
- * Equalizador da caixa, para TUDO que ela toca. O som do app (música e vídeo) passa por um equalizador de software dentro do player
- * ([EqualizadorSoftware]): sem estalo. O som do celular por Bluetooth, que o app não toca, é equalizado pelo Equalizer e pelo BassBoost do Android na
- * saída geral; esses efeitos só ficam ligados enquanto é o celular que está tocando (senão o som do app seria equalizado duas vezes e os efeitos
- * ligariam e desligariam a cada faixa). Ajustes guardados.
+ * O player e o Bluetooth usam os mesmos efeitos nativos, cada um na própria sessão de áudio.
+ * O player recorre a [EqualizadorSoftware] se a ROM não aceitar os efeitos na sessão dele.
  */
 object Amplificador {
     private const val TAG = "Amplificador"
@@ -30,15 +31,21 @@ object Amplificador {
     @Volatile var disponivel = true; private set      // o equalizador de software sempre existe
     /** Sobe a cada mudança: o equalizador do player confere e refaz os filtros. */
     @Volatile var versao = 0; private set
-    /** O som que sai agora é o do celular por Bluetooth: os efeitos do Android estão ligados na saída geral. */
+    /** A sessão do Bluetooth pode continuar com os efeitos armados durante uma pausa. */
     private var fonteBluetooth = false
+    private val principal = Handler(Looper.getMainLooper())
+    private var sessaoBluetooth = -1
+    private var consultandoBluetooth = false
+    private var consultarDepoisDe = 0L
+    private var tentarRapidoAte = 0L
+    private val reconsultaBluetooth = Runnable { definirFonteBluetooth(true) }
     var ligado = true; private set
     /** Índice da predefinição escolhida, ou -1 quando os controles foram mexidos à mão. */
     var predefinicao = 0; private set
     var graves = 0; private set      // 0..1000
 
-    private var eq: Equalizer? = null
-    private var bass: BassBoost? = null
+    private var efeitosBluetooth: EfeitosSessao? = null
+    private val sessoesLocais = LinkedHashSet<SessaoLocal>()
     var nBandas = 5; private set
     var minMb = -1500; private set
     var maxMb = 1500; private set
@@ -74,24 +81,12 @@ object Amplificador {
         graves = when (i) { 1 -> 500; 6 -> 350; 5 -> 200; else -> 0 }
     }
 
-    /** Efeitos do Android na saída geral (sessão 0): só existem quando o menu pede "também no celular (Bluetooth)". */
-    private fun criarEfeitosDoSistema() {
-        try { if (eq == null) eq = Equalizer(0, 0) } catch (t: Throwable) { Log.w(TAG, "equalizador do sistema indisponivel", t) }
-        try { if (bass == null) bass = BassBoost(0, 0) } catch (t: Throwable) { Log.w(TAG, "graves do sistema indisponivel", t) }
-    }
+    private class EfeitosSessao(id: Int) {
+        val eq = try { Equalizer(0, id) } catch (e: RuntimeException) { Log.w(TAG, "equalizador indisponível na sessão $id", e); null }
+        val bass = try { BassBoost(0, id) } catch (e: RuntimeException) { Log.w(TAG, "graves indisponíveis na sessão $id", e); null }
 
-    private fun liberarEfeitosDoSistema() {
-        try { eq?.enabled = false; eq?.release() } catch (_: Throwable) { }
-        try { bass?.enabled = false; bass?.release() } catch (_: Throwable) { }
-        eq = null; bass = null
-    }
-
-    private fun aplicar() {
-        versao++      // o equalizador do player refaz os filtros
-        if (!fonteBluetooth) return
-        try {
-            val e = eq
-            if (e != null) {
+        fun aplicar(): Boolean = try {
+            eq?.let { e ->
                 val n = e.numberOfBands.toInt()
                 val mn = e.bandLevelRange[0].toInt(); val mx = e.bandLevelRange[1].toInt()
                 for (b in 0 until n) {
@@ -101,16 +96,93 @@ object Amplificador {
                 e.enabled = ligado
             }
             bass?.let { b -> b.setStrength((if (ligado) graves else 0).toShort()); b.enabled = ligado && graves > 0 }
-        } catch (t: Throwable) { Log.w(TAG, "nao consegui aplicar", t) }
+            true
+        } catch (t: RuntimeException) { Log.w(TAG, "nao consegui aplicar", t); false }
+
+        fun liberar() {
+            try { eq?.release() } catch (_: RuntimeException) {}
+            try { bass?.release() } catch (_: RuntimeException) {}
+        }
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    internal class SessaoLocal(private val software: EqualizadorSoftware) {
+        private var id = 0
+        private var efeitos: EfeitosSessao? = null
+
+        fun ligar(sessao: Int) {
+            if (id == sessao && efeitos != null) return
+            desligar()
+            if (sessao <= 0) return
+            val novos = EfeitosSessao(sessao)
+            if (novos.eq?.hasControl() != true || novos.bass?.hasControl() != true || !novos.aplicar()) {
+                novos.liberar()
+                return
+            }
+            id = sessao
+            efeitos = novos
+            sessoesLocais.add(this)
+            software.efeitosNativos = true
+            Log.d(TAG, "Player sessão $sessao: equalizador nativo e reforço de graves")
+        }
+
+        fun atualizar() {
+            if (efeitos?.aplicar() == false) desligar()
+        }
+
+        fun desligar() {
+            efeitos?.liberar()
+            efeitos = null
+            id = 0
+            sessoesLocais.remove(this)
+            software.efeitosNativos = false
+        }
+    }
+
+    private fun aplicar() {
+        versao++
+        efeitosBluetooth?.aplicar()
+        sessoesLocais.toList().forEach { it.atualizar() }
     }
 
     /** Quem manda: a tela principal, quando o som que sai passa a ser o do celular por Bluetooth (verdadeiro) ou o do app (falso). */
-    fun definirFonteBluetooth(v: Boolean) {
-        if (v == fonteBluetooth) return
-        fonteBluetooth = v
-        if (v) criarEfeitosDoSistema() else liberarEfeitosDoSistema()
-        aplicar()
-        Log.d(TAG, "som do ${if (v) "celular (Bluetooth): efeitos do Android ligados" else "app: equalizador do player"}")
+    fun definirFonteBluetooth(v: Boolean, consultarAgora: Boolean = false) {
+        if (v != fonteBluetooth) {
+            fonteBluetooth = v
+            consultarDepoisDe = 0L
+            if (!v) {
+                principal.removeCallbacks(reconsultaBluetooth)
+                efeitosBluetooth?.liberar()
+                efeitosBluetooth = null
+                sessaoBluetooth = -1
+            }
+        }
+        if (v && consultarAgora) {
+            consultarDepoisDe = 0L
+            tentarRapidoAte = SystemClock.uptimeMillis() + 1_500L
+        }
+        if (!v || consultandoBluetooth || SystemClock.uptimeMillis() < consultarDepoisDe) return
+        consultandoBluetooth = true
+        Thread {
+            val sessao = SessaoAudioAndroid.bluetooth()
+            principal.post {
+                consultandoBluetooth = false
+                if (fonteBluetooth) {
+                    val agora = SystemClock.uptimeMillis()
+                    val tentarRapido = sessao <= 0 && agora < tentarRapidoAte
+                    consultarDepoisDe = agora + if (sessao > 0) 3000L else if (tentarRapido) 180L else 1000L
+                    if (tentarRapido) principal.postDelayed(reconsultaBluetooth, 180L)
+                    if (sessao > 0 && (sessao != sessaoBluetooth || efeitosBluetooth == null)) {
+                        efeitosBluetooth?.liberar()
+                        sessaoBluetooth = sessao
+                        val efeitos = EfeitosSessao(sessao)
+                        efeitosBluetooth = efeitos.takeIf { it.eq != null || it.bass != null }
+                        efeitos.aplicar()
+                        Log.d(TAG, "Bluetooth sessão $sessao: equalizador=${efeitos.eq?.enabled}, graves=${efeitos.bass?.enabled}")
+                    }
+                }
+            }
+        }.start()
     }
 
     fun definirLigado(v: Boolean) { ligado = v; aplicar(); guardar() }

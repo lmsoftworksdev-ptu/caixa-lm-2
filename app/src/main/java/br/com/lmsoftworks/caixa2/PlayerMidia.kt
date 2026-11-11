@@ -84,21 +84,27 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     private var ultimoControle: ControleCarga? = null
+    private val efeitosLocais = HashMap<ExoPlayer, Amplificador.SessaoLocal>()
 
     private fun novoExo(): ExoPlayer {
         val controle = ControleCarga()
         ultimoControle = controle
-        // o som passa pelo equalizador de software do menu Equalizador (sem os efeitos do Android, que fazem estalo)
+        val software = EqualizadorSoftware()
+        val efeitos = Amplificador.SessaoLocal(software)
         val renderers = object : androidx.media3.exoplayer.DefaultRenderersFactory(ctx) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
                 androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .setAudioProcessors(arrayOf(EqualizadorSoftware()))
+                    .setAudioProcessors(arrayOf(software))
                     .build()
         }
         val p = ExoPlayer.Builder(ctx, renderers).setLoadControl(controle).build()
+        efeitosLocais[p] = efeitos
         p.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                efeitosLocais[p]?.ligar(audioSessionId)
+            }
             override fun onPlaybackStateChanged(state: Int) {
                 if (p !== player) return
                 if (state == Player.STATE_BUFFERING) Log.d(TAG, "carregando: posicao=${p.currentPosition / 1000}s, guardado adiante=${(p.bufferedPosition - p.currentPosition) / 1000}s")
@@ -118,7 +124,20 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 val t = m.title?.toString()?.trim().orEmpty()
                 if (t.isNotEmpty() && t != item?.titulo) { item = item?.copy(canal = t); aoMudar() }
             }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (p === player) { tocando = isPlaying; if (isPlaying) aoComecou?.invoke(); aoMudar() } }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) efeitosLocais[p]?.ligar(p.audioSessionId)
+                if (p === player) {
+                    tocando = isPlaying
+                    if (isPlaying) {
+                        if (fadeAoComecarMs > 0) {
+                            Log.d(TAG, "Reprodução começou com fade-in de ${fadeAoComecarMs} ms")
+                            rampa(0f, 1f, fadeAoComecarMs) { }
+                        }
+                        aoComecou?.invoke()
+                    }
+                    aoMudar()
+                }
+            }
             override fun onPlayerError(e: PlaybackException) {
                 if (p !== player) { if (p === proximoPlayer) cancelarFade() else if (p === preVideo?.player) liberarPreVideo(); return }
                 Log.w(TAG, "erro no player", e)
@@ -134,6 +153,12 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             }
         })
         return p
+    }
+
+    private fun liberarExo(p: ExoPlayer?) {
+        if (p == null) return
+        efeitosLocais.remove(p)?.desligar()
+        try { p.release() } catch (_: RuntimeException) {}
     }
 
     // ---------------------------------------------------------------- pedidos
@@ -219,7 +244,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun liberarPreVideo() {
         val pv = preVideo ?: return
         preVideo = null
-        try { pv.player.release() } catch (_: Throwable) { }
+        liberarExo(pv.player)
     }
 
     private fun verificarPreVideo() {
@@ -257,14 +282,13 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         player = novo
         pv.controle.tetoUs = Long.MAX_VALUE      // daqui em diante guarda o que precisar, como qualquer vídeo
         superficie?.let { novo.setVideoSurfaceView(it) }
-        try { antigo?.release() } catch (_: Throwable) { }
+        liberarExo(antigo)
         relacionados = pv.fonte.relacionados; modoMusica = pv.fonte.musica; infoExtra = infoDe(pv.fonte)
         novo.repeatMode = Player.REPEAT_MODE_OFF
         val vaiTocar = comecarTocando
         comecarTocando = true
-        novo.playWhenReady = vaiTocar
         cancelarRampa(); fracaoVolume = 1f
-        if (vaiTocar) { novo.volume = 0f; rampa(0f, 1f, 600L) { } } else novo.volume = volumeBase
+        if (vaiTocar) tocarComFade(novo, 600L) else novo.volume = volumeBase
         nivelador.novaFaixa(); nivelador.ligar(novo.audioSessionId)
         carregando = novo.playbackState != Player.STATE_READY
         tocando = novo.isPlaying
@@ -290,6 +314,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     private fun iniciarItemAgora(r: Resultado, video: Boolean, recuperando: Boolean = false) {
+        retomarAposAssistente = false
         if (!recuperando) { recuperacoes = 0; retomarEm = 0L }
         // pega o foco de áudio JÁ, antes de achar o endereço da faixa (leva uns segundos): senão, quando o assistente fecha e solta o dele, o
         // foco volta para o Bluetooth, que manda "tocar" ao celular, e a música do celular volta por cima da que foi pedida
@@ -312,7 +337,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 assumirPreVideo(pv, r)
                 return
             }
-            try { pv.player.release() } catch (_: Throwable) { }
+            liberarExo(pv.player)
         }
         player?.stop(); player?.clearMediaItems()
         aoMudar()
@@ -395,6 +420,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         // pede o foco de áudio: o A2DP da caixa perde o dele e manda "pausar" ao celular
         try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
         val p = criar()
+        p.playWhenReady = false
         val origem = origemDe(fonte)
         p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !ehVideo).setMaxVideoSize(if (ehCanalTv) 1280 else Int.MAX_VALUE, if (ehCanalTv) 720 else Int.MAX_VALUE).build()      // canal ao vivo: no máximo 720p (o aparelho e a internet agradecem)
@@ -404,10 +430,8 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         p.prepare()
         nivelador.novaFaixa(); nivelador.ligar(p.audioSessionId)
         val vaiTocar = comecarTocando
-        p.playWhenReady = vaiTocar
         comecarTocando = true
-        // entra em fade-in (1 s), sem corte seco
-        if (vaiTocar) { p.volume = 0f; rampa(0f, 1f, 1000L) { } } else p.volume = volumeBase
+        if (vaiTocar) tocarComFade(p, 1000L) else p.volume = volumeBase
     }
 
     /** Rádio da internet: a URL do fluxo (mp3, aac, HLS...) não é do YouTube. */
@@ -462,18 +486,31 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (p.isPlaying) pausarSuave()
         else {
             if (p.playbackState == Player.STATE_ENDED) p.seekTo(0)
-            p.volume = 0f; p.play()
-            rampa(0f, 1f, 250L) { }          // volta com um fade-in curto
+            tocarComFade(p, 250L)
         }
     }
 
     // ---------------------------------------------------------------- fade ao pausar e ao trocar de música
 
     private var rampaAtual: Runnable? = null
+    private var fadeAoComecarMs = 0L
     private var fracaoVolume = 1f
     private var saindo = false
 
-    private fun cancelarRampa() { rampaAtual?.let { handler.removeCallbacks(it) }; rampaAtual = null; saindo = false }
+    private fun cancelarRampa() {
+        rampaAtual?.let { handler.removeCallbacks(it) }
+        rampaAtual = null
+        fadeAoComecarMs = 0L
+        saindo = false
+    }
+
+    private fun tocarComFade(p: ExoPlayer, duracaoMs: Long) {
+        cancelarRampa()
+        fadeAoComecarMs = duracaoMs
+        fracaoVolume = 0f
+        p.volume = 0f
+        p.play()
+    }
 
     private fun restaurarVolume() { fracaoVolume = 1f; player?.volume = volumeBase }
 
@@ -599,8 +636,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         retomarAposAssistente = false
         val p = player ?: return
         if (p.isPlaying) return
-        p.volume = 0f; p.play()
-        rampa(0f, 1f, 1000L) { }
+        tocarComFade(p, 1000L)
     }
 
     /** Volume do player (0..1): o assistente abaixa enquanto escuta e fala. */
@@ -696,7 +732,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         novo.playWhenReady = true
         if (indice + 1 >= fila.size) { fila = fila + relacionadosNovos(); relacionados = emptyList() }
         player = novo
-        try { antigo.release() } catch (_: Throwable) {}
+        liberarExo(antigo)
         nivelador.novaFaixa(); nivelador.ligar(novo.audioSessionId)
         infoExtra = infoDe(pre.fonte)
         indice++
@@ -714,7 +750,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     /** Descarta a próxima já carregada e volta o volume da atual (o usuário pulou, pausou ou mexeu na barra). */
     private fun cancelarFade() {
         preparada = null
-        try { proximoPlayer?.release() } catch (_: Throwable) {}
+        liberarExo(proximoPlayer)
         proximoPlayer = null
         if (emFade) { emFade = false; player?.volume = volumeBase }
     }
@@ -728,6 +764,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun parar() {
         geracao++
+        cancelarRampa()
         cancelarFade()
         liberarPreVideo()
         player?.stop(); player?.clearMediaItems()
@@ -737,10 +774,11 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
 
     fun liberar() {
         geracao++
+        cancelarRampa()
         cancelarFade()
         liberarPreVideo()
         handler.removeCallbacks(vigia)
         nivelador.desligar()
-        player?.release(); player = null
+        liberarExo(player); player = null
     }
 }

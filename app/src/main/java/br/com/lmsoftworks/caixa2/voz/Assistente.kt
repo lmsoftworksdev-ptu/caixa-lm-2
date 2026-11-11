@@ -141,11 +141,12 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     private val main = Handler(Looper.getMainLooper())
     private var escuta: EscutaAssistente? = null
+    private var encerrandoEscuta = false
     private var ativo = false
     private var carregando = false
     @Volatile var estado = EstadoVoz.DESLIGADA; private set
     /** Cada pedido novo sobe o número: respostas de pedidos antigos (internet lenta) são ignoradas. */
-    private var geracao = 0
+    @Volatile private var geracao = 0
     /** Se não for null, o pedido atual é uma busca por voz: o texto vai para cá e nada é executado. */
     private var destinoBusca: ((String?) -> Unit)? = null
     private var aoOuvirBusca: (() -> Unit)? = null
@@ -172,8 +173,19 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         ativo = false
         geracao++
         TonsVoz.pararPensando()
-        escuta?.parar(); escuta = null
-        Fala.parar()
+        val anterior = escuta
+        escuta = null
+        if (anterior != null) {
+            encerrandoEscuta = true
+            Thread({
+                anterior.parar()
+                main.post {
+                    encerrandoEscuta = false
+                    if (ativo) comecarChamada()
+                }
+            }, "encerrar-escuta").start()
+        }
+        if (Fala.falando) Fala.parar()
         acoes.abafar(false)
         faixa.esconder()
         estado = EstadoVoz.DESLIGADA
@@ -196,9 +208,9 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
     }
 
     private fun comecarChamada() {
+        if (encerrandoEscuta || escuta != null) return
         val m = modelo ?: return
         MIC_COMUNICACAO = try { File(ctx.getExternalFilesDir(null), "mic_comunicacao").exists() } catch (e: Throwable) { false }
-        escuta?.parar()
         try {
             val gramatica = (FRASES_CHAMADA + ISCAS).joinToString(prefix = "[", postfix = ", \"[unk]\"]") { "\"$it\"" }
             val rec = Recognizer(m, TAXA, gramatica)
@@ -247,7 +259,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         if (Fala.falando) return
         ultimaChamada = agora
         Log.d(TAG, "chamada (openWakeWord): nota=${"%.2f".format(nota)}")
-        main.post { if (ativo && (estado == EstadoVoz.ESPERANDO_CHAMADA || estado == EstadoVoz.RESPONDENDO || estado == EstadoVoz.PENSANDO)) acordou() }
+        main.post { aceitarChamada() }
     }
 
     private fun verificarChamada(json: String?, campo: String) {
@@ -269,8 +281,12 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         // Enquanto a caixa FALA o microfone ouve a voz dela: só vale "ei/oi/ok + nome" completo (ou o nome sozinho, terminado).
         val soNome = texto in SO_NOME
         if (Fala.falando && !soNome && !REGEX_CHAMADA_FALANDO.matches(texto)) return
-        // vale também no meio de uma resposta ou de uma pesquisa: a caixa para o que está fazendo e escuta de novo
-        main.post { if (ativo && (estado == EstadoVoz.ESPERANDO_CHAMADA || estado == EstadoVoz.RESPONDENDO || estado == EstadoVoz.PENSANDO)) acordou() }
+        main.post { aceitarChamada() }
+    }
+
+    private fun aceitarChamada() {
+        // Uma nova detecção do nome não deve invalidar a transcrição ou a pesquisa em andamento.
+        if (ativo && (estado == EstadoVoz.ESPERANDO_CHAMADA || estado == EstadoVoz.RESPONDENDO)) acordou()
     }
 
     // ---------------------------------------------------------------- pedido
@@ -294,17 +310,25 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         acordou()
     }
 
-    /** O usuário tocou na tela: para de falar, de pesquisar e de ouvir, e fecha o assistente. */
+    /** Cancela a sessão atual e fecha o assistente. */
     fun cancelar() {
-        geracao++
-        TonsVoz.pararPensando()
-        Fala.parar()
+        Log.d(TAG, "sessao cancelada pelo toque (estado=$estado)")
+        val cancelada = ++geracao
+        pendente = null
         escuta?.cancelarPedido()
         val busca = destinoBusca; destinoBusca = null
         escuta?.textoAoVivo = false
-        acoes.abafar(false)
         faixa.esconder()
         estado = if (escuta != null) EstadoVoz.ESPERANDO_CHAMADA else estado
+        // Começa o fade antes de executar as chamadas síncronas dos serviços de áudio.
+        faixa.postOnAnimation {
+            main.post {
+                if (cancelada != geracao) return@post
+                TonsVoz.pararPensando()
+                if (Fala.falando) Fala.parar()
+                acoes.abafar(false)
+            }
+        }
         busca?.invoke(null)
     }
 
@@ -369,7 +393,14 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
         Thread {
             // busca por voz só precisa do texto; o pedido normal já vem interpretado (intenção + qual música/vídeo)
             val e = try { Respostas.entenderPedido(ctx, wav) } catch (ex: Throwable) { Log.w(TAG, "entendimento falhou", ex); null }
-            main.post { if (minha == geracao) { entendimento = e; terminouTranscricao(e?.texto, minha) } else Log.d(TAG, "resposta do Gemini ignorada: a caixa foi chamada de novo (texto=${e?.texto})") }
+            main.post {
+                if (minha == geracao) {
+                    entendimento = e
+                    terminouTranscricao(e?.texto, minha)
+                } else {
+                    Log.d(TAG, "resposta do Gemini ignorada: pedido encerrado ou substituido")
+                }
+            }
         }.start()
     }
 
@@ -495,11 +526,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 if (pl != null) {
                     main.post {
                         if (minha != geracao) return@post
-                        TonsVoz.pararPensando()
-                        faixa.esconder()
-                        acoes.tocar(pl.second, true)
-                        estado = EstadoVoz.RESPONDENDO
-                        Fala.falar(ctx, "Tocando a playlist ${TextosVoz.tituloFalado(pl.first)}") { fim(0) }
+                        confirmarReproducao(pl.second, true, "Tocando a playlist ${TextosVoz.tituloFalado(pl.first)}", minha)
                     }
                     return@Thread
                 }
@@ -516,15 +543,23 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
                 if (minha != geracao) return@post
                 if (lista == null) { resposta("Não consegui buscar agora.", dito, erro = true); return@post }
                 if (lista.isEmpty()) { resposta("Não encontrei $busca.", dito, erro = true); return@post }
-                // entendeu: tira a tela do assistente na hora e abre a música/vídeo; a caixa só confirma em voz alta
-                TonsVoz.pararPensando()
-                faixa.esconder()
-                acoes.tocar(lista.take(1), soAudio)
                 val gerundio = tocar?.gerundio ?: if (soAudio) "Tocando" else "Reproduzindo"
-                estado = EstadoVoz.RESPONDENDO
-                Fala.falar(ctx, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}") { fim(0) }
+                confirmarReproducao(lista.take(1), soAudio, "$gerundio ${TextosVoz.tituloFalado(lista[0].titulo)}", minha)
             }
         }.start()
+    }
+
+    private fun confirmarReproducao(lista: List<Resultado>, soAudio: Boolean, frase: String, minha: Int) {
+        TonsVoz.pararPensando()
+        estado = EstadoVoz.RESPONDENDO
+        faixa.respondendo("")
+        Fala.falar(ctx, frase) {
+            if (minha != geracao || !ativo) return@falar
+            faixa.esconder()
+            estado = EstadoVoz.ESPERANDO_CHAMADA
+            Log.d(TAG, "Confirmação falada encerrada. Iniciando a mídia.")
+            acoes.tocar(lista, soAudio)
+        }
     }
 
     /**

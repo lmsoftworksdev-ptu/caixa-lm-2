@@ -99,7 +99,12 @@ object Fala {
         aoTerminar.clear() // QUEUE_FLUSH abaixo corta a fala anterior: ela nao deve avisar fim nenhum
         aoTerminar[id] = fim
         // Seguranca: nunca trava o fluxo, mas deixa tempo para respostas longas.
-        main.postDelayed({ terminou(id) }, TEMPO_MAXIMO_MS + texto.length * 90L)
+        main.postDelayed({
+            if (id in aoTerminar) {
+                runCatching { t.stop() }
+                terminou(id)
+            }
+        }, TEMPO_MAXIMO_MS + texto.length * 90L)
         val r = t.speak(texto, TextToSpeech.QUEUE_FLUSH, Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, CANAL) }, id)
         if (r != TextToSpeech.SUCCESS) terminou(id)
     }
@@ -191,8 +196,9 @@ object Fala {
     private fun terminou(id: String?) {
         if (id == null) return
         main.post {
-            aoTerminar.remove(id)?.invoke()
+            val fim = aoTerminar.remove(id) ?: return@post
             if (aoTerminar.isEmpty()) { falando = false; devolverVolume() }
+            fim()
         }
     }
 }

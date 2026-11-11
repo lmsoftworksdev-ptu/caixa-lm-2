@@ -382,7 +382,22 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
     }
 
     /** Quando o menu aparece. */
-    fun aoMostrar() {}
+    fun aoMostrar() { if (area.childCount == 0) renderizar() }
+
+    fun fecharMenu() {
+        fecharDetalhe()
+        fecharTeclado()
+        seq++
+        consulta = ""
+        resultados = null
+        carregando = false
+        erro = null
+        piscar?.cancel()
+        piscar = null
+        fileiras.clear()
+        area.removeAllViews()
+        atualizarBarra()
+    }
 
     /** O gesto de voltar não pode começar numa fileira que já rolou. */
     fun areaProtegida(x: Float, y: Float): Boolean {

@@ -8,6 +8,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -18,6 +20,7 @@ import kotlin.math.sqrt
  */
 @UnstableApi
 class EqualizadorSoftware : BaseAudioProcessor() {
+    @Volatile var efeitosNativos = false
     private class Biquad(var b0: Float = 1f, var b1: Float = 0f, var b2: Float = 0f, var a1: Float = 0f, var a2: Float = 0f)
 
     private var taxa = 0
@@ -26,17 +29,25 @@ class EqualizadorSoftware : BaseAudioProcessor() {
     private val filtros = ArrayList<Biquad>()
     private var estados = Array(0) { FloatArray(0) }       // [canal][2 * filtro]: z1 e z2
     private var ganhoPrevio = 1f
+    private var ganhoPico = 1f
+    private var recuperarGanho = 0f
+    private var quadro = FloatArray(0)
     private var processar = false
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         taxa = inputAudioFormat.sampleRate
         canais = inputAudioFormat.channelCount
+        quadro = FloatArray(canais)
+        recuperarGanho = (1.0 - exp(-1.0 / (taxa * 0.060))).toFloat()
         versao = -1
         return inputAudioFormat
     }
 
-    override fun onFlush() { estados = Array(canais) { FloatArray(2 * filtros.size) } }
+    override fun onFlush() {
+        estados = Array(canais) { FloatArray(2 * filtros.size) }
+        ganhoPico = 1f
+    }
 
     /** Refaz os filtros quando o menu mudou algo (os estados dos filtros são mantidos para não dar salto no som). */
     private fun atualizar() {
@@ -53,11 +64,12 @@ class EqualizadorSoftware : BaseAudioProcessor() {
             val graves = Amplificador.graves / 1000f * 10f      // até +10 dB de realce nos graves
             if (graves > 0.05f) { novos.add(prateleiraGrave(110f, graves)); if (graves > maiorAlta) maiorAlta = graves }
         }
-        // folga contra distorção: baixa o volume geral um pouco do quanto os realces somam
-        ganhoPrevio = if (maiorAlta > 0f) 10.0.pow(-(maiorAlta * 0.6) / 20.0).toFloat() else 1f
+        // Limita a perda fixa de nível; o ganho de pico protege a saída quando as bandas somadas passam de 0 dBFS.
+        ganhoPrevio = 10.0.pow(-min(2f, maiorAlta * 0.3f) / 20.0).toFloat()
         if (novos.size != filtros.size) estados = Array(canais) { FloatArray(2 * novos.size) }
         filtros.clear(); filtros.addAll(novos)
         processar = filtros.isNotEmpty()
+        if (!processar) ganhoPico = 1f
     }
 
     private fun pico(f0: Float, db: Float, q: Float): Biquad {
@@ -87,14 +99,21 @@ class EqualizadorSoftware : BaseAudioProcessor() {
     override fun queueInput(inputBuffer: ByteBuffer) {
         val tam = inputBuffer.remaining()
         if (tam == 0) return
-        if (versao != Amplificador.versao) atualizar()
         val saida = replaceOutputBuffer(tam)
+        if (efeitosNativos) {
+            if (versao != -1) { versao = -1; onFlush() }
+            saida.put(inputBuffer)
+            saida.flip()
+            return
+        }
+        if (versao != Amplificador.versao) atualizar()
         if (!processar) { saida.put(inputBuffer); saida.flip(); return }
         val entrada = inputBuffer.order(ByteOrder.nativeOrder()).asShortBuffer()
         saida.order(ByteOrder.nativeOrder())
         val n = entrada.remaining() / canais
         val nf = filtros.size
         for (i in 0 until n) {
+            var pico = 0f
             for (c in 0 until canais) {
                 var x = entrada.get().toFloat() * ganhoPrevio
                 val z = estados[c]
@@ -105,7 +124,13 @@ class EqualizadorSoftware : BaseAudioProcessor() {
                     z[2 * k + 1] = f.b2 * x - f.a2 * y
                     x = y
                 }
-                saida.putShort(x.coerceIn(-32768f, 32767f).toInt().toShort())
+                quadro[c] = x
+                pico = maxOf(pico, kotlin.math.abs(x))
+            }
+            val seguro = if (pico > 32767f) 32767f / pico else 1f
+            ganhoPico = min(seguro, ganhoPico + (1f - ganhoPico) * recuperarGanho)
+            for (c in 0 until canais) {
+                saida.putShort((quadro[c] * ganhoPico).coerceIn(-32768f, 32767f).toInt().toShort())
             }
         }
         inputBuffer.position(inputBuffer.limit())

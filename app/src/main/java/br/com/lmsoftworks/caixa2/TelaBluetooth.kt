@@ -1,19 +1,17 @@
 package br.com.lmsoftworks.caixa2
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * Tela Bluetooth da v3, em duas colunas: à esquerda o título com o interruptor e o cartão "LM Sound" com o botão de procurar;
+ * Tela Bluetooth da v3, em duas colunas: à esquerda o título com o interruptor e o cartão "LM Sound";
  * à direita os aparelhos (CONECTADO, PAREADOS, POR PERTO). A caixa aparece como "LM Sound" para os outros aparelhos.
  * Toque em um aparelho pareado para ver os detalhes; toque em um encontrado para parear.
  */
@@ -22,7 +20,6 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
     private val interruptor = Interruptor(c)
     private val hero = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
     private val lista = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-    private val procurar = LinearLayout(c).apply { gravity = Gravity.CENTER; isClickable = true }
     private val principal = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
     private val detalhe = ModalV3(c)
     private var assinatura = ""
@@ -54,8 +51,6 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         addView(principal, LayoutParams(-1, -1))
 
         interruptor.aoMudar = { v -> bt.definirLigado(v) }
-        procurar.setOnClickListener { bt.iniciarBusca() }
-        procurar.efeitoToque()
 
         addView(detalhe, LayoutParams(-1, -1))
         atualizar(true)
@@ -71,11 +66,13 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         val aps = bt.aparelhos()
         val ass = buildString {
             append(bt.ligado).append('|').append(bt.visivel).append('|').append(bt.buscando).append('|').append(bt.erro).append('|').append(Cfg.AZUL)
+            append('|').append(bt.transmissor).append('|').append(bt.trocandoModo).append('|').append(bt.modosDisponiveis)
             aps.forEach { append('|').append(it.endereco).append(it.nome).append(it.pareado).append(it.conectado).append(it.pareando) }
         }
         if (!forcar && ass == assinatura) return
         assinatura = ass
         interruptor.ligado = bt.ligado
+        interruptor.isEnabled = !bt.trocandoModo
         montarHero()
         montarLista(aps)
         if (emDetalhe && detalheEstado != estado()) fecharDetalhe()
@@ -95,21 +92,25 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
             hero.addView(AnelIcone(c, R.drawable.ic_caixa, 96, Color.parseColor("#7FB4FF"), Color.parseColor("#293D8BFF"), 0))
             hero.addView(t(if (bt.visivel) "Visível como" else "Aparece como", 18, Tema.TEXTO2), gap)
             hero.addView(t("“${bt.nomeCaixa}”", 32, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { topMargin = 4.d() })
-            hero.addView(t("No celular, abra o Bluetooth e escolha ${bt.nomeCaixa}. Depois é só tocar a música lá.", 18, Tema.TEXTO2), gap)
+            val ajuda = if (bt.transmissor) "Selecione a soundbar ou o fone em Por perto para enviar o áudio da Caixa."
+                else "No celular, abra o Bluetooth e escolha ${bt.nomeCaixa}. Depois é só tocar a música lá."
+            hero.addView(t(ajuda, 18, Tema.TEXTO2), gap)
         }
         val msg = bt.erro
         if (msg != null) hero.addView(t(msg, 18, Tema.VERMELHO_SUAVE), gap)
-        hero.addView(View(c), LinearLayout.LayoutParams(1, 0, 1f))
-        if (bt.ligado) {
-            procurar.removeAllViews()
-            procurar.background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA)
-            procurar.alpha = if (bt.buscando) .75f else 1f
-            if (bt.buscando) {
-                procurar.addView(ProgressBar(c).apply { isIndeterminate = true; indeterminateTintList = ColorStateList.valueOf(Color.WHITE) }, LinearLayout.LayoutParams(28.d(), 28.d()))
-            } else procurar.addView(icone(c, R.drawable.ic_busca, 26, Tema.TEXTO))
-            procurar.addView(texto(c, if (bt.buscando) "Procurando…" else "Procurar aparelhos", 22, Tema.TEXTO, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 10.d() })
-            (procurar.parent as? android.view.ViewGroup)?.removeView(procurar)
-            hero.addView(procurar, LinearLayout.LayoutParams(-1, 64.d()))
+        if (bt.trocandoModo) hero.addView(t("Trocando o modo Bluetooth…", 18, Tema.TEXTO2), gap)
+        if (bt.modosDisponiveis) {
+            hero.addView(View(c), LinearLayout.LayoutParams(1, 0, 1f))
+            val seletor = LinearLayout(c)
+            for ((nome, transmissor) in listOf("Receptor" to false, "Transmissor" to true)) {
+                val ativo = bt.transmissor == transmissor
+                val escolha = botao(c, nome, if (ativo) Cfg.AZUL else Tema.BOTAO) { confirmarModo(nome, transmissor) }
+                escolha.isEnabled = !bt.trocandoModo && !ativo
+                seletor.addView(escolha, LinearLayout.LayoutParams(0, 52.d(), 1f).apply {
+                    if (transmissor) leftMargin = 8.d()
+                })
+            }
+            hero.addView(seletor, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12.d() })
         }
     }
 
@@ -130,14 +131,15 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
         grupo("Conectado", conectados)
         grupo("Pareados", pareados)
         grupo("Por perto", perto)
-        if (aps.isEmpty() || (perto.isEmpty() && bt.buscando)) {
-            lista.addView(texto(c, if (bt.buscando) "Procurando aparelhos…" else "Nenhum aparelho ainda. Pareie pelo seu celular escolhendo ${bt.nomeCaixa}.", 20, Tema.TEXTO3)
+        if (bt.buscando || perto.isEmpty()) {
+            lista.addView(texto(c, if (bt.buscando) "Procurando aparelhos…" else "Nenhum aparelho por perto. Coloque-o em modo de pareamento.", 20, Tema.TEXTO3)
                 .apply { setPadding(18.d(), 20.d(), 18.d(), 20.d()) })
         }
     }
 
     private fun linha(a: BluetoothControle.Aparelho) {
         val subtitulo = when {
+            a.conectado && bt.transmissor -> "Saída de áudio da Caixa"
             a.conectado -> "Tocando áudio nesta caixa"
             a.pareando -> "Pareando…"
             a.pareado -> "Pareado · toque para conectar"
@@ -167,6 +169,7 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
     }
 
     private fun escolher(a: BluetoothControle.Aparelho) {
+        if (bt.trocandoModo) return
         bt.limparErro()
         when {
             a.pareando -> { }
@@ -177,6 +180,20 @@ class TelaBluetooth(private val c: Context, private val bt: BluetoothControle) :
     }
 
     private fun fecharDetalhe() = detalhe.fechar()
+
+    private fun confirmarModo(nome: String, transmissor: Boolean) {
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        conteudo.addView(texto(c, "Ativar modo $nome?", 32, Tema.TEXTO, true))
+        conteudo.addView(texto(c, "A Caixa vai reiniciar para aplicar o novo modo Bluetooth.", 20, Tema.TEXTO2),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12.d(); bottomMargin = 24.d() })
+        val botoes = LinearLayout(c).apply { gravity = Gravity.END }
+        botoes.addView(botao(c, "Cancelar", Tema.BOTAO) { fecharDetalhe() })
+        botoes.addView(botao(c, "Trocar e reiniciar", Cfg.AZUL) { fecharDetalhe(); bt.definirModo(transmissor) },
+            LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 12.d() })
+        conteudo.addView(botoes)
+        detalheEstado = estado()
+        detalhe.mostrar(680, conteudo)
+    }
 
     private fun mostrarDetalhe(a: BluetoothControle.Aparelho) {
         val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }

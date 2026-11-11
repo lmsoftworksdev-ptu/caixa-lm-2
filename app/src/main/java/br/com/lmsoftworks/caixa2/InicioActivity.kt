@@ -1,12 +1,18 @@
 package br.com.lmsoftworks.caixa2
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
+import android.graphics.PixelFormat
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
+import android.view.Gravity
+import android.view.SurfaceView
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -16,6 +22,11 @@ import android.widget.Toast
  * depois a interface aparece com um fade.
  */
 class InicioActivity : Activity() {
+    private var retornoAjustesAndroid: View? = null
+    private lateinit var miniVideo: FrameLayout
+    private lateinit var imagemMiniVideo: SurfaceView
+    private var toqueNaMiniatura = false
+    private var bloquearToquesAte = 0L
 
     private lateinit var conteudo: FrameLayout
     private lateinit var fundo: FundoView
@@ -133,33 +144,37 @@ class InicioActivity : Activity() {
         relogio.postDelayed({ br.com.lmsoftworks.caixa2.voz.Fala.falar(this, frase) { acoesAssistente.abafar(false) } }, 1500)
     }
 
-    private var ticksBluetooth = 0
-
-    /** O equalizador do Android (para o som do celular) só liga quando é o celular que está tocando; com o app tocando, vale o equalizador do player. */
+    /** O efeito usa a sessão do Bluetooth, separada da sessão do player. Pode ficar armado durante uma pausa. */
     private fun atualizarFonteDoEqualizador() {
-        val celular = !playerMidia.tocando && bluetooth.algumConectado && (bluetooth.celularTocando || (musica.tocando && !musica.emLocal))
-        if (celular) { if (ticksBluetooth < 3) ticksBluetooth++ } else ticksBluetooth = 0
-        if (celular && ticksBluetooth >= 2) Amplificador.definirFonteBluetooth(true) else if (!celular) Amplificador.definirFonteBluetooth(false)
+        if (!bluetooth.algumConectado) Amplificador.definirFonteBluetooth(false)
+        else if (bluetooth.celularTocando) Amplificador.definirFonteBluetooth(true)
     }
 
     private val tique = object : Runnable {
         override fun run() {
+            val agoraMs = android.os.SystemClock.uptimeMillis()
+            alarmes.verificar()?.let { tocarAlarme(it) }
+            if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
+            if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
+            atualizarFonteDoEqualizador()
+            if (agoraMs - ultimaSincBt > 3000L) { ultimaSincBt = agoraMs; bluetooth.sincronizarTocando() }
+            vigiarNicho()
+            // As duas faces do cubo ficam em camadas de hardware. Atualizar as telas durante o giro força o redesenho dessas camadas.
+            if (girando) {
+                relogio.postDelayed(this, 100)
+                return
+            }
             inicio.atualizar()
             if (atual == "musica") telaMusica.atualizar()
             if (atual == "config") atualizarConfig()
             if (atual == "alarmes") telaAlarmes.tique()
             barra.atualizarHora()
             UsoRede.amostrar()
-            atualizarFonteDoEqualizador()
             barra.atualizarRede()
             if (atual == "inicio") aplicarTema("inicio")      // o fundo do Início acompanha a hora do dia
-            alarmes.verificar()?.let { tocarAlarme(it) }
-            if (alarmeTocando == null) lembretes.devidos().forEach { dispararLembrete(it) }
-            if (alarmeTocando == null && dormir.chegouAHora()) avisarFalando("Está na hora de dormir. Boa noite!")
             if (led.modo == "ambilight" && !telaVideo.aberto) atualizarLedDaMusica()
             inicio.definirProximoAlarme(alarmes.proximoTexto(), alarmes.proxima()?.first?.nome?.ifBlank { null })
             // a faixa fechada com o gesto só fica escondida enquanto parada: tocou de novo, o cartão volta e o pause não o esconde mais
-            val agoraMs = android.os.SystemClock.uptimeMillis()
             val tocandoAgora = if (musica.temMusica) musica.tocando else musica.celularTocandoAgora(bluetooth.celularTocando)
             val chaveMusica = if (musica.temMusica) musica.titulo + musica.artista else "sem-dados"
             if (tocandoAgora && agoraMs >= musicaDispensadaAte) musicaDispensada = ""
@@ -170,7 +185,6 @@ class InicioActivity : Activity() {
             if (atual == "musica" && !musica.temMusica && !musica.emLocal && !telaMusica.semDadosAtivo()) {
                 if (vazioDesde == 0L) vazioDesde = agoraMs else if (agoraMs - vazioDesde > 400L && !girando) ir("inicio")
             } else vazioDesde = 0L
-            vigiarNicho()
             // Proteção: só a tela atual pode ficar visível. Se outra continuar por cima (um giro interrompido, uma troca rápida), some em meio segundo.
             if (apareceu && !girando && !ocioso && !telaVideo.aberto) {
                 val atualView = tela(atual)
@@ -181,20 +195,20 @@ class InicioActivity : Activity() {
                 }
                 if (!sobrando) sobreposicaoDesde = agoraMs
             } else sobreposicaoDesde = agoraMs
-            if (agoraMs - ultimaSincBt > 3000L) { ultimaSincBt = agoraMs; bluetooth.sincronizarTocando() }      // o aviso de "tocando" pode ter saído antes de o app abrir
-            val semDados = !musica.temMusica && bluetooth.algumConectado && (bluetooth.celularTocando || musica.tocando) && !playerMidia.ativo && !telaVideo.aberto
-            if (semDados) { if (semDadosDesde == 0L) semDadosDesde = agoraMs } else semDadosDesde = 0L
-            if (semDadosDesde != 0L && agoraMs - semDadosDesde > 2500L) cartaoSemDados = true      // passou a tocar sem mandar os dados
+            val semDados = !musica.temMusica && bluetooth.celularConfirmado && !playerMidia.ativo && !telaVideo.aberto
+            if (semDados) cartaoSemDados = true
             if (!telaMusica.semDadosAtivo()) cartaoSemDados = false      // o aparelho saiu ou os dados chegaram
             val genericoVisivel = cartaoSemDados && !dispensada
             if (dispensada) abriuSemDados = false      // fecharam o player: o próximo play abre a tela de novo
             // Sem os dados da música, a tela "Tocando em <celular>" abre sozinha ao dar play, como a de "Tocando agora" abriria.
-            if (genericoVisivel && !abriuSemDados) {
+            if (genericoVisivel && semDados && !abriuSemDados) {
                 abriuSemDados = true
                 if (atual == "inicio" && agoraMs > semAbrirMusicaAte) ir("musica")
             }
             if (semDados) semDadosVistoEm = agoraMs else if (agoraMs - semDadosVistoEm > 8000L) abriuSemDados = false      // o áudio do iPhone cai e volta: só conta como outra vez depois de 8 s parado
-            if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
+            val video = playerMidia.item?.takeIf { videoRecolhido }
+            if (video != null) inicio.definirMusica(video.titulo, video.canal, playerMidia.capa, playerMidia.tocando)
+            else if (musica.temMusica && !dispensada) inicio.definirMusica(musica.titulo, musica.artista, musica.capa, musica.tocando)
             else if (genericoVisivel) inicio.definirMusicaSemDados(bluetooth.nomeConectado() ?: "Bluetooth", tocandoAgora)
             else inicio.definirMusica(null, null)
             val proximoLembrete = lembretes.todos.firstOrNull()
@@ -224,7 +238,6 @@ class InicioActivity : Activity() {
         super.onCreate(savedInstanceState)
         (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).let { if (it.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) it.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0) }      // a versão anterior podia deixar a caixa muda
         bootNovo = aparelhoAcabouDeLigar()
-        if (bootNovo) aquecerAudio()
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
@@ -240,12 +253,16 @@ class InicioActivity : Activity() {
         fundoCapa = FundoCapa(this).also { it.aoCobrir = { cobre -> fundo.sobreCapa = cobre } }
         bluetooth = BluetoothControle(this) { aoMudarBluetooth() }
         // Bluetooth desligando ou desligado: o app solta o serviço dele. Ligou de novo: volta a ler a música do celular.
-        bluetooth.aoSincronizar = { impor() }
+        bluetooth.aoSincronizar = {
+            Amplificador.definirFonteBluetooth(true, consultarAgora = true)
+            impor()
+        }
         bluetooth.aoEstadoAdaptador = { st ->
             if (st == android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF || st == android.bluetooth.BluetoothAdapter.STATE_OFF) musica.desligar()
             else if (st == android.bluetooth.BluetoothAdapter.STATE_ON) musica.iniciar()
         }
         bluetooth.aoAntesDeDesligar = { musica.desligar() }
+        bluetooth.aoReiniciarParaTrocarModo = { sequenciaEnergia(false) }
         bluetooth.aoTravado = {
             Aviso.mostrar(this, "O Bluetooth do aparelho travou: reiniciar a caixa resolve")
             modalEnergia.abrir()
@@ -267,10 +284,13 @@ class InicioActivity : Activity() {
         inicio.aoFecharMusica = {
             musicaDispensada = if (musica.temMusica) musica.titulo + musica.artista else "sem-dados"
             musicaDispensadaAte = android.os.SystemClock.uptimeMillis() + 1500      // dá tempo de o player confirmar que parou
-            if (musica.emLocal) playerMidia.parar() else musica.pausar()
+            if (videoRecolhido || musica.emLocal) playerMidia.parar() else musica.pausar()
             inicio.definirMusica(null, null)
         }
-        inicio.aoPlayPause = { semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000; musica.alternar() }      // play/pause no Início não abre a tela da música
+        inicio.aoPlayPause = {
+            semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000
+            if (videoRecolhido) playerMidia.alternar() else musica.alternar()
+        }
         telaWifi = TelaWifi(this, wifi)
         telaWifi.visibility = View.GONE
         telaBluetooth = TelaBluetooth(this, bluetooth)
@@ -295,8 +315,28 @@ class InicioActivity : Activity() {
         telaRadios = TelaRadios(this, { lista, i -> tocarRadio(lista, i) }, { lista, i -> tocarCanalTv(lista, i) })
         telaRadios.visibility = View.GONE
         telaVideo = TelaVideo(this, playerMidia, { painelVolume.porcento }, { p -> painelVolume.definirPorcento(p) }, { seletorParaMusica() }) { fecharVideoAnimado() }
+        imagemMiniVideo = SurfaceView(this)
+        miniVideo = FrameLayout(this).apply {
+            visibility = View.GONE
+            contentDescription = "Reabrir vídeo"
+            setOnClickListener { reabrirVideoRecolhido() }
+            ativarArrasteMiniVideo(this)
+            addView(imagemMiniVideo, FrameLayout.LayoutParams(-1, -1))
+            val fechar = texto(context, "×", 36, Color.WHITE, true).apply {
+                gravity = Gravity.CENTER
+                background = fundoArredondado(0xDD141A26.toInt(), 24.d())
+                contentDescription = "Ocultar miniatura"
+                setOnClickListener {
+                    bloquearToquesAte = android.os.SystemClock.uptimeMillis() + 500L
+                    playerMidia.ligarImagem(null)
+                    miniVideo.visibility = View.GONE
+                }
+            }
+            addView(fechar, FrameLayout.LayoutParams(60.d(), 60.d(), Gravity.TOP or Gravity.END))
+        }
         faixaAssistente = br.com.lmsoftworks.caixa2.voz.FaixaAssistente(this, { assistente.nivelMicrofone }, { conteudo })
         faixaAssistente.aoToque = { assistente.cancelar() }
+        faixaAssistente.aoMudarSessao = led::definirPulsoAssistente
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
         telaMidia.nivelMic = { assistente.nivelMicrofone }
         telaMidia.aoMicrofone = {
@@ -320,22 +360,29 @@ class InicioActivity : Activity() {
         telaConfig.aoVerificarAtualizacao = { Atualizador.verificarAgora(this) { msg -> Aviso.mostrar(this, msg) } }
         telaConfig.aoEnergia = { modalEnergia.abrir() }
         telaConfig.aoDiagnostico = { ir("diagnostico") }
+        telaConfig.aoAbrirAjusteAndroid = ::abrirAjusteAndroid
         // prioridade: se o celular começar a tocar, o que toca na própria caixa (YouTube) pára
         bluetooth.aoCelularTocando = {
-            if (!musica.appRecente()) celularAssumiu()
+            if (!musica.appRecente()) {
+                celularAssumiu()
+                musica.sincronizarCelularConfirmado()
+                if (musica.temMusica && !musica.emLocal) abrirMusicaConfirmada()
+            }
             impor()
         }
         // o estado "tocando" do celular (AVRCP) vale mesmo quando o áudio dele fica caindo e voltando (o iPhone faz isso): pausa o vídeo
         musica.celularSomTocando = { bluetooth.celularTocando }
+        musica.celularSomConfirmado = { bluetooth.celularConfirmado }
         playerMidia.aoComecou = { musica.appComecou() }
         musica.aoCelularComecou = { celularAssumiu() }
         // o volume da caixa prevalece: o celular manda o dele ao conectar e ao começar a tocar, e logo depois o da caixa volta
-        bluetooth.aoConectado = { painelVolume.imporPor(3000L) }
+        bluetooth.aoConectado = { if (!bluetooth.transmissor) painelVolume.imporPor(3000L) }
         bluetooth.aoDesconectado = {
             // o aparelho saiu (a pessoa desligou o Bluetooth do celular ou se afastou): o cartão de música some e a tela de música volta a
             // pedir para conectar um celular. Não muda de tela.
             if (!Ajustes.restaurarRedes && !modalEnergia.aberto) {
                 musica.celularDesconectou()
+                cartaoSemDados = false
                 abriuSemDados = false      // se o celular voltar e der play, a tela "Tocando de ..." abre de novo
                 if (atual == "musica" && !musica.emLocal) ir("inicio")      // o player fecha sozinho e volta para o início
             }
@@ -396,6 +443,10 @@ class InicioActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             addView(conteudo, FrameLayout.LayoutParams(-1, -1))
             addView(telaVideo, FrameLayout.LayoutParams(-1, -1))
+            addView(miniVideo, FrameLayout.LayoutParams(272.d(), 153.d(), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = 24.d()
+                bottomMargin = 24.d()
+            })
             addView(faixaAssistente, FrameLayout.LayoutParams(-1, -1))
             addView(telaAlarmeTocando, FrameLayout.LayoutParams(-1, -1))
             addView(telaOciosa, FrameLayout.LayoutParams(-1, -1))
@@ -420,8 +471,84 @@ class InicioActivity : Activity() {
         aoMudarLed()
     }
 
+    @Suppress("DEPRECATION")
+    private fun abrirAjusteAndroid(intent: Intent) {
+        val wm = applicationContext.getSystemService(WINDOW_SERVICE) as WindowManager
+        var inicioX = 0f
+        var inicioY = 0f
+        val voltar = FrameLayout(this).apply {
+            contentDescription = "Deslize para baixo para voltar à Caixa"
+            addView(View(context).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.GRAY)
+                    cornerRadius = 2.d().toFloat()
+                }
+            }, FrameLayout.LayoutParams(44.d(), 4.d(), Gravity.CENTER))
+            setOnTouchListener { alca, evento ->
+                when (evento.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        inicioX = evento.rawX
+                        inicioY = evento.rawY
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val deslocamentoY = evento.rawY - inicioY
+                        val deslocamentoX = kotlin.math.abs(evento.rawX - inicioX)
+                        if (gestoParaBaixo(deslocamentoY, deslocamentoX)) {
+                            alca.post {
+                                if (retornoAjustesAndroid === alca) {
+                                    retirarRetornoAjustesAndroid()
+                                    startActivity(Intent(this@InicioActivity, InicioActivity::class.java)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+                                }
+                            }
+                        }
+                    }
+                }
+                true
+            }
+        }
+        val tipo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, 26.d(), tipo,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP
+            title = "Gesto de retorno à Caixa"
+        }
+        try {
+            wm.addView(voltar, params)
+            retornoAjustesAndroid = voltar
+        } catch (e: SecurityException) {
+            Toast.makeText(this, "Atalho indisponível. Use Voltar para retornar à Caixa.", Toast.LENGTH_LONG).show()
+        } catch (e: WindowManager.BadTokenException) {
+            Toast.makeText(this, "Atalho indisponível. Use Voltar para retornar à Caixa.", Toast.LENGTH_LONG).show()
+        }
+        try {
+            if (retornoAjustesAndroid != null) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        } catch (e: RuntimeException) {
+            retirarRetornoAjustesAndroid()
+            throw e
+        }
+    }
+
+    private fun retirarRetornoAjustesAndroid() {
+        val voltar = retornoAjustesAndroid ?: return
+        retornoAjustesAndroid = null
+        val wm = applicationContext.getSystemService(WINDOW_SERVICE) as WindowManager
+        wm.removeViewImmediate(voltar)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        retirarRetornoAjustesAndroid()
+    }
+
     override fun onStart() {
         super.onStart()
+        manterSaidaDeAudioAtiva()
         restaurarRedesSeDesligadas()
         if (Ajustes.fusoAuto) telaConfig.buscarFusoAutomatico()      // o fuso do lugar, pela internet (o do Android daqui tem horário de verão antigo)
         alarmes.reagendar()
@@ -429,6 +556,7 @@ class InicioActivity : Activity() {
         Quiosque.aplicar(this)
         wifi.iniciar()
         bluetooth.iniciar()
+        bluetooth.definirTelaAberta(atual == "bluetooth")
         musica.iniciar()
         painelVolume.iniciar()
         led.iniciar()
@@ -461,7 +589,7 @@ class InicioActivity : Activity() {
     /** Enquanto a tela de LED está aberta, o fundo e o destaque acompanham a cor da fita. */
     private val temaLed = object : Runnable {
         override fun run() {
-            if (atual == "led") aplicarTemaLed()
+            if (atual == "led" && !girando) aplicarTemaLed()
             relogio.postDelayed(this, 120)
         }
     }
@@ -488,7 +616,6 @@ class InicioActivity : Activity() {
     private var cartaoSemDados = false          // o cartão do Início com o nome do aparelho (celular tocando sem mandar os dados) está valendo
     private var semDadosVistoEm = 0L
     private var abriuSemDados = false        // a tela "Tocando em ..." (celular tocando sem mandar os dados) já abriu nesta vez
-    private var semDadosDesde = 0L          // desde quando o som sai pelo Bluetooth sem o celular mandar os dados da música
     private var musicaDispensada = ""          // faixa fechada com o gesto no cartão do Início: o cartão só volta quando ela tocar de novo
     private var musicaDispensadaAte = 0L
 
@@ -496,8 +623,12 @@ class InicioActivity : Activity() {
         if (atual == "musica") { telaMusica.atualizar(); aplicarTema("musica"); atualizarLedDaMusica() }   // a cor da capa pode chegar depois
         // quando alguém começa a tocar pelo Bluetooth, abre sozinho a tela Tocando agora
         // (sem os dados da música, o estado "tocando" do iPhone oscila: quem abre a tela nesse caso é o tique, uma vez por vez que toca)
-        if (musica.tocando && !tocandoAntes && musica.temMusica && atual == "inicio" && android.os.SystemClock.uptimeMillis() > semAbrirMusicaAte) ir("musica")
+        if (musica.tocando && !tocandoAntes && musica.temMusica && (musica.emLocal || bluetooth.celularConfirmado)) abrirMusicaConfirmada()
         tocandoAntes = musica.tocando
+    }
+
+    private fun abrirMusicaConfirmada() {
+        if (atual == "inicio" && android.os.SystemClock.uptimeMillis() > semAbrirMusicaAte) ir("musica")
     }
 
     private fun aoMudarBluetooth() {
@@ -522,6 +653,7 @@ class InicioActivity : Activity() {
     }
 
     private fun abrir(id: String) {
+        if (id == "musica" && videoRecolhido) { reabrirVideoRecolhido(); return }
         if (id == "listas") { telaAlarmes.abrirAba("listas", lista = "compras"); ir("alarmes"); return }
         if (id.startsWith("aviso:")) {
             when (val a = id.removePrefix("aviso:")) {
@@ -533,7 +665,7 @@ class InicioActivity : Activity() {
         }
         if (id == "lembretes") { telaAlarmes.abrirAba("lembretes", lembretes.todos.firstOrNull()?.id); ir("alarmes") }
         else if (id == "alarme-proximo") { telaAlarmes.abrirAba("alarmes", alarmes.proxima()?.first?.id?.toLong()); ir("alarmes") }
-        else if (id == "midia") ir(if ((musica.temMusica && !musica.ehRadio) || telaMusica.semDadosAtivo()) "musica" else "midia")      // tocando uma rádio, a Mídia abre a Mídia (a rádio é do outro aplicativo)
+        else if (id == "midia") ir(if (!videoRecolhido && ((musica.temMusica && !musica.ehRadio) || telaMusica.semDadosAtivo())) "musica" else "midia")
         else if (id == "radios") ir(if (musica.ehRadio) "musica" else "radios")      // a rádio que toca abre o player da rádio; senão, o menu de Rádios      // tocando algo (com ou sem os dados da música): Tocando agora; senão, a busca
         else if (id == "wifi" || id == "bluetooth" || id == "musica" || id == "led" || id == "alarmes" || id == "config" || id == "clima" || id == "receitas" || id == "amplificador") ir(id)
         else Aviso.mostrar(this, "Em breve")
@@ -604,12 +736,14 @@ class InicioActivity : Activity() {
             "led" -> telaLed.atualizar()
             "amplificador" -> telaAmplificador.atualizar()
             "diagnostico" -> telaDiagnostico.aoMostrar()
+            "receitas" -> telaReceitas.aoMostrar()
             "alarmes" -> telaAlarmes.atualizar()
             "config" -> { atualizarConfig(); telaConfig.atualizar() }
         }
     }
 
     private fun mudarEstado(destino: String) {
+        if (atual == "bluetooth" && destino != "bluetooth") bluetooth.definirTelaAberta(false)
         // saiu da tela da música de propósito: ela não volta sozinha por alguns segundos, para a pessoa navegar à vontade
         if (atual == "musica" && destino != "musica") semAbrirMusicaAte = maxOf(semAbrirMusicaAte, android.os.SystemClock.uptimeMillis() + 8000L)
         atual = destino
@@ -642,10 +776,17 @@ class InicioActivity : Activity() {
     private fun aoChegar(destino: String) {
         wifi.procurar = destino == "wifi"
         if (destino == "wifi") { telaWifi.reiniciar(); wifi.varrer() }
-        if (destino == "bluetooth") { telaBluetooth.reiniciar(); bluetooth.definirVisivel(true) }
-        else bluetooth.definirVisivel(false)
+        if (destino == "bluetooth") telaBluetooth.reiniciar()
+        bluetooth.definirTelaAberta(destino == "bluetooth")
         if (destino == "midia") telaMidia.aoMostrar()
         if (destino == "radios") telaRadios.aoMostrar()
+        if (destino == "inicio") {
+            telaMidia.fecharTeclado()
+            telaReceitas.fecharMenu()
+            telaAlarmes.fecharMenu()
+            repeat(2) { telaWifi.voltar(); telaConfig.voltar() }
+            telaBluetooth.voltar()
+        }
         if (destino == "clima") {
             // previsão guardada por 15 minutos; senão busca de novo (mostra a rodinha só se ainda não havia nada)
             if (previsao != null && android.os.SystemClock.uptimeMillis() - previsaoEm < 15 * 60_000L) telaPrevisao.definir(previsao) else buscarPrevisao()
@@ -682,14 +823,16 @@ class InicioActivity : Activity() {
         val interpolador = if (desde == 0f && ate == 90f) android.view.animation.PathInterpolator(0.3f, 0.7f, 0.2f, 1f)
                            else android.view.animation.PathInterpolator(0f, 0f, 0.2f, 1f)
         var t0 = -1L
+        val meiaLargura = metade()
         fundo.lento(true)      // durante o giro o fundo segue com menos quadros: a troca de cor do menu esmaece em vez de pular no fim
         // laço próprio (um quadro por vez), sem depender da escala de animação do sistema
         val passo = object : Runnable {
             override fun run() {
                 // o relógio do giro começa no PRIMEIRO quadro: a criação das camadas não "come" o começo da animação
-                if (t0 < 0) t0 = android.os.SystemClock.uptimeMillis()
-                val x = ((android.os.SystemClock.uptimeMillis() - t0).toFloat() / dur).coerceIn(0f, 1f)
-                Cubo.aplicar(de, para, desde + (ate - desde) * interpolador.getInterpolation(x), dir, metade())
+                val agora = android.os.SystemClock.uptimeMillis()
+                if (t0 < 0) t0 = agora
+                val x = ((agora - t0).toFloat() / dur).coerceIn(0f, 1f)
+                Cubo.aplicar(de, para, desde + (ate - desde) * interpolador.getInterpolation(x), dir, meiaLargura)
                 if (x < 1f) conteudo.postOnAnimation(this) else aoFim()
             }
         }
@@ -779,10 +922,10 @@ class InicioActivity : Activity() {
         override fun abafar(sim: Boolean): Long {
             if (sim) pausarCelularNoFim = false
             // música do celular (Bluetooth): fade-out, pausa e voz no volume dela; vídeo/música do app: baixa o player
-            // o aviso de "celular tocando" do Bluetooth só chega quando o estado muda: se o app abriu com a música já tocando, ele não
-            // veio. Por isso também vale o aparelho dizer que há música saindo agora.
             val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
-            val celular = bluetooth.celularTocando || (bluetooth.algumConectado && audio.isMusicActive)
+            // O silêncio do app também conta como STREAM_MUSIC no Android. Confere o perfil A2DP para saber se é o celular tocando.
+            if (sim && bluetooth.algumConectado && !bluetooth.celularTocando) bluetooth.sincronizarTocando()
+            val celular = bluetooth.celularTocando
             var espera = 0L
             if (sim) {
                 geracaoFimPausa++           // chamou de novo antes de a música voltar: cancela o fechamento pendente
@@ -853,9 +996,20 @@ class InicioActivity : Activity() {
 
         override fun tocar(lista: List<Resultado>, soAudio: Boolean) {
             musica.marcarPorVoz()      // o Bluetooth devolve o som ao celular no fim da fala: o app não cede a isso
+            geracaoFimPausa++
+            geracaoPausa++
+            if (modoPausa) painelVolume.pausaFim(fade = false)
+            else painelVolume.abafarSistema(false, fade = false)
+            modoPausa = false
+            modoPausaApp = false
             // a lista de próximas também vem do que a voz pediu: o tema é o artista (ou o título) do primeiro resultado
             lista.firstOrNull()?.let { iniciarNicho(it.canal.removeSuffix(" - Topic").ifBlank { it.titulo }, soAudio, it) }
             if (soAudio) { videoDeMusica = false; if (telaVideo.aberto) fecharVideo(); tocarMusicaDoYoutube(lista, 0) } else abrirVideo(lista, 0)
+            if (focoPedido) {
+                val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+                audio.abandonAudioFocus(focoVoz)
+                focoPedido = false
+            }
         }
 
         override fun executar(comando: br.com.lmsoftworks.caixa2.voz.ComandoVoz, textoOuvido: String): String? =
@@ -863,7 +1017,7 @@ class InicioActivity : Activity() {
     }
 
     private fun executarComando(c: br.com.lmsoftworks.caixa2.voz.ComandoVoz): String? {
-        val noVideo = telaVideo.aberto
+        val noVideo = telaVideo.aberto || videoRecolhido
         return when (c) {
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Pesquisar -> {
                 ir("midia"); telaMidia.pesquisar(c.consulta)
@@ -873,7 +1027,9 @@ class InicioActivity : Activity() {
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Continuar -> { if (noVideo) { if (!playerMidia.tocando) playerMidia.alternar() } else musica.tocar(); null }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Parar -> {
                 if (alarmeTocando != null) pararAlarme(false)
-                else if (noVideo) fecharVideoAnimado() else { musica.pausar(); if (musica.emLocal) playerMidia.parar() else pausarCelularNoFim = true }
+                else if (telaVideo.aberto) fecharVideoAnimado()
+                else if (videoRecolhido) playerMidia.parar()
+                else { musica.pausar(); if (musica.emLocal) playerMidia.parar() else pausarCelularNoFim = true }
                 null
             }
             is br.com.lmsoftworks.caixa2.voz.ComandoVoz.Proxima -> { if (noVideo) playerMidia.proxima() else musica.proxima(); null }
@@ -1109,13 +1265,60 @@ class InicioActivity : Activity() {
     }
 
     private fun aoMudarPlayer() {
-        if (playerMidia.ehVideo && led.modo == "ambilight" && !playerMidia.primeiroQuadro) led.definirCorAmbiente(Color.BLACK)
+        if (!playerMidia.ehVideo) mostrarMiniVideo(false)
+        if (telaVideo.aberto && playerMidia.ehVideo && led.modo == "ambilight" && !playerMidia.primeiroQuadro) led.definirCorAmbiente(Color.BLACK)
         led.sessaoExterna = if (playerMidia.tocando) playerMidia.sessaoAudio else -1
-        if (playerMidia.ehVideo) telaVideo.atualizar() else { musica.sincronizarLocal(); adiantarClipe() }
+        if (playerMidia.ehVideo) {
+            if (telaVideo.aberto) telaVideo.atualizar()
+        } else { musica.sincronizarLocal(); adiantarClipe() }
     }
 
     /** A tela que estava por baixo quando o vídeo abriu (a busca, ou o início quando o pedido veio por voz): é para onde o vídeo volta. */
     private var origemVideo = "midia"
+    private var videoRecolhido = false
+
+    private fun mostrarMiniVideo(mostrar: Boolean) {
+        if (videoRecolhido == mostrar) return
+        videoRecolhido = mostrar
+        if (mostrar) {
+            miniVideo.translationX = 0f
+            miniVideo.translationY = 0f
+        }
+        miniVideo.visibility = if (mostrar) View.VISIBLE else View.GONE
+        playerMidia.ligarImagem(if (mostrar) imagemMiniVideo else null)
+    }
+
+    private fun ativarArrasteMiniVideo(miniatura: View) {
+        val tolerancia = ViewConfiguration.get(this).scaledTouchSlop
+        var inicioX = 0f
+        var inicioY = 0f
+        var posicaoX = 0f
+        var posicaoY = 0f
+        var moveu = false
+        miniatura.setOnTouchListener { view, evento ->
+            when (evento.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    inicioX = evento.rawX
+                    inicioY = evento.rawY
+                    posicaoX = view.x
+                    posicaoY = view.y
+                    moveu = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = evento.rawX - inicioX
+                    val dy = evento.rawY - inicioY
+                    if (moveu || kotlin.math.abs(dx) > tolerancia || kotlin.math.abs(dy) > tolerancia) {
+                        moveu = true
+                        val area = view.parent as View
+                        view.x = (posicaoX + dx).coerceIn(0f, (area.width - view.width).coerceAtLeast(0).toFloat())
+                        view.y = (posicaoY + dy).coerceIn(0f, (area.height - view.height).coerceAtLeast(0).toFloat())
+                    }
+                }
+                MotionEvent.ACTION_UP -> if (!moveu) view.performClick()
+            }
+            true
+        }
+    }
 
     /** O vídeo aberto veio de uma música (seletor música <-> vídeo): ao sair, a música volta no mesmo segundo. */
     private var videoDeMusica = false
@@ -1203,6 +1406,7 @@ class InicioActivity : Activity() {
     }
 
     private fun abrirVideo(lista: List<Resultado>, i: Int, inicioMs: Long = 0L) {
+        mostrarMiniVideo(false)
         videoDeMusica = false
         telaVideo.mostrarSeletor(true)      // todo vídeo tem o seletor: a nota leva para Tocando agora com o áudio dele
         if (!telaVideo.aberto) origemVideo = atual
@@ -1217,6 +1421,7 @@ class InicioActivity : Activity() {
     }
 
     private fun fecharVideo() {
+        mostrarMiniVideo(false)
         val voltarMusica = videoDeMusica
         val pos = playerMidia.posicaoMs
         val estavaTocando = playerMidia.tocando
@@ -1356,6 +1561,38 @@ class InicioActivity : Activity() {
         telaVideo.esmaecerSaida { girando = false; fecharVideo() }
     }
 
+    private fun recolherVideo(irAoInicio: Boolean = false) {
+        if (girando) return
+        val abrirMidia = !irAoInicio && playerMidia.ehVideo && playerMidia.ativo && atual != "midia"
+        if (abrirMidia) {
+            tela(atual).visibility = View.INVISIBLE
+            mudarEstado("midia")
+            telaMidia.visibility = View.VISIBLE
+        }
+        girando = true
+        tela(atual).visibility = View.VISIBLE
+        telaVideo.esmaecerSaida {
+            girando = false
+            if (playerMidia.ehVideo && playerMidia.ativo) {
+                telaVideo.fechar()
+                mostrarMiniVideo(true)
+                relogio.removeCallbacks(amostradorVideo)
+                atualizarLedDaMusica()
+            } else fecharVideo()
+            if (irAoInicio) ir("inicio")
+            else if (abrirMidia) aoChegar("midia")
+        }
+    }
+
+    private fun reabrirVideoRecolhido() {
+        if (girando || !videoRecolhido) return
+        mostrarMiniVideo(false)
+        origemVideo = atual
+        telaVideo.abrir(esmaecendo = apareceu)
+        relogio.removeCallbacks(amostradorVideo)
+        relogio.post(amostradorVideo)
+    }
+
     /**
      * O que toca segue um TEMA ("sertanejo", a pesquisa...): enquanto o item escolhido toca, o app procura uma playlist pronta desse tema
      * e a põe na fila; quando a playlist está acabando, emenda outra do mesmo tema. Assim não aparece nada fora do assunto.
@@ -1487,7 +1724,7 @@ class InicioActivity : Activity() {
 
     /** Tem música saindo? Vale o estado que o celular informa OU o próprio Android dizer que o canal de música está ativo
      *  (o estado do celular às vezes não chega, e a tela ociosa não pode entrar com música tocando). */
-    private fun tocandoMusica() = musica.tocando || (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).isMusicActive
+    private fun tocandoMusica() = playerMidia.tocando || (musica.emLocal && musica.tocando) || bluetooth.celularConfirmado
 
     private fun ocupado() = tocandoMusica() || telaVideo.aberto || alarmeTocando != null || modalEnergia.aberto || modalAtualizacao.aberto || painelVolume.aberto || girando
 
@@ -1521,19 +1758,67 @@ class InicioActivity : Activity() {
         aplicarBrilho()
     }
 
-    /** Deslizar do canto esquerdo para a direita volta uma tela: a caixa gira acompanhando o dedo. */
+    private var toqueTopo = false
+    private var toqueTopoX = 0f
+    private var toqueTopoY = 0f
+
+    private fun gestoParaBaixo(dy: Float, dx: Float) = dy >= 72.d() && dy > kotlin.math.abs(dx)
+
+    private fun voltarInicioPeloTopo() {
+        modalAtualizacao.fechar()
+        modalEnergia.fechar()
+        painelVolume.fechar()
+        if (telaVideo.aberto) recolherVideo(irAoInicio = true) else ir("inicio")
+    }
+
+    /** A borda esquerda volta uma tela e a borda superior volta ao Início. */
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
         ultimoToque = android.os.SystemClock.uptimeMillis()
+        if (ultimoToque < bloquearToquesAte) {
+            engolindo = e.actionMasked != MotionEvent.ACTION_UP && e.actionMasked != MotionEvent.ACTION_CANCEL
+            return true
+        }
         // tela ociosa: o primeiro toque só acorda e não aciona nada embaixo
         if (ocioso || engolindo) {
             if (ocioso && e.actionMasked == MotionEvent.ACTION_DOWN) { sairOcioso(); engolindo = true }
             if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) engolindo = false
             return true
         }
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            toqueNaMiniatura = false
+            if (miniVideo.visibility == View.VISIBLE && !girando && !modalEnergia.aberto && !modalAtualizacao.aberto &&
+                !faixaAssistente.aberta && alarmeTocando == null) {
+                val posicao = IntArray(2)
+                miniVideo.getLocationOnScreen(posicao)
+                toqueNaMiniatura = e.rawX >= posicao[0] && e.rawX < posicao[0] + miniVideo.width &&
+                    e.rawY >= posicao[1] && e.rawY < posicao[1] + miniVideo.height
+            }
+        }
+        if (toqueNaMiniatura) {
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) toqueNaMiniatura = false
+            return super.dispatchTouchEvent(e)
+        }
         // teclado da Mídia aberto: tocar no cabeçalho fecha o teclado (o toque segue para o botão tocado)
         if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "midia" && telaMidia.tecladoVisivel && e.rawY < 104.d()) telaMidia.fecharTeclado()
         if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "receitas" && telaReceitas.tecladoVisivel && e.rawY < 104.d()) telaReceitas.fecharTeclado()
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            toqueTopo = e.rawY < 36.d() && (atual != "inicio" || telaVideo.aberto) && !faixaAssistente.aberta && alarmeTocando == null
+            toqueTopoX = e.rawX
+            toqueTopoY = e.rawY
+        }
+        if (toqueTopo && !capturado && (e.actionMasked == MotionEvent.ACTION_MOVE || e.actionMasked == MotionEvent.ACTION_UP) &&
+            gestoParaBaixo(e.rawY - toqueTopoY, e.rawX - toqueTopoX)) {
+            toqueTopo = false
+            arrastando = false
+            val cancela = MotionEvent.obtain(e)
+            cancela.action = MotionEvent.ACTION_CANCEL
+            super.dispatchTouchEvent(cancela)
+            cancela.recycle()
+            engolindo = e.actionMasked != MotionEvent.ACTION_UP
+            voltarInicioPeloTopo()
+            return true
+        }
         if ((atual != "inicio" || telaVideo.aberto) && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -1633,7 +1918,7 @@ class InicioActivity : Activity() {
         sairOcioso()                                   // alarme acorda a tela
         painelVolume.fechar(); modalEnergia.fechar()
         musicaTocavaNoAlarme = musica.tocando
-        videoTocavaNoAlarme = telaVideo.aberto && playerMidia.tocando
+        videoTocavaNoAlarme = (telaVideo.aberto || videoRecolhido) && playerMidia.tocando
         if (musica.tocando) musica.pausar()
         if (videoTocavaNoAlarme) playerMidia.pausar()
         val audio = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
@@ -1681,37 +1966,38 @@ class InicioActivity : Activity() {
     }
 
     private var bootNovo = false
-    private var aquecimento: android.media.AudioTrack? = null
+    private var silencioContinuo: android.media.AudioTrack? = null
 
     /**
-     * A saída de áudio "dorme" e engole o começo do primeiro som. Por isso, assim que o app abre, toca um silêncio contínuo
-     * para acordá-la; o som de início sai inteiro quando a interface começa a aparecer, e o silêncio para quando ele termina.
+     * Mantém uma faixa de PCM silencioso no mixer para a saída não entrar em espera entre sons.
+     * O Android repete o buffer estático sem precisar de uma thread de escrita ou tomar o foco de áudio.
      */
-    private fun aquecerAudio() {
+    @Suppress("DEPRECATION")
+    private fun manterSaidaDeAudioAtiva() {
+        if (silencioContinuo != null) return
+        val taxa = 48_000
+        val quadros = taxa / 10
+        val silencio = ByteArray(quadros * 4)
+        var faixa: android.media.AudioTrack? = null
         try {
-            val taxa = 44100
-            val faixa = android.media.AudioTrack(
+            faixa = android.media.AudioTrack(
                 android.media.AudioManager.STREAM_MUSIC, taxa, android.media.AudioFormat.CHANNEL_OUT_STEREO,
-                android.media.AudioFormat.ENCODING_PCM_16BIT, taxa * 4, android.media.AudioTrack.MODE_STREAM
+                android.media.AudioFormat.ENCODING_PCM_16BIT, silencio.size, android.media.AudioTrack.MODE_STATIC
             )
-            aquecimento = faixa
+            check(faixa.write(silencio, 0, silencio.size) == silencio.size)
+            check(faixa.setLoopPoints(0, quadros, -1) == android.media.AudioTrack.SUCCESS)
             faixa.play()
-            Thread {
-                val silencio = ByteArray(taxa / 5 * 4)
-                try { while (aquecimento === faixa) faixa.write(silencio, 0, silencio.size) } catch (_: Throwable) {}
-            }.start()
-        } catch (_: Throwable) { aquecimento = null }
-    }
-
-    private fun pararAquecimento() {
-        val f = aquecimento ?: return
-        aquecimento = null
-        try { f.stop(); f.release() } catch (_: Throwable) {}
+            silencioContinuo = faixa
+            android.util.Log.d("CaixaAudio", "Saída mantida ativa pela sessão silenciosa ${faixa.audioSessionId}")
+        } catch (e: RuntimeException) {
+            faixa?.release()
+            android.util.Log.w("CaixaAudio", "Não foi possível manter a saída ativa", e)
+        }
     }
 
     /** Toca o som de início do começo ao fim (só chamado quando o aparelho acabou de ligar). */
     private fun tocarSomDeInicio() {
-        Som.tocar(this, R.raw.som_inicio, volumeDaVoz = true) { relogio.postDelayed({ pararAquecimento() }, 300) }
+        Som.tocar(this, R.raw.som_inicio, volumeDaVoz = true)
     }
 
     /**
@@ -1743,6 +2029,10 @@ class InicioActivity : Activity() {
     }
 
     override fun onDestroy() {
+        retirarRetornoAjustesAndroid()
+        silencioContinuo?.release()
+        silencioContinuo = null
+        if (::playerMidia.isInitialized) playerMidia.liberar()
         try { unregisterReceiver(receptorEnergia) } catch (_: Exception) { }
         super.onDestroy()
     }
@@ -1829,7 +2119,7 @@ class InicioActivity : Activity() {
         if (modalAtualizacao.aberto) { modalAtualizacao.fechar(); return }
         if (modalEnergia.aberto) { modalEnergia.fechar(); return }
         if (painelVolume.aberto) { painelVolume.fechar(); return }
-        if (telaVideo.aberto) { fecharVideoAnimado(); return }
+        if (telaVideo.aberto) { recolherVideo(); return }
         when (atual) {
             "midia" -> if (!telaMidia.voltar()) ir("inicio")
             "receitas" -> if (!telaReceitas.voltar()) ir("inicio")

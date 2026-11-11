@@ -36,7 +36,7 @@ class Nivelador(private val handler: Handler, private val medindoLimpo: () -> Bo
         if (id == sessao && realce != null) return
         desligar()
         try {
-            realce = LoudnessEnhancer(id).apply { setTargetGain(0); enabled = true }
+            realce = LoudnessEnhancer(id).apply { setTargetGain(0); enabled = Ajustes.nivelarAudio }
             medidor = Visualizer(id).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
@@ -55,7 +55,12 @@ class Nivelador(private val handler: Handler, private val medindoLimpo: () -> Bo
     }
 
     /** Começou outra faixa: mede de novo (o ganho volta ao normal aos poucos, enquanto a nova medida não chega). */
-    fun novaFaixa() { energia = 0.0; quadros = 0 }
+    fun novaFaixa() {
+        energia = 0.0
+        quadros = 0
+        ganhoMb = 0
+        try { realce?.setTargetGain(0) } catch (_: RuntimeException) {}
+    }
 
     fun desligar() {
         try { medidor?.enabled = false; medidor?.release() } catch (_: Throwable) {}
@@ -64,7 +69,15 @@ class Nivelador(private val handler: Handler, private val medindoLimpo: () -> Bo
     }
 
     private fun medir(w: ByteArray) {
-        if (!Ajustes.nivelarAudio) { mover(0); return }
+        val efeito = realce ?: return
+        val ativo = Ajustes.nivelarAudio
+        try {
+            if (efeito.enabled != ativo) {
+                novaFaixa()
+                efeito.enabled = ativo
+            }
+        } catch (_: RuntimeException) { return }
+        if (!ativo) return
         if (!medindoLimpo()) return                 // durante fade ou com o volume do player abaixado a medida não vale
         var soma = 0.0
         for (b in w) { val x = ((b.toInt() and 0xFF) - 128) / 128.0; soma += x * x }
@@ -88,6 +101,10 @@ class Nivelador(private val handler: Handler, private val medindoLimpo: () -> Bo
             else -> return
         }
         ganhoMb = novo
-        handler.post { try { realce?.setTargetGain(novo) } catch (_: Throwable) {} }
+        handler.post {
+            if (ganhoMb == novo && Ajustes.nivelarAudio) {
+                try { realce?.setTargetGain(novo) } catch (_: Throwable) {}
+            }
+        }
     }
 }

@@ -11,7 +11,6 @@ import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
-import kotlin.math.abs
 
 data class Resultado(
     val titulo: String,
@@ -353,8 +352,15 @@ object YouTube {
             val t = it.audioTrackType
             t == null || t == org.schabi.newpipe.extractor.stream.AudioTrackType.ORIGINAL
         }
-        val audio = (if (originais.isNotEmpty()) originais else todos)
-            .minByOrNull { abs(it.averageBitrate - 128) }
+        val faixas = originais.ifEmpty { todos }
+        val estereo = faixas.filter { faixa ->
+            (faixa.itagItem?.audioChannels ?: 0) <= 2 &&
+                (faixa.codec.isNullOrBlank() || faixa.codec == "opus" || faixa.codec == "mp4a.40.2")
+        }.ifEmpty { faixas }
+        val audio = estereo.filter { it.itagItem?.isDrc() != true }.ifEmpty { estereo }.maxByOrNull {
+            if (it.averageBitrate > 0) it.averageBitrate else it.bitrate / 1000
+        }
+        if (audio != null) Log.d("Midia", "áudio YouTube: ${audio.format?.name}/${audio.codec}, ${audio.averageBitrate} kb/s")
 
         if (soAudio) {
             val a = audio?.content

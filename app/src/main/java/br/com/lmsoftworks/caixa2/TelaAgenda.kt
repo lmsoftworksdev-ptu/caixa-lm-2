@@ -151,6 +151,13 @@ class TelaAlarmes(
         return false
     }
 
+    fun fecharMenu() {
+        if (modal.aberto) modal.fechar()
+        if (telaTexto.aberto) telaTexto.fechar()
+        lista.removeAllViews()
+        editor.removeAllViews()
+    }
+
     /** Refaz tudo com o que está salvo. */
     fun atualizar() {
         if (alarmeSel != DORMIR && alarmes.porId(alarmeSel) == null) alarmeSel = alarmes.lista.firstOrNull()?.id ?: DORMIR

@@ -73,7 +73,7 @@ private class BrilhoOndas(c: Context) : View(c) {
  * O assistente, como na animação de referência (animacao-assistente.html): ao chamar, o fundo desfoca e escurece e no centro aparece
  * a esfera de luz do vídeo (assistente_siri.mp4, misturado com o fundo no modo "screen"), que cresce e acelera com o volume da voz,
  * com brilho colorido em volta e ondas de choque quando a voz sobe de repente. O texto fica no alto: "Ouvindo…", "Pensando…" e a
- * resposta. Tocar na tela interrompe tudo.
+ * resposta. Um toque na tela fecha a assistente em qualquer etapa.
  * [nivelMic] dá o volume do microfone (0..1); [alvo] é a parte da tela que será desfocada.
  */
 @UnstableApi
@@ -120,17 +120,20 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
     private val fechar = Runnable { esconder() }
     private val parar = Runnable { if (!aberta) player?.pause() }
 
-    /** Tocou na tela: quem usa interrompe o assistente. */
+    /** Toque para fechar a assistente. */
     var aoToque: (() -> Unit)? = null
+    var aoMudarSessao: ((Boolean) -> Unit)? = null
+    private var sessaoAtiva = false
 
     // A tela do assistente fica SEMPRE "visível" (só transparente quando fechada): se ela sumisse de verdade (GONE), o Android
     // desmontava a camada do vídeo e, ao reabrir, aparecia um retângulo preto até a mistura ser aplicada de novo.
     private var abertoFlag = false
+    private var saindo = false
     val aberta: Boolean get() = abertoFlag
 
     init {
         alpha = 0f
-        setOnClickListener { aoToque?.invoke() }
+        setOnClickListener { if (aberta) aoToque?.invoke() }
         isClickable = false      // (setOnClickListener liga o clique: tem que desligar DEPOIS, senão a tela inteira fica "tampada" e o toque não passa)
         fundo.scaleType = ImageView.ScaleType.FIT_XY
         addView(fundo, LayoutParams(-1, -1))
@@ -218,8 +221,10 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
     private fun abrir(novo: Int) {
         removeCallbacks(fechar)
         removeCallbacks(parar)
-        animate().cancel()
         if (!aberta) {
+            animate().cancel()
+            saindo = false
+            removeCallbacks(quadro)
             desfocar()
             preparar()
             abertoFlag = true
@@ -238,6 +243,10 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
     }
 
     fun ouvindo(dito: String = "") {
+        if (!sessaoAtiva) {
+            sessaoAtiva = true
+            aoMudarSessao?.invoke(true)
+        }
         abrir(1)
         rotulo.text = ""; linha.text = ""
         linha.setTextColor(Color.WHITE)
@@ -264,12 +273,20 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
     fun esconder() {
         removeCallbacks(fechar)
         if (!aberta) return
-        estado = 0
         abertoFlag = false
-        isClickable = false
+        saindo = true
         animate().cancel()
         animate().alpha(0f).setDuration(550).withEndAction {
-            fundo.setImageDrawable(null); caixaVideo.alpha = 0f
+            saindo = false
+            estado = 0
+            isClickable = false
+            removeCallbacks(quadro)
+            fundo.setImageDrawable(null)
+            caixaVideo.alpha = 0f
+            if (sessaoAtiva) {
+                sessaoAtiva = false
+                aoMudarSessao?.invoke(false)
+            }
             postDelayed(parar, 700)
         }.start()
     }
@@ -283,10 +300,19 @@ class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float,
 
     private val quadro = object : Runnable {
         override fun run() {
-            if (!aberta) return
+            if (!aberta && !saindo) return
             val t = SystemClock.uptimeMillis() / 1000f
             val dt = min(0.1f, t - tAnterior); tAnterior = t
             val pensando = estado == 2
+            if (saindo) {
+                // O vídeo continua rodando. Mantém a rotação do brilho sem reconstruir a pintura do vídeo durante o fade.
+                rotacao += dt * (if (pensando) 2.4f else 0.8f + nivel * 1.6f)
+                brilho.rotacao = rotacao
+                brilho.agora = t
+                brilho.invalidate()
+                postOnAnimation(this)
+                return
+            }
             val alvoNivel = when (estado) {
                 1 -> (nivelMic() * 1.3f).coerceIn(0f, 1f)
                 3 -> fala(t) * 0.85f

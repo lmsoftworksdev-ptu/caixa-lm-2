@@ -27,6 +27,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     var aoVerificarAtualizacao: () -> Unit = {}
     var aoEnergia: () -> Unit = {}
     var aoDiagnostico: () -> Unit = {}
+    var aoAbrirAjusteAndroid: (Intent) -> Unit = { c.startActivity(it) }
     var versao: String = ""
     /** Procura a cidade (em segundo plano) e devolve (nome, latitude, longitude) ou null. */
     var buscarCidade: (String, (Triple<String, Double, Double>?) -> Unit) -> Unit = { _, volta -> volta(null) }
@@ -201,7 +202,8 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
         for ((nome, acao) in itens) {
             opcoesSistema.addView(botao(c, nome, Tema.BOTAO) {
                 try {
-                    c.startActivity(Intent(acao).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    aoAbrirAjusteAndroid(Intent(acao))
+                    modal.fechar()
                 } catch (_: Exception) {
                     Toast.makeText(c, "Essa tela não está disponível.", Toast.LENGTH_LONG).show()
                 }
@@ -359,8 +361,8 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                         post { Aviso.mostrar(c, if (livre < 0) "Não consegui limpar tudo." else if (livre == 0L) "Já estava tudo limpo." else "Limpeza concluída: " + Limpeza.texto(livre) + " liberados") }
                     }.start()
                 }))
-                opcoes.addView(linha("Restaurar ajustes", "Volta brilho, ocioso, sons, cidade e nome ao padrão", botao(c, "Restaurar", Tema.BOTAO, Tema.VERMELHO_SUAVE) { confirmarRestaurar() }))
                 opcoes.addView(linha("Energia", "Desligar ou reiniciar a caixa", botao(c, "Energia", Tema.BOTAO) { aoEnergia() }))
+                opcoes.addView(linha("Restaurar ajustes", "Volta brilho, ocioso, sons, cidade e nome ao padrão", botao(c, "Restaurar", Tema.BOTAO, Tema.VERMELHO_SUAVE) { confirmarRestaurar() }))
             }
         }
     }

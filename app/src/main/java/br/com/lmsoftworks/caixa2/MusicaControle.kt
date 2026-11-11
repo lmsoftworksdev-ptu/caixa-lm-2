@@ -62,10 +62,11 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** O áudio do celular está chegando (aviso do A2DP, que vem antes e sem depender do estado da música): também vale como "o celular está tocando". */
     var celularSomTocando: () -> Boolean = { false }
+    var celularSomConfirmado: () -> Boolean = { false }
     /** O celular passou a tocar de verdade (o estado dele continua "tocando" depois de um instante): o que o app toca (vídeo) tem que pausar. */
     var aoCelularComecou: (() -> Unit)? = null
     private val confirmarCelular = Runnable {
-        if (!foneTocando(controle?.playbackState)) return@Runnable
+        if (!celularSomConfirmado() || !foneTocando(controle?.playbackState)) return@Runnable
         if (appRecente()) controle?.transportControls?.pause()      // foi o eco do app começando a tocar
         else aoCelularComecou?.invoke()
     }
@@ -126,6 +127,15 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
     val semEstadoDoCelular: Boolean get() = controle?.playbackState?.state.let { it == null || it == PlaybackState.STATE_NONE || it == PlaybackState.STATE_STOPPED }
     private fun celularAtivo(s: PlaybackState?) = foneTocando(s) || celularSomTocando()
 
+    fun sincronizarCelularConfirmado() {
+        val c = controle ?: return
+        if (emLocal) local?.parar()
+        origem = Origem.CELULAR
+        lerMetadados(c.metadata)
+        lerEstado(c.playbackState)
+        aoMudar()
+    }
+
     /** O player do YouTube (menu Mídia). Quando ele está tocando uma música, ele manda no lugar do celular. */
     var local: PlayerMidia? = null
     /** Quando o app começou a tocar uma música dele (o celular que voltar a tocar logo depois não foi a pessoa: foi o fim do assistente). */
@@ -158,12 +168,12 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
         override fun onMetadataChanged(m: MediaMetadata?) {
             if (emLocal) return
             // o celular manda título e capa também quando só é desbloqueado: isso não é "tocar". Só vale quando ele está tocando.
-            if (origem == Origem.CELULAR || celularAtivo(controle?.playbackState)) { origem = Origem.CELULAR; lerMetadados(m); aoMudar() }
+            if (origem == Origem.CELULAR || celularSomConfirmado()) { origem = Origem.CELULAR; lerMetadados(m); aoMudar() }
         }
         override fun onPlaybackStateChanged(s: PlaybackState?) {
             if (emLocal) {
                 // o celular voltou a tocar de verdade: ele passa a mandar de novo e a música do YouTube para
-                if (!foneTocando(s)) return
+                if (!celularSomConfirmado() || !foneTocando(s)) return
                 if (appRecente()) {
                     // acabou de começar (ou ainda está carregando) a música do app e o celular "voltou": não foi a pessoa dando play, então o celular é pausado de novo
                     controle?.transportControls?.pause()
@@ -178,7 +188,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
             }
             handler.removeCallbacks(confirmarCelular)
             if (foneTocando(s)) handler.postDelayed(confirmarCelular, 250)      // só filtra um "tocando" que some em seguida
-            if (celularAtivo(s) && origem != Origem.CELULAR) { origem = Origem.CELULAR; lerMetadados(controle?.metadata) }
+            if (celularSomConfirmado() && origem != Origem.CELULAR) { origem = Origem.CELULAR; lerMetadados(controle?.metadata) }
             if (origem == Origem.CELULAR) lerEstado(s)
             aoMudar()
         }
@@ -191,7 +201,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
                 val c = MediaController(ctx, navegador!!.sessionToken)
                 controle = c
                 c.registerCallback(retorno, handler)
-                if (celularAtivo(c.playbackState) && !emLocal) { origem = Origem.CELULAR; lerMetadados(c.metadata); lerEstado(c.playbackState) }
+                if (celularSomConfirmado() && !emLocal) { origem = Origem.CELULAR; lerMetadados(c.metadata); lerEstado(c.playbackState) }
             } catch (e: Exception) { Log.w(TAG, "nao foi possivel abrir a sessao", e) }
             aoMudar()
         }

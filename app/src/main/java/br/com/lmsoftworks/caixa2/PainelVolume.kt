@@ -77,6 +77,14 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private var abafado = -1
     private var abafadoAlvo = -1
     private var ignorarAte = 0L
+    private var mudandoSaida = false
+    private val aplicarVolumeNaSaida = Runnable {
+        mudandoSaida = false
+        if (!suspenso && abafado < 0) {
+            imporVolumeDaCaixa()
+            atualizar()
+        }
+    }
 
     /**
      * Baixa o volume do aparelho (a música do celular) enquanto o assistente ouve e fala, e devolve depois. Não abre a pílula
@@ -141,14 +149,19 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         if (nivel >= 0) abafadoAlvo = Math.min(nivel, abafado)
     }
 
-    fun pausaFim() {
+    fun pausaFim(fade: Boolean = true) {
         if (abafado < 0) return
         val volta = abafado
         abafado = -1
         handler.removeCallbacks(passoFade)
         ignorarAte = android.os.SystemClock.uptimeMillis() + 1500
-        audio.setStreamVolume(canal, 1, 0)
-        degrau(1, volta, 150L)
+        if (fade) {
+            audio.setStreamVolume(canal, 1, 0)
+            degrau(1, volta, 150L)
+        } else {
+            audio.setStreamVolume(canal, volta, 0)
+            atualizar()
+        }
     }
 
     /** Fade do volume do aparelho: um nível a cada 120 ms, sem abrir a pílula. */
@@ -178,8 +191,14 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
     private val receptor = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, i: Intent) {
             if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", canal) != canal) return
+            if (i.action == "android.media.STREAM_DEVICES_CHANGED_ACTION") {
+                mudandoSaida = true
+                handler.removeCallbacks(aplicarVolumeNaSaida)
+                handler.postDelayed(aplicarVolumeNaSaida, 200)
+                return
+            }
             // mudanças do próprio app (assistente abaixando/voltando o volume) não aparecem na tela
-            if (abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) return
+            if (mudandoSaida || abafado >= 0 || android.os.SystemClock.uptimeMillis() < ignorarAte) return
             val agora = android.os.SystemClock.uptimeMillis()
             android.util.Log.d("CaixaVol", "volume do sistema ${audio.getStreamVolume(canal)} (caixa ${Ajustes.volumeCaixa}%) " + if (agora < janelaImporAte) "na janela de nivelamento" else "mudança da pessoa")
             if (agora < janelaImporAte) {
@@ -244,12 +263,16 @@ class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -
         if (Ajustes.volumeCaixa < 0) Ajustes.definirVolumeCaixa(porcento) else imporPor(3000L)      // ao abrir, por 3 segundos o volume da caixa vale sobre o que o celular mandar
         if (!registrado) {
             registrado = true
-            c.registerReceiver(receptor, IntentFilter("android.media.VOLUME_CHANGED_ACTION"))
+            c.registerReceiver(receptor, IntentFilter("android.media.VOLUME_CHANGED_ACTION").apply {
+                addAction("android.media.STREAM_DEVICES_CHANGED_ACTION")
+            })
         }
         atualizar()
     }
 
     fun parar() {
+        handler.removeCallbacks(aplicarVolumeNaSaida)
+        mudandoSaida = false
         if (registrado) { registrado = false; try { c.unregisterReceiver(receptor) } catch (e: Exception) { } }
     }
 

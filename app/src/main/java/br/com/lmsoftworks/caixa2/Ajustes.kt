@@ -22,7 +22,7 @@ object Ajustes {
     /** Toquinho a cada tecla do teclado da tela. */
     @Volatile var sonsTeclado = true; private set
     /** Nivelamento de áudio: as faixas mais baixas sobem até o nível das mais fortes. */
-    @Volatile var nivelarAudio = true; private set
+    @Volatile var nivelarAudio = false; private set
     /** A caixa foi desligada/reiniciada pelo app com Wi-Fi e Bluetooth desligados de propósito: ao ligar, eles voltam sozinhos. */
     @Volatile var restaurarRedes = false; private set
     /** Fuso horário: automático (pela internet) ou manual. As diferenças para Greenwich são em minutos (-180 = UTC−3). */
@@ -60,7 +60,7 @@ object Ajustes {
         escurecerOcioso = p.getBoolean("escurecerOcioso", true)
         sonsResposta = p.getBoolean("sonsResposta", true)
         sonsTeclado = p.getBoolean("sonsTeclado", true)
-        nivelarAudio = p.getBoolean("nivelarAudio", true)
+        nivelarAudio = p.getBoolean("nivelarAudio", false)
         restaurarRedes = p.getBoolean("restaurarRedes", false)
         fusoAuto = p.getBoolean("fusoAuto", true)
         fusoManualMin = p.getInt("fusoManualMin", -180)
