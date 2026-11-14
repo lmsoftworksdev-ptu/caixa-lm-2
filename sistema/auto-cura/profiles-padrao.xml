@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<profiles>
+    <active>0230226d-0d05-494a-a9bd-d222a1117655</active>
+    <profile name="Padrão" uuid="0230226d-0d05-494a-a9bd-d222a1117655">
+        <ringModeDescriptor>
+            <value>normal</value>
+            <override>true</override>
+        </ringModeDescriptor>
+    </profile>
+</profiles>

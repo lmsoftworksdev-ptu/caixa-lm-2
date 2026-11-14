@@ -283,8 +283,8 @@ class InicioActivity : Activity() {
         bluetooth.aoTrocaIniciada = { cobertura.mostrar("Trocando o modo Bluetooth… a caixa vai reiniciar") }      // tela de carregamento já ao apertar
         bluetooth.aoTrocaFalhou = { cobertura.esconder() }
         bluetooth.aoTravado = {
+            // só o aviso: o modal de desligar/reiniciar não abre mais sozinho (a pessoa abre quando quiser, pelo botão de energia)
             Aviso.mostrar(this, "O Bluetooth do aparelho travou: reiniciar a caixa resolve")
-            modalEnergia.abrir()
         }
         musica = MusicaControle(this) { aoMudarMusica() }
         musica.bluetoothLigado = { bluetooth.ligado }

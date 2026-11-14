@@ -1,0 +1,9 @@
+# Auto-cura (Caixa LM): desligar sem aviso deixa arquivos do /data cheios de zeros, e dois deles derrubam o sistema em ciclo
+# (a caixa fica na animação de inicialização). Antes de o sistema subir, o init (que pode escrever aí) refaz o perfil padrão e apaga o
+# histórico do Wi-Fi (o sistema recria os dois sozinho; as redes salvas ficam em wpa_supplicant.conf e não são tocadas).
+on post-fs-data
+    copy /system/etc/caixa/profiles-padrao.xml /data/system/profiles.xml
+    chown system system /data/system/profiles.xml
+    chmod 0600 /data/system/profiles.xml
+    restorecon /data/system/profiles.xml
+    rm /data/misc/wifi/networkHistory.txt
