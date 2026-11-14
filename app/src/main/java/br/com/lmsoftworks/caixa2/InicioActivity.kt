@@ -449,11 +449,12 @@ class InicioActivity : Activity() {
                 if (v.width > v.height && !apareceu) {
                     apareceu = true
                     fundo.iniciar()
-                    // espera a animação de giro do Android terminar antes de mostrar a interface
-                    conteudo.animate().alpha(1f)
-                        .setStartDelay(Cfg.ATRASO_ENTRADA_MS).setDuration(Cfg.FADE_ENTRADA_MS).start()
-                    // o fundo fica preto (sem imagem) até a interface aparecer em fade; o som começa junto, do início
-                    if (bootNovo) relogio.postDelayed({ tocarSomDeInicio() }, Cfg.ATRASO_ENTRADA_MS)
+                    // tela preta até a animação de inicialização do Android acabar de verdade; só então a interface aparece em fade
+                    aoFimDaAnimacaoDeBoot {
+                        conteudo.animate().alpha(1f).setStartDelay(0L).setDuration(Cfg.FADE_ENTRADA_MS).start()
+                        // o som começa junto com a interface, do início
+                        if (bootNovo) tocarSomDeInicio()
+                    }
                 }
             }
         }
@@ -2050,6 +2051,26 @@ class InicioActivity : Activity() {
     }
 
     private var bootNovo = false
+
+    /**
+     * A animação de inicialização é um serviço do Android (init.svc.bootanim). Antes ela acabava num tempo fixo (0,9 s) e a interface
+     * aparecia por cima dela ou o Android mostrava a própria tela. Agora fica tudo preto até o serviço parar de verdade (no máximo 20 s),
+     * mais um respiro de 0,3 s, e só então a interface entra em fade.
+     */
+    private fun aoFimDaAnimacaoDeBoot(acao: () -> Unit) {
+        val inicio = android.os.SystemClock.uptimeMillis()
+        fun rodando(): Boolean = try {
+            val sp = Class.forName("android.os.SystemProperties")
+            sp.getMethod("get", String::class.java).invoke(null, "init.svc.bootanim") == "running"
+        } catch (e: Throwable) { false }
+        val verificar = object : Runnable {
+            override fun run() {
+                if (rodando() && android.os.SystemClock.uptimeMillis() - inicio < 20_000L) relogio.postDelayed(this, 100L)
+                else relogio.postDelayed(acao, 300L)
+            }
+        }
+        verificar.run()
+    }
     private var silencioContinuo: android.media.AudioTrack? = null
 
     /**

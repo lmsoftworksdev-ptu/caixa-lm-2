@@ -426,11 +426,23 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
         else controle?.transportControls?.play()
     }
     /** Manda "pausar" ao celular sem checar o estado (ele pode estar tocando sem avisar). */
-    fun pausarCelular() { controle?.transportControls?.pause() }
+    fun pausarCelular() {
+        pausouEm = SystemClock.uptimeMillis()
+        if (!emLocal && tocando) { estado = PlaybackState.STATE_PAUSED; aoMudar() }      // a tela já mostra "pausado"; o estado de verdade do celular chega logo depois e corrige
+        controle?.transportControls?.pause()
+    }
+    /** Quando foi o último "pausar" mandado ao celular: o áudio do Bluetooth ainda sai por uns segundos depois disso e NÃO quer dizer que ele está tocando. */
+    private var pausouEm = 0L
 
     fun pausar() { if (emLocal) { if (local!!.tocando) local!!.alternar() } else controle?.transportControls?.pause() }
     /** O celular manda som mas não avisou o estado (o iPhone às vezes não manda): pausa mesmo assim, em vez de "dar play" por cima. */
-    fun alternar() { if (emLocal) local!!.alternar() else if (tocando || celularSomTocando()) pausarCelular() else tocar() }
+    fun alternar() {
+        if (emLocal) { local!!.alternar(); return }
+        // Logo depois de pausar, o áudio do Bluetooth demora uns 5 s para acabar: se isso contasse como "tocando", o play virava outro pause
+        // e era preciso clicar várias vezes. Dentro dessa janela só vale o estado que o celular informa.
+        val recemPausado = SystemClock.uptimeMillis() - pausouEm < 7_000L
+        if (tocando || (!recemPausado && celularSomTocando())) pausarCelular() else tocar()
+    }
     fun proxima() { if (emLocal) local!!.proxima() else controle?.transportControls?.skipToNext() }
     fun anterior() { if (emLocal) local!!.anterior() else controle?.transportControls?.skipToPrevious() }
 
