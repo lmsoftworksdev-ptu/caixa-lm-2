@@ -123,7 +123,7 @@ class InicioActivity : Activity() {
         if (climaBuscando || (climaEm != 0L && agora - climaEm < 30 * 60_000L)) return
         climaBuscando = true
         climaEm = agora
-        Thread {
+        Tarefas.executar {
             val c = try { br.com.lmsoftworks.caixa2.voz.Respostas.climaHoje(this) } catch (e: Throwable) { null }
             relogio.post {
                 climaBuscando = false
@@ -134,7 +134,7 @@ class InicioActivity : Activity() {
                     climaEm = android.os.SystemClock.uptimeMillis() - 30 * 60_000L + espera
                 }
             }
-        }.start()
+        }
     }
 
     private lateinit var lembretes: LembreteControle
@@ -234,7 +234,9 @@ class InicioActivity : Activity() {
             val compras = listas.itens("compras").filter { !it.marcado }.map { it.texto }
             inicio.definirLista(if (compras.isEmpty()) null else "Lista de compras", compras)
             if (!ocioso) {
-                if (android.os.SystemClock.uptimeMillis() - ultimoToque > Ajustes.ociosoMs() && !ocupado()) entrarOcioso()
+                conferirEconomiaBrilho()
+                // o modo de descanso (tela preta com a hora) só vem do menu principal e sem nada tocando; nos outros menus só o brilho baixa
+                if (atual == "inicio" && android.os.SystemClock.uptimeMillis() - ultimoToque > Ajustes.ociosoMs() && !ocupado()) entrarOcioso()
             } else {
                 telaOciosa.atualizar()
                 if (tocandoMusica()) sairOcioso()      // alguém começou a tocar: acorda
@@ -304,10 +306,7 @@ class InicioActivity : Activity() {
             if (videoRecolhido || musica.emLocal) playerMidia.parar() else musica.pausar()
             inicio.definirMusica(null, null)
         }
-        inicio.aoPlayPause = {
-            semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000
-            if (videoRecolhido) playerMidia.alternar() else musica.alternar()
-        }
+        inicio.aoPlayPause = { alternarReproducao() }
         telaMusica = TelaMusica(this, musica, bluetooth, { ir("bluetooth") }, { ir(if (musica.ehRadio) "radios" else "midia") }) { videoDaMusica() }
         telaMusica.fundoCapa = fundoCapa
         telaMusica.semDados.aoCor = { a, b -> if (atual == "musica") fundo.tema(a, b, 1.9f) }      // sem os dados da música: as cores do fundo mudam sozinhas
@@ -388,20 +387,20 @@ class InicioActivity : Activity() {
                 if (atual == "musica" && !musica.emLocal) ir("inicio")      // o player fecha sozinho e volta para o início
             }
         }
-        telaConfig.buscarCidade = { nome, volta -> Thread { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } }.start() }
+        telaConfig.buscarCidade = { nome, volta -> Tarefas.executar { val r = try { br.com.lmsoftworks.caixa2.voz.Respostas.buscarCidade(this, nome) } catch (e: Throwable) { null }; relogio.post { volta(r) } } }
         telaConfig.aoMudarFuso = { alarmes.reagendar(); aoMudarAlarmes(); climaEm = 0L }
         telaConfig.buscarFusoAutomatico = { FusoHorario.buscarAutomatico(this, relogio) { telaConfig.aoMudarFuso(); if (atual == "config") telaConfig.atualizar() } }
         telaConfig.aoMudarCidade = { climaEm = 0L; previsao = null }      // o clima e a previsão buscam de novo, na cidade nova
         telaConfig.aoMudarNome = { bluetooth.aplicarNome() }
         telaConfig.aoRestaurar = { aplicarBrilho(); bluetooth.aplicarNome(); climaEm = 0L; previsao = null }
         telaConfig.lerRegistro = { volta ->
-            Thread {
+            Tarefas.executar {
                 val txt = try {
                     val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "400", "-s", "Assistente:D", "VozCaixa:D", "Midia:D", "CaixaLed:D", "CaixaBt:D", "Atualizador:D", "AndroidRuntime:E"))
                     p.inputStream.bufferedReader().readLines().filter { !it.startsWith("---") }.takeLast(70).joinToString("\n") { it.replace(Regex("^\\d\\d-\\d\\d "), "") }
                 } catch (e: Throwable) { "Não consegui ler o registro: ${e.message}" }
                 relogio.post { volta(txt) }
-            }.start()
+            }
         }
         telaConfig.salvarRegistro = { txt ->
             try { val f = java.io.File(getExternalFilesDir(null), "registro.txt"); f.writeText(txt); f.absolutePath } catch (e: Throwable) { "" }
@@ -484,17 +483,12 @@ class InicioActivity : Activity() {
                         inicioX = evento.rawX
                         inicioY = evento.rawY
                     }
-                    MotionEvent.ACTION_UP -> {
+                    // dispara assim que o dedo desce o bastante (não espera soltar): funciona mesmo com um arrasto curto ou interrompido
+                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
                         val deslocamentoY = evento.rawY - inicioY
                         val deslocamentoX = kotlin.math.abs(evento.rawX - inicioX)
-                        if (gestoParaBaixo(deslocamentoY, deslocamentoX)) {
-                            alca.post {
-                                if (retornoAjustesAndroid === alca) {
-                                    retirarRetornoAjustesAndroid()
-                                    startActivity(Intent(this@InicioActivity, InicioActivity::class.java)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-                                }
-                            }
+                        if (deslocamentoY >= 48.d() && deslocamentoY > deslocamentoX) {
+                            alca.post { if (retornoAjustesAndroid === alca) voltarDosAjustesAndroid() }
                         }
                     }
                 }
@@ -504,7 +498,7 @@ class InicioActivity : Activity() {
         val tipo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, 26.d(), tipo,
+            WindowManager.LayoutParams.MATCH_PARENT, 44.d(), tipo,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
@@ -520,11 +514,35 @@ class InicioActivity : Activity() {
             Toast.makeText(this, "Atalho indisponível. Use Voltar para retornar à Caixa.", Toast.LENGTH_LONG).show()
         }
         try {
+            ajustesAndroidAbertos = true
             if (retornoAjustesAndroid != null) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         } catch (e: RuntimeException) {
             retirarRetornoAjustesAndroid()
             throw e
+        }
+    }
+
+    /** Os ajustes do Android foram abertos por aqui e ainda não foram encerrados. */
+    private var ajustesAndroidAbertos = false
+
+    /** Volta à Caixa e encerra o app Configurações do Android de verdade (a tela não fica aberta por baixo). */
+    private fun voltarDosAjustesAndroid() {
+        retirarRetornoAjustesAndroid()
+        startActivity(Intent(this@InicioActivity, InicioActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        relogio.postDelayed({ encerrarAjustesAndroid() }, 450L)      // depois que a Caixa já está na frente: sem piscar
+    }
+
+    private fun encerrarAjustesAndroid() {
+        if (!ajustesAndroidAbertos) return
+        ajustesAndroidAbertos = false
+        val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        try {
+            am.javaClass.getMethod("forceStopPackage", String::class.java).invoke(am, "com.android.settings")
+        } catch (e: Throwable) {
+            Falhas.gravar("Encerrar ajustes do Android", e)
+            try { am.killBackgroundProcesses("com.android.settings") } catch (_: Throwable) { }
         }
     }
 
@@ -538,6 +556,8 @@ class InicioActivity : Activity() {
     override fun onResume() {
         super.onResume()
         retirarRetornoAjustesAndroid()
+        // voltou à Caixa (gesto, botão Voltar ou qualquer outro caminho): o app Configurações não pode ficar aberto por baixo
+        if (ajustesAndroidAbertos) relogio.postDelayed({ encerrarAjustesAndroid() }, 450L)
     }
 
     override fun onStart() {
@@ -816,7 +836,7 @@ class InicioActivity : Activity() {
         if (buscandoPrevisao) return
         buscandoPrevisao = true
         telaPrevisao.mostrarCarregando()
-        Thread {
+        Tarefas.executar {
             val p = try { br.com.lmsoftworks.caixa2.voz.Respostas.previsaoCompleta(this) } catch (e: Throwable) { null }
             relogio.post {
                 buscandoPrevisao = false
@@ -824,7 +844,7 @@ class InicioActivity : Activity() {
                 telaPrevisao.definir(p ?: previsao)
                 if (atual == "clima") aplicarTema("clima")      // o fundo segue o tempo de hoje
             }
-        }.start()
+        }
     }
 
     private fun metade(): Float = conteudo.width / 2f
@@ -1115,7 +1135,7 @@ class InicioActivity : Activity() {
     /** Pede à busca do YouTube e toca o primeiro resultado (música: só o áudio e tela de música; vídeo: tela cheia). */
     private fun buscarETocar(consulta: String, soAudio: Boolean, modoIndefinido: Boolean) {
         val musicaPedida = if (modoIndefinido) !telaVideo.aberto else soAudio
-        Thread {
+        Tarefas.executar {
             val lista = try { YouTube.buscar(consulta, musicaPedida) } catch (e: Exception) { emptyList() }
             relogio.post {
                 when {
@@ -1124,7 +1144,7 @@ class InicioActivity : Activity() {
                     else -> { iniciarNicho(lista[0].canal.removeSuffix(" - Topic").ifBlank { lista[0].titulo }, false, lista[0]); abrirVideo(lista.take(1), 0) }
                 }
             }
-        }.start()
+        }
     }
 
     // ---- temporizador de sono: no fim, o volume desce em ~18 s, a música para e o volume volta ao que era ----
@@ -1414,11 +1434,11 @@ class InicioActivity : Activity() {
         ultimoPrefetch = faixa.url
         clipesProntos[faixa.url]?.let { playerMidia.prefetchVideo(it); return }      // veio de um vídeo: o vínculo já é exato
         val tit = faixa.titulo; val art = faixa.canal.removeSuffix(" - Topic"); val dur = faixa.duracaoSeg
-        Thread {
+        Tarefas.executar {
             try { Thread.sleep(4000) } catch (e: Exception) { }
-            val achado = acharClipe(tit, art, dur) ?: return@Thread
+            val achado = acharClipe(tit, art, dur) ?: return@executar
             relogio.post { clipesProntos[faixa.url] = achado; playerMidia.prefetchVideo(achado) }
-        }.start()
+        }
     }
 
     private fun abrirVideo(lista: List<Resultado>, i: Int, inicioMs: Long = 0L) {
@@ -1482,7 +1502,7 @@ class InicioActivity : Activity() {
      * e toca a primeira, no mesmo segundo; o vínculo com o vídeo fica guardado, então o ícone de vídeo reabre exatamente esse vídeo.
      */
     private fun musicaDoVideo(v: Resultado, inicioMs: Long, tocar: Boolean, irParaMusica: Boolean) {
-        Thread {
+        Tarefas.executar {
             val consulta = ("áudio " + nomeDaMusica(v.titulo) + " " + v.canal.removeSuffix(" - Topic")).trim()
             val lista = try { YouTube.buscar(consulta, true) } catch (e: Exception) { emptyList() }
             relogio.post {
@@ -1518,7 +1538,7 @@ class InicioActivity : Activity() {
                     }
                 }
             }
-        }.start()
+        }
     }
 
     /** Seletor da tela Tocando agora: abre o clipe da mesma faixa no mesmo segundo; a música para. */
@@ -1554,7 +1574,7 @@ class InicioActivity : Activity() {
         val pronto = clipesProntos[faixa.url]
         if (pronto != null) { abrirClipe(pronto); return }
         buscandoClipe = true
-        Thread {
+        Tarefas.executar {
             val achado = acharClipe(titulo, artista, faixa.duracaoSeg)
             relogio.post {
                 buscandoClipe = false
@@ -1565,7 +1585,7 @@ class InicioActivity : Activity() {
                     if (musicaTocavaAntes) musica.tocar()
                 } else { clipesProntos[faixa.url] = achado; abrirClipe(achado) }
             }
-        }.start()
+        }
     }
 
 
@@ -1654,7 +1674,7 @@ class InicioActivity : Activity() {
         val tentarMix = n.sementes.add(semente)
         val (q, exigir) = consultas[n.rodada % consultas.size]
         val t0 = android.os.SystemClock.uptimeMillis()
-        Thread {
+        Tarefas.executar {
             val mix = if (tentarMix) try { YouTube.mix(semente, n.musica) } catch (e: Exception) { emptyList() } else emptyList()
             if (mix.size >= 5) {
                 android.util.Log.d("Nicho", "mix do YouTube de " + semente.takeLast(11) + " (" + (if (n.musica) "música" else "vídeo") + "): " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + mix.size + " itens")
@@ -1665,7 +1685,7 @@ class InicioActivity : Activity() {
                     android.util.Log.d("Nicho", "fila agora " + playerMidia.fila.size + " (" + entraram + " novos)")
                     if (entraram < 3 && ++n.tentativas < 10) carregarPlaylistDoNicho() else if (entraram >= 3) n.tentativas = 0      // quase tudo repetido: tenta outra semente/playlist
                 }
-                return@Thread
+                return@executar
             }
             // 2) plano B: playlists achadas por busca (do artista e, depois, do gênero)
             n.rodada++
@@ -1681,7 +1701,7 @@ class InicioActivity : Activity() {
                     if (entraram == 0) { if (++n.tentativas < 10) carregarPlaylistDoNicho() } else n.tentativas = 0      // nada novo: tenta outra playlist
                 } else if (++n.tentativas < 10) carregarPlaylistDoNicho()
             }
-        }.start()
+        }
     }
 
     /** A cada meio segundo: largou o tema se tocou algo de fora dele; pede outra playlist quando a fila está acabando. */
@@ -1748,6 +1768,7 @@ class InicioActivity : Activity() {
     private fun entrarOcioso() {
         if (ocioso) return
         ocioso = true
+        economiaBrilho = false
         Animacao.pausada = true
         painelVolume.fechar()
         telaOciosa.atualizar()
@@ -1760,7 +1781,29 @@ class InicioActivity : Activity() {
 
     /** Brilho da tela escolhido em Configurações (fora do modo ocioso). */
     private fun aplicarBrilho() {
+        economiaBrilho = false
         val lp = window.attributes; lp.screenBrightness = Ajustes.brilho / 100f; window.attributes = lp
+    }
+
+    /** A tela está com o brilho baixado (15%) pela economia de bateria. */
+    private var economiaBrilho = false
+    private val ESPERA_ECONOMIA_MS = 30_000L
+
+    /**
+     * Economia de bateria: com um menu aberto ou música tocando, 30 s sem toque baixam o brilho a 15%; qualquer toque (ou alarme, assistente,
+     * aviso) devolve. Vídeo tocando ou aberto nunca escurece.
+     */
+    private fun conferirEconomiaBrilho() {
+        val parado = android.os.SystemClock.uptimeMillis() - ultimoToque
+        val videoNaTela = telaVideo.aberto || (playerMidia.ehVideo && playerMidia.tocando)
+        val algoPedindoAtencao = alarmeTocando != null || faixaAssistente.aberta || modalEnergia.aberto || modalAtualizacao.aberto || painelVolume.aberto || girando
+        val pode = Ajustes.economiaBrilho && !videoNaTela && !algoPedindoAtencao
+        if (economiaBrilho) {
+            if (!pode || parado < ESPERA_ECONOMIA_MS) aplicarBrilho()
+        } else if (pode && parado >= ESPERA_ECONOMIA_MS && (atual != "inicio" || tocandoMusica())) {
+            economiaBrilho = true
+            val lp = window.attributes; lp.screenBrightness = 0.15f; window.attributes = lp
+        }
     }
 
     private fun sairOcioso() {
@@ -1790,6 +1833,8 @@ class InicioActivity : Activity() {
     /** A borda esquerda volta uma tela e a borda superior volta ao Início. */
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
         ultimoToque = android.os.SystemClock.uptimeMillis()
+        // brilho baixado pela economia: o toque devolve o brilho e só acorda (não aciona nada embaixo, a tela estava quase apagada)
+        if (economiaBrilho) { aplicarBrilho(); if (e.actionMasked == MotionEvent.ACTION_DOWN) engolindo = true }
         if (ultimoToque < bloquearToquesAte) {
             engolindo = e.actionMasked != MotionEvent.ACTION_UP && e.actionMasked != MotionEvent.ACTION_CANCEL
             return true
@@ -1888,8 +1933,30 @@ class InicioActivity : Activity() {
     }
 
     /** As teclas de volume mexem no volume sem o indicador nativo do Android: aparece o nosso painel. */
+    /** Play/pause do que estiver tocando (cartão da tela inicial e botão físico de energia). */
+    private fun alternarReproducao() {
+        semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000
+        if (videoRecolhido) playerMidia.alternar() else musica.alternar()
+    }
+
+    private var energiaLongaDisparada = false
+    private val dispararEnergiaLonga = Runnable { energiaLongaDisparada = true; abrirModalDesligar() }
+
     override fun dispatchKeyEvent(e: android.view.KeyEvent): Boolean {
         ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
+        if (economiaBrilho) aplicarBrilho()
+        // Botão físico de energia (o layout de teclas do sistema o entrega como play/pause): toque curto = play/pause; segurar 3 s = desligar
+        if (e.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+            if (e.device?.name == "qpnp_pon") {
+                if (e.action == android.view.KeyEvent.ACTION_DOWN) {
+                    if (e.repeatCount == 0) { energiaLongaDisparada = false; relogio.removeCallbacks(dispararEnergiaLonga); relogio.postDelayed(dispararEnergiaLonga, 3000L) }
+                } else if (e.action == android.view.KeyEvent.ACTION_UP) {
+                    relogio.removeCallbacks(dispararEnergiaLonga)
+                    if (!energiaLongaDisparada && !energiaEmCurso && !modalEnergia.aberto) alternarReproducao()
+                }
+            } else if (e.action == android.view.KeyEvent.ACTION_DOWN && e.repeatCount == 0) alternarReproducao()      // tecla de mídia de outro aparelho
+            return true
+        }
         if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
             if (e.action == android.view.KeyEvent.ACTION_DOWN)
                 painelVolume.ajustarPorTecla(if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) 1 else -1)
@@ -2059,6 +2126,10 @@ class InicioActivity : Activity() {
         for (k in 0..24) relogio.postDelayed({
             try { sendBroadcast(android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) { }
         }, k * 30L)
+        abrirModalDesligar()
+    }
+
+    private fun abrirModalDesligar() {
         if (energiaEmCurso || alarmeTocando != null) return
         ultimoToque = android.os.SystemClock.uptimeMillis(); if (ocioso) sairOcioso()
         painelVolume.fechar()

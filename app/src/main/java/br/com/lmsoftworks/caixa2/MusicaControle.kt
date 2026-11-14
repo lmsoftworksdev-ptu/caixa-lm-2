@@ -215,13 +215,13 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Aquece DNS e conexão segura para a primeira capa chegar mais rápido. */
     private fun aquecer() {
-        Thread {
+        Tarefas.executar {
             try {
                 val con = URL("https://itunes.apple.com/search?term=a&limit=1").openConnection() as HttpURLConnection
                 con.connectTimeout = 4000; con.readTimeout = 4000
                 con.inputStream.use { it.readBytes() }
             } catch (e: Exception) { }
-        }.start()
+        }
     }
 
     fun iniciar() {
@@ -345,7 +345,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
 
     /** Procura a capa no iTunes (sem chave), em segundo plano, escolhendo o resultado que mais combina; guarda no cache. */
     private fun buscarCapa(artista: String, titulo: String, album: String, chave: String) {
-        Thread {
+        Tarefas.executar {
             var imagem: Bitmap? = null
             try {
                 var melhor: JSONObject? = null
@@ -373,7 +373,7 @@ class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
                 if (imagem != null) cacheMemoria.put(chave, imagem)
                 if (chave == chaveCapa && imagem != null) { capa = imagem; aoMudar() }
             }
-        }.start()
+        }
     }
 
     // ---- música do YouTube (menu Mídia) ----

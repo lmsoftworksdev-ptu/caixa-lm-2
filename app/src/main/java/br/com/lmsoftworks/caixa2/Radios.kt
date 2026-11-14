@@ -112,6 +112,6 @@ object Radios {
     /** Conta uma audição no Radio Browser (é assim que ele ordena as mais ouvidas). Sem esperar resposta. */
     fun registrarAudicao(ctx: Context, uuid: String) {
         if (uuid.isBlank()) return
-        Thread { pegar(ctx, "$BASE/url/${enc(uuid)}") }.start()
+        Tarefas.executar { pegar(ctx, "$BASE/url/${enc(uuid)}") }
     }
 }

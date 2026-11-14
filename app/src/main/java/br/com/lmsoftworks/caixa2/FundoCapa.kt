@@ -61,10 +61,10 @@ class FundoCapa(c: Context) : FrameLayout(c) {
         val minha = ++geracao
         if (capa == null) { sair(); return }
         val proporcao = razao
-        Thread {
+        Tarefas.executar {
             val pronta = try { desfocar(capa, proporcao) } catch (e: Throwable) { null }
             post { if (minha == geracao && pronta != null) entrar(pronta, minha) }
-        }.start()
+        }
     }
 
     private fun entrar(imagem: Bitmap, minha: Int) {

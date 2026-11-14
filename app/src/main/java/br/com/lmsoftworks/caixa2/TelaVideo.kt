@@ -22,12 +22,26 @@ class Carregando(c: Context) : View(c) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.WHITE }
     private val area = RectF()
     private var angulo = 0f
+    private var girando = false
+    // 30 quadros por segundo e só enquanto está à vista (antes girava a 60 mesmo escondida, atrás de outra tela)
     private val gira = object : Runnable {
-        override fun run() { angulo = (angulo + 9f) % 360f; invalidate(); postOnAnimation(this) }
+        override fun run() {
+            if (!isShown) { girando = false; return }
+            angulo = (android.os.SystemClock.uptimeMillis() % 667L) / 667f * 360f      // uma volta a cada 0,67 s, igual ao ritmo de antes
+            invalidate()
+            postDelayed(this, 33L)
+        }
     }
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); postOnAnimation(gira) }
-    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); removeCallbacks(gira) }
+    private fun conferir() {
+        if (isAttachedToWindow && isShown) { if (!girando) { girando = true; post(gira) } }
+        else { girando = false; removeCallbacks(gira) }
+    }
+
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); conferir() }
+    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); girando = false; removeCallbacks(gira) }
+    override fun onVisibilityChanged(changedView: View, visibility: Int) { super.onVisibilityChanged(changedView, visibility); conferir() }
+    override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); conferir() }
 
     override fun onDraw(canvas: Canvas) {
         p.strokeWidth = 6.d().toFloat()
@@ -78,6 +92,12 @@ class TelaVideo(
     private val tempoAtual = texto(c, "0:00", 20, Color.WHITE)
     private val tempoTotal = texto(c, "", 20, Color.WHITE)
     private val redeVideo = texto(c, "", 19, Color.parseColor("#CCFFFFFF"))      // velocidade de download, entre o tempo e o volume
+    private val qualidadeImagem = texto(c, "", 17, Color.parseColor("#99FFFFFF"))      // qualidade da imagem, empilhada embaixo da velocidade (ocupa o mesmo espaço)
+    private val colunaRede = LinearLayout(c).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(redeVideo, LinearLayout.LayoutParams(-2, -2))
+        addView(qualidadeImagem, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (-2).d() })
+    }
     private val rodinha = Carregando(c)
     private val mensagem = LinearLayout(c)
     private val textoErro = texto(c, "", 28, Color.WHITE, true).apply { gravity = Gravity.CENTER; maxWidth = 900.d(); setSingleLine(false); maxLines = 2 }
@@ -145,7 +165,7 @@ class TelaVideo(
         linhaBotoes.addView(lista, lp68())
         linhaBotoes.addView(tempoAtual.apply { setPadding(10.d(), 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))
         linhaBotoes.addView(tempoTotal, LinearLayout.LayoutParams(-2, -2))
-        linhaBotoes.addView(redeVideo, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 34.d() })
+        linhaBotoes.addView(colunaRede, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 34.d() })
         espacador = View(c)
         linhaBotoes.addView(espacador, LinearLayout.LayoutParams(0, 1, 1f))
         iconeVolume = icone(c, R.drawable.ic_volume_2, 34, Color.WHITE)
@@ -211,7 +231,7 @@ class TelaVideo(
         // player reduzido: só anterior, play/pause e próximo; sem o botão da lista (tocar na tela fecha a lista) e com o tempo no canto
         botaoLista?.visibility = if (abrir || player.fila.size <= 1) View.GONE else View.VISIBLE
         tempoAtual.visibility = if (abrir) View.GONE else View.VISIBLE
-        redeVideo.visibility = if (abrir) View.GONE else View.VISIBLE
+        colunaRede.visibility = if (abrir) View.GONE else View.VISIBLE
         tempoTotal.visibility = if (abrir) View.GONE else View.VISIBLE
         tempoCanto.visibility = if (abrir) View.VISIBLE else View.GONE
         if (abrir) atualizarTempo()
@@ -334,6 +354,8 @@ class TelaVideo(
         val dur = player.duracaoMs
         tempoAtual.text = formatar(player.posicaoMs)
         redeVideo.text = UsoRede.texto
+        qualidadeImagem.text = player.qualidadeVideo
+        qualidadeImagem.visibility = if (qualidadeImagem.text.isEmpty()) View.GONE else View.VISIBLE
         if (lateralAberta) tempoCanto.text = formatar(player.posicaoMs) + (if (dur > 0) " / " + formatar(dur) else "")
         tempoTotal.text = if (dur > 0) " / " + formatar(dur) else ""
         barra.fracao = if (dur > 0) player.posicaoMs.toFloat() / dur else 0f

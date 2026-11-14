@@ -26,8 +26,8 @@ import android.widget.TextView
 class PainelVolume(private val c: Context, private val aoMudar: (Int, Boolean) -> Unit) : FrameLayout(c) {
 
     companion object {
-        /** O amplificador da caixa corta o último passo do volume do aparelho (15 de 15): o 100% do app é o passo 14. */
-        const val LIMITE_REAL = 14f / 15f      // o nível 10 da tela é o passo 14 (o antigo nível 9)
+        /** O 100% do app é o último passo do volume do aparelho (15 de 15), a pedido: volume máximo na saída do fone. */
+        const val LIMITE_REAL = 1f
         const val NIVEL_ABAFADO = 2
         private const val LARGURA_DP = 540
         private const val ALTURA_DP = 76

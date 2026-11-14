@@ -61,7 +61,7 @@ object YouTube {
     private var iniciado = false
 
     /** Deixa o NewPipe pronto antes do primeiro pedido (a primeira busca fica mais rápida). */
-    fun aquecer() { Thread { try { garantirInicio() } catch (_: Throwable) {} }.start() }
+    fun aquecer() { Tarefas.executar { try { garantirInicio() } catch (_: Throwable) {} } }
 
     private fun garantirInicio() {
         if (iniciado) return
@@ -161,15 +161,18 @@ object YouTube {
      * Esse vídeo é música (clipe, áudio, show)? Entra quem tem de 1,5 a 12 minutos, não tem cara de reação, entrevista, aula, corte
      * etc., e tem sinal de música (clipe, oficial, "Artista - Música", canal do artista, VEVO...) ou é do mesmo canal do que está tocando.
      */
+    private val reAcentos = Regex("""\p{M}+""")
+    private val reArtistaMusica = Regex("""\S+ [-–|] \S+""")
+
     fun pareceMusica(titulo: String, canal: String, duracaoSeg: Long, canalAtual: String): Boolean {
         if (duracaoSeg in 1..89 || duracaoSeg > 720) return false
-        val t = java.text.Normalizer.normalize(titulo.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+        val t = java.text.Normalizer.normalize(titulo.lowercase(), java.text.Normalizer.Form.NFD).replace(reAcentos, "")
         if (FORA_DE_MUSICA.any { t.contains(it) }) return false
-        val c = java.text.Normalizer.normalize(canal.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "")
+        val c = java.text.Normalizer.normalize(canal.lowercase(), java.text.Normalizer.Form.NFD).replace(reAcentos, "")
         if (canalAtual.isNotEmpty() && canal.removeSuffix(" - Topic").equals(canalAtual.removeSuffix(" - Topic"), true)) return true
         if (SINAL_DE_MUSICA.any { t.contains(it) }) return true
         if (c.contains("vevo") || c.endsWith("topic") || c.contains("oficial") || c.contains("official") || c.contains("music") || c.contains("musica") || c.contains("records") || c.contains("gravadora")) return true
-        return Regex("""\S+ [-–|] \S+""").containsMatchIn(t)      // "Artista - Música"
+        return reArtistaMusica.containsMatchIn(t)      // "Artista - Música"
     }
 
     /**
@@ -382,7 +385,8 @@ object YouTube {
         //    prefere a de cima (1080p) a uma de baixa resolucao.
         val h264 = info.videoOnlyStreams.filter {
             it.content.isNotEmpty() && it.height <= 1080 &&
-                it.format == org.schabi.newpipe.extractor.MediaFormat.MPEG_4 // H.264 (mp4)
+                it.format == org.schabi.newpipe.extractor.MediaFormat.MPEG_4 && // mp4...
+                it.codec?.startsWith("avc", ignoreCase = true) == true // ...e H.264 de verdade: o AV1 também vem em mp4 e o G3 não decodifica (só saía o áudio)
         }
         // A MELHOR imagem disponivel (ate 1080p), sempre HD: nunca abaixo de 720p.
         // A tela da caixa é 1280x720: 1080p não mostra nada a mais e tem o dobro de dados (travava o vídeo ao carregar). Usa 720p;

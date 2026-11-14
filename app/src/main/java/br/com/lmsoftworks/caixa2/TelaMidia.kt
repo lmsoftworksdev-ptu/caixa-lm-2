@@ -291,7 +291,7 @@ class TelaMidia(
         renderizar()
         var r: List<Resultado>? = null; var falha: Exception? = null
         val t0 = android.os.SystemClock.uptimeMillis()
-        Thread {
+        Tarefas.executar {
             try { r = YouTube.emAlta(musica) } catch (e: Exception) { falha = e }
             android.util.Log.d("MidiaTempo", "em alta " + (if (musica) "música" else "vídeo") + ": " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
             principal.post {
@@ -307,7 +307,7 @@ class TelaMidia(
                 // falhou: tenta de novo sozinho em alguns segundos, até carregar
                 if (r == null) principal.postDelayed({ if (consulta.isBlank() && !carregando && modoMusica == musica) { erro = null; carregarAlta() } }, 3_000L)
             }
-        }.start()
+        }
     }
 
     private fun falhou(e: Exception?) {
@@ -331,7 +331,7 @@ class TelaMidia(
         renderizar()
         var r: List<Resultado>? = null; var falha: Exception? = null
         val t0 = android.os.SystemClock.uptimeMillis()
-        Thread {
+        Tarefas.executar {
             try { r = YouTube.buscar(q, musica) } catch (e: Exception) { falha = e }
             android.util.Log.d("MidiaTempo", "pesquisa de " + (if (musica) "músicas" else "vídeos") + " '" + q + "': " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
             principal.post {
@@ -341,7 +341,7 @@ class TelaMidia(
                 else { res = r.orEmpty().take(LIMITE_GENERO); if (!res.isNullOrEmpty()) buscasGuardadas[(if (musica) "m|" else "v|") + q.lowercase()] = res!! }
                 renderizar()
             }
-        }.start()
+        }
     }
 
     // ------------------------------------------------------------------ etiquetas Música / Vídeo
@@ -406,7 +406,7 @@ class TelaMidia(
     /** Busca o em alta de um tipo sem mexer na tela: guarda o resultado e só desenha se for o tipo que está na tela. */
     private fun precarregarAlta(musica: Boolean) {
         if ((if (musica) altaM else altaV) != null) return
-        Thread {
+        Tarefas.executar {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             val r = try { YouTube.emAlta(musica) } catch (e: Exception) { null }
             principal.post {
@@ -415,7 +415,7 @@ class TelaMidia(
                 altaEm = System.currentTimeMillis()
                 if (modoMusica == musica && !carregando && consulta.isBlank()) renderizar()
             }
-        }.start()
+        }
     }
 
     // ------------------------------------------------------------------ desenho das fileiras
@@ -435,7 +435,7 @@ class TelaMidia(
             area.addView(fileira(if (q.isEmpty()) List(if (musica) 12 else 6) { esqueleto(true, musica = musica) } else List(3) { esqueleto(true, grande = true, musica = musica) }), fileiraLp())      // na pesquisa o esqueleto já tem o tamanho das capas grandes
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
                 duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
-                addUpdateListener { v -> fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
+                addUpdateListener { v -> if (!isShown) return@addUpdateListener; fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
                 start()
             }
             return
@@ -504,7 +504,7 @@ class TelaMidia(
     private fun carregarGenero(chave: String, termo: String, musica: Boolean) {
         if (!generosPedidos.add(chave)) return
         val t0 = android.os.SystemClock.uptimeMillis()
-        Thread {
+        Tarefas.executar {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             val r = try { YouTube.generoEmAlta(termo, musica) } catch (e: Exception) { null }
             android.util.Log.d("MidiaTempo", "gênero " + chave + ": " + (android.os.SystemClock.uptimeMillis() - t0) + " ms, " + (r?.size ?: -1) + " itens")
@@ -518,7 +518,7 @@ class TelaMidia(
                 } else { tentativas.remove(chave); generos[chave] = r; preencherSlot(chave) }
                 atualizarProntidao()
             }
-        }.start()
+        }
     }
 
     private fun cabLp() = LinearLayout.LayoutParams(-1, -2).apply { leftMargin = 52.d(); rightMargin = 48.d(); topMargin = 18.d(); bottomMargin = 10.d() }

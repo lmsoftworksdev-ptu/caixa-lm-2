@@ -10,6 +10,9 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
+import android.os.Debug
+import android.view.Choreographer
+import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -37,6 +40,7 @@ class TelaDiagnostico(private val c: Context) : FrameLayout(c) {
     private val bt = bloco("Bluetooth")
     private val redes = bloco("Interfaces de rede")
     private val energia = bloco("Energia e sistema")
+    private val desempenho = bloco("Desempenho")
 
     private val vistos = HashSet<String>()
     private var primeiraVez = true
@@ -94,7 +98,97 @@ class TelaDiagnostico(private val c: Context) : FrameLayout(c) {
     // ------------------------------------------------------------------ atualização
 
     private val tique = object : Runnable {
-        override fun run() { if (isShown) atualizar(); handler.postDelayed(this, 1000) }
+        override fun run() {
+            if (isShown) { atualizar(); iniciarMedicao() } else pararMedicao()
+            handler.postDelayed(this, 1000)
+        }
+    }
+
+    // ------------------------------------------------------------------ desempenho
+
+    /** Medição dos quadros: só enquanto esta tela está aberta (pedir quadro o tempo todo já pesa um pouco, então não fica ligado fora daqui). */
+    private var medindo = false
+    private var ultimoQuadroNs = 0L
+    private var janelaInicioMs = 0L
+    private var quadros = 0
+    private var somaMs = 0.0
+    private var piorMs = 0.0
+    private var lentos = 0          // intervalos acima de 33 ms (menos de 30 quadros por segundo)
+    private var muitoLentos = 0     // acima de 100 ms (a pessoa percebe o tranco)
+    private var resQuadros = ""
+    private val aoQuadro = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!medindo) return
+            if (ultimoQuadroNs != 0L) {
+                val ms = (frameTimeNanos - ultimoQuadroNs) / 1_000_000.0
+                quadros++; somaMs += ms
+                if (ms > piorMs) piorMs = ms
+                if (ms > 33.5) lentos++
+                if (ms > 100.0) muitoLentos++
+            }
+            ultimoQuadroNs = frameTimeNanos
+            val agora = SystemClock.uptimeMillis()
+            if (agora - janelaInicioMs >= 5_000L && quadros > 0) {      // janela de 5 s: o resultado acompanha o que está acontecendo agora
+                val s = (agora - janelaInicioMs) / 1000.0
+                resQuadros = "Quadros por segundo: %.0f   Tempo médio: %.0f ms   Pior: %.0f ms\nQuadros lentos (>33 ms): %d de %d (%.0f%%)   Travadas (>100 ms): %d".format(
+                    quadros / s, somaMs / quadros, piorMs, lentos, quadros, 100.0 * lentos / quadros, muitoLentos)
+                janelaInicioMs = agora; quadros = 0; somaMs = 0.0; piorMs = 0.0; lentos = 0; muitoLentos = 0
+            }
+            Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    private fun iniciarMedicao() {
+        if (medindo) return
+        medindo = true; ultimoQuadroNs = 0L; janelaInicioMs = SystemClock.uptimeMillis(); resQuadros = ""
+        quadros = 0; somaMs = 0.0; piorMs = 0.0; lentos = 0; muitoLentos = 0
+        Choreographer.getInstance().postFrameCallback(aoQuadro)
+    }
+
+    private fun pararMedicao() {
+        if (!medindo) return
+        medindo = false
+        Choreographer.getInstance().removeFrameCallback(aoQuadro)
+    }
+
+    private var memoriaEm = 0L
+    private var resMemoria = ""
+    private var cpuAntesMs = 0L
+    private var cpuRelogioAntes = 0L
+    private var resCpu = ""
+
+    private fun lerArquivo(caminho: String): String = try { File(caminho).readText().trim() } catch (_: Throwable) { "" }
+
+    private fun contarViews(v: View): Int = 1 + if (v is ViewGroup) (0 until v.childCount).sumOf { contarViews(v.getChildAt(it)) } else 0
+
+    private fun atualizarDesempenho() {
+        val agora = SystemClock.uptimeMillis()
+        // CPU gasta por este app desde a última leitura, em % de um núcleo (a caixa tem 4)
+        val cpuMs = android.os.Process.getElapsedCpuTime()
+        if (cpuRelogioAntes != 0L && agora > cpuRelogioAntes) resCpu = "%.0f%%".format(100.0 * (cpuMs - cpuAntesMs) / (agora - cpuRelogioAntes))
+        cpuAntesMs = cpuMs; cpuRelogioAntes = agora
+        // memória e views custam mais para ler: a cada 5 s
+        if (agora - memoriaEm >= 5_000L) {
+            memoriaEm = agora
+            val am = c.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+            val dm = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
+            val rt = Runtime.getRuntime()
+            val threads = Regex("Threads:\\s*(\\d+)").find(lerArquivo("/proc/self/status"))?.groupValues?.get(1) ?: "?"
+            val views = try { contarViews(rootView) } catch (_: Throwable) { -1 }
+            resMemoria = "Memória livre: ${mi.availMem / 1048576} MB de ${mi.totalMem / 1048576} MB${if (mi.lowMemory) "  (POUCA!)" else ""}" +
+                "\nEste app: ${dm.totalPss / 1024} MB (nativa ${dm.nativePss / 1024}, Java ${dm.dalvikPss / 1024}, heap ${(rt.totalMemory() - rt.freeMemory()) / 1048576} MB)" +
+                "\nViews na tela: $views   Threads do app: $threads"
+        }
+        val carga = lerArquivo("/proc/loadavg").split(" ").take(3).joinToString(" ")
+        val freq = lerArquivo("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").toLongOrNull()?.let { "${it / 1000} MHz" } ?: "?"
+        val freqMax = lerArquivo("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq").toLongOrNull()?.let { "${it / 1000} MHz" } ?: "?"
+        val sb = StringBuilder()
+        if (resQuadros.isNotEmpty()) sb.append(resQuadros) else sb.append("Medindo quadros… (leva 5 s)")
+        sb.append("\nCPU deste app: ${resCpu.ifEmpty { "…" }} de um núcleo   Carga do sistema: $carga   Processador: $freq (máx. $freqMax)")
+        if (resMemoria.isNotEmpty()) sb.append("\n").append(resMemoria)
+        sb.append("\nConsultas ao sistema (dumpsys): ${SessaoAudioAndroid.consultas} feitas, ${SessaoAudioAndroid.reaproveitadas} reaproveitadas\nTarefas em segundo plano: ${Tarefas.rodadas} já rodaram, ${Tarefas.vivas} threads reaproveitáveis agora")
+        desempenho.text = sb.toString()
     }
 
     override fun onAttachedToWindow() {
@@ -108,6 +202,7 @@ class TelaDiagnostico(private val c: Context) : FrameLayout(c) {
 
     override fun onDetachedFromWindow() {
         handler.removeCallbacks(tique)
+        pararMedicao()
         if (registrado) { try { c.unregisterReceiver(receptor) } catch (_: Throwable) { }; registrado = false }
         super.onDetachedFromWindow()
     }
@@ -121,6 +216,7 @@ class TelaDiagnostico(private val c: Context) : FrameLayout(c) {
         try { atualizarBt() } catch (e: Throwable) { bt.text = "Erro ao ler o Bluetooth: ${e.javaClass.simpleName}" }
         try { atualizarRedes() } catch (e: Throwable) { redes.text = "Erro ao ler as redes: ${e.javaClass.simpleName}" }
         try { atualizarEnergia() } catch (e: Throwable) { energia.text = "Erro ao ler a energia: ${e.javaClass.simpleName}" }
+        try { atualizarDesempenho() } catch (e: Throwable) { desempenho.text = "Erro ao medir o desempenho: ${e.javaClass.simpleName}" }
     }
 
     private fun atualizarUsb() {

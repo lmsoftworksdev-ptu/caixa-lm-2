@@ -294,23 +294,38 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
         salvarAgora(true)          // a próxima vez que ligar volta do mesmo jeito
         ativo = false
         fila.clear(); corPendente = null
-        if (!conectado) { aoFim(); return }
+        if (!conectado) { encerrarLigacaoParaEnergia(aoFim, 0L); return }      // mesmo sem conexão pronta: para a busca e qualquer tentativa em andamento
         val apagar = quadro(0x0b, intArrayOf(0x3b, 0x24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         var tentativas = 0
         val tenta = object : Runnable {
             override fun run() {
                 if (fita.escrever(apagar, false) || ++tentativas > 12) {
                     Log.d(TAG, "fita apagada para desligar (tentativas=$tentativas)")
-                    handler.postDelayed({ aoFim() }, 600)
+                    handler.postDelayed({ encerrarLigacaoParaEnergia(aoFim, 900L) }, 600)      // o comando sai; depois fecha a ligação do jeito certo
                 } else handler.postDelayed(this, 100)
             }
         }
         handler.post(tenta)
     }
 
+    /** A caixa vai desligar ou reiniciar com a ligação da fita fechada. */
+    private var paradaParaEnergia = false
+
+    /**
+     * Fecha a ligação com a fita ANTES de o Bluetooth cair (refresh + disconnect + close): a fita recebe o fim da conexão e já aceita a próxima
+     * quando a caixa ligar. Antes o Bluetooth caía no meio da ligação e a fita ficava presa à conexão velha (~20 s, às vezes sem conectar).
+     */
+    private fun encerrarLigacaoParaEnergia(aoFim: () -> Unit, esperaMs: Long) {
+        paradaParaEnergia = true
+        try { fita.parar() } catch (e: Exception) { Log.w(TAG, "fita.parar falhou", e) }
+        Log.d(TAG, "ligação com a fita encerrada para desligar")
+        if (esperaMs > 0) handler.postDelayed({ aoFim() }, esperaMs) else aoFim()      // dá tempo de o fim da conexão chegar à fita
+    }
+
     /** Se o desligar não aconteceu (sem permissão), volta o controle da fita. */
     fun retomar() {
         if (ativo) return
+        if (paradaParaEnergia) { paradaParaEnergia = false; fita.iniciar() }      // o desligar não aconteceu: volta a procurar a fita
         ativo = true
         handler.postDelayed(ciclo, INTERVALO_EFEITO_MS)
         handler.postDelayed(vigia, 2000)
@@ -661,7 +676,12 @@ class LedControle(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** Pergunta ao Android (dumpsys) qual faixa de áudio está tocando agora e devolve a sessão dela. */
-    private fun acharSessaoTocando(): Int = SessaoAudioAndroid.externa(android.os.Process.myPid())
+    private fun acharSessaoTocando(): Int {
+        // sem nada tocando no volume de música não há o que procurar: pergunta barata ao sistema, em vez de abrir o dumpsys
+        val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        if (!audio.isMusicActive) return -1
+        return SessaoAudioAndroid.externa(android.os.Process.myPid())
+    }
 
     private fun trocarSessao(nova: Int) {
         if (!monitorAtivo) return

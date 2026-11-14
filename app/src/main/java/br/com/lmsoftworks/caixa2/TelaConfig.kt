@@ -217,7 +217,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
         testeInternetEmAndamento = true
         resultadoTesteInternet = "Baixando dados de teste (até 5 MB)…"
         montar()
-        Thread {
+        Tarefas.executar {
             val resultado = try {
                 val conexao = (URL("https://speed.cloudflare.com/__down?bytes=5000000").openConnection() as HttpURLConnection).apply {
                     connectTimeout = 10000
@@ -253,7 +253,7 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 resultadoTesteInternet = resultado
                 if (atual == "sistema") montar()
             }
-        }.start()
+        }
     }
 
     // ------------------------------------------------------------------ conteúdo de cada seção
@@ -269,8 +269,12 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 val tempos = listOf("30 s" to 30, "1 min" to 60, "5 min" to 300, "Nunca" to 0)
                 opcoes.addView(linha("Modo ocioso", "Tela preta só com a hora, depois de um tempo sem uso",
                     escolhas(tempos.map { it.first }, tempos.indexOfFirst { it.second == Ajustes.ociosoSeg }.let { if (it < 0) 1 else it }) { i -> Ajustes.definirOcioso(tempos[i].second); montar() }))
+                opcoes.addView(linha("Economia de bateria", "Com um menu aberto ou música tocando, 30 s sem toque baixam o brilho a 15%; tocar na tela devolve. Vídeo nunca escurece",
+                    interruptor(Ajustes.economiaBrilho) { Ajustes.definirEconomiaBrilho(it); aoMudarBrilho() }))
                 opcoes.addView(linha("Escurecer no modo ocioso", "Baixa o brilho da tela quando fica ociosa",
                     interruptor(Ajustes.escurecerOcioso) { Ajustes.definirEscurecer(it) }))
+                opcoes.addView(linha("Transição leve entre telas", "Desliza e esmaece em vez de girar o cubo 3D: pesa menos no processador",
+                    interruptor(Ajustes.transicaoSuave) { Ajustes.definirTransicaoSuave(it) }))
                 opcoes.addView(linha("Cidade do clima", if (Ajustes.cidadeFixa) "Fixa em ${Ajustes.cidadeNome}" else "Automática, pela internet", LinearLayout(c).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     if (Ajustes.cidadeFixa) addView(botao(c, "Automática", Tema.BOTAO) { Ajustes.usarCidadeAutomatica(); aoMudarCidade(); montar() })
@@ -385,10 +389,10 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                 opcoes.addView(linha("Registro do app", "As últimas linhas do diagnóstico, para achar problemas", botao(c, "Ver registro", Tema.BOTAO) { abrirRegistro() }))
                 opcoes.addView(linha("Limpar cache", "Apaga miniaturas guardadas, arquivos temporários e registros antigos", botao(c, "Limpar", Tema.BOTAO) {
                     Aviso.mostrar(c, "Limpando…")
-                    Thread {
+                    Tarefas.executar {
                         val livre = try { Limpeza.executar(c) } catch (e: Throwable) { -1L }
                         post { Aviso.mostrar(c, if (livre < 0) "Não consegui limpar tudo." else if (livre == 0L) "Já estava tudo limpo." else "Limpeza concluída: " + Limpeza.texto(livre) + " liberados") }
-                    }.start()
+                    }
                 }))
                 opcoes.addView(linha("Energia", "Desligar ou reiniciar a caixa", botao(c, "Energia", Tema.BOTAO) { aoEnergia() }))
                 opcoes.addView(linha("Restaurar ajustes", "Volta brilho, ocioso, sons, cidade e nome ao padrão", botao(c, "Restaurar", Tema.BOTAO, Tema.VERMELHO_SUAVE) { confirmarRestaurar() }))

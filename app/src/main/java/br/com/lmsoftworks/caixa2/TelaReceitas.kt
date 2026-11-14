@@ -104,7 +104,7 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
         if (q.isEmpty()) { resultados = null; carregando = false; erro = null; renderizar(); return }
         carregando = true; erro = null
         renderizar()
-        Thread {
+        Tarefas.executar {
             val lista = try { Receitas.buscar(c, q) } catch (e: Exception) { null }
             principal.post {
                 if (minha != seq) return@post
@@ -113,7 +113,7 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
                 else resultados = lista
                 renderizar()
             }
-        }.start()
+        }
     }
 
     /** Escreve [texto] na barra e pesquisa. */
@@ -134,7 +134,7 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
             area.addView(fileira(List(4) { esqueleto() }), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 16.d() })
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
                 duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
-                addUpdateListener { v -> fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
+                addUpdateListener { v -> if (!isShown) return@addUpdateListener; fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
                 start()
             }
             return
@@ -225,13 +225,13 @@ class TelaReceitas(private val c: Context) : FrameLayout(c) {
         montarDetalhe(null, r)        // a página já aparece montada, com brilho passando nas caixas enquanto a receita carrega
         detalhe.alpha = 0f
         detalhe.animate().alpha(1f).setDuration(180).start()
-        Thread {
+        Tarefas.executar {
             val d = Receitas.detalhe(c, r)
             principal.post {
                 if (minha != seqDetalhe || !detalheAberto) return@post
                 if (d == null) { fecharDetalhe(); mostrarAviso("Não consegui abrir esta receita") } else montarDetalhe(d, r)
             }
-        }.start()
+        }
     }
 
     private fun mostrarAviso(msg: String) { Aviso.mostrar(c, msg) }
@@ -427,16 +427,32 @@ class BlocoBrilho(c: Context, private val raio: Int) : View(c) {
         faixa.shader = gradiente
     }
 
+    private var ultimoQuadro = 0L
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         animador = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 1300; repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { fase = it.animatedValue as Float; invalidate() }
+            addUpdateListener {
+                val agora = android.os.SystemClock.uptimeMillis()
+                if (agora - ultimoQuadro < 30L) return@addUpdateListener      // 30 quadros por segundo
+                ultimoQuadro = agora
+                fase = it.animatedValue as Float; invalidate()
+            }
             start()
         }
+        conferir()
     }
 
     override fun onDetachedFromWindow() { animador?.cancel(); animador = null; super.onDetachedFromWindow() }
+    override fun onVisibilityChanged(changedView: View, visibility: Int) { super.onVisibilityChanged(changedView, visibility); conferir() }
+    override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); conferir() }
+
+    /** Escondida (outra tela por cima), a faixa não anda: não gasta processador à toa. */
+    private fun conferir() {
+        val a = animador ?: return
+        if (isShown) { if (a.isPaused) a.resume() } else if (a.isStarted && !a.isPaused) a.pause()
+    }
 
     override fun onDraw(canvas: android.graphics.Canvas) {
         val r = raio.d().toFloat()

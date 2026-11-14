@@ -210,7 +210,7 @@ class TelaRadios(
         carregando()
         if (tv) {
             val pais = paisTv
-            Thread {
+            Tarefas.executar {
                 val r = TV.canais(c, pais)
                 principal.post {
                     if (meu != pedido) return@post
@@ -219,11 +219,11 @@ class TelaRadios(
                     if (categoria != null && categoria !in TV.categoriasDe(r)) categoria = null
                     montarCategorias(); aplicarFiltroTv()
                 }
-            }.start()
+            }
             return
         }
         val pais = codigoPais; val q = consulta
-        Thread {
+        Tarefas.executar {
             val r = Radios.buscar(c, pais, q)
             principal.post {
                 if (meu != pedido) return@post
@@ -233,7 +233,7 @@ class TelaRadios(
                     else -> mostrar(r)
                 }
             }
-        }.start()
+        }
     }
 
     private fun aplicarFiltroTv() {

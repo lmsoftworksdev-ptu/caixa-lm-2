@@ -66,7 +66,10 @@ class TextoRolante(c: Context, private val texto: String, tamanho: Int, cor: Int
         canvas.drawRect(width - borda, 0f, width.toFloat(), height.toFloat(), fade)
         if (off > 0f) { fade.shader = gradEsq; canvas.drawRect(0f, 0f, borda, height.toFloat(), fade) }
         canvas.restoreToCount(camada)
-        if (isShown && !Animacao.pausada) postInvalidateOnAnimation()
+        if (isShown && !Animacao.pausada) {
+            // 30 quadros por segundo enquanto desliza (a 38 px/s o olho não vê diferença); parado na pausa, só acorda quando ela acabar
+            if (m < PAUSA_MS) postInvalidateDelayed(PAUSA_MS - m + 8L) else postInvalidateDelayed(33L)
+        }
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); postInvalidateOnAnimation() }

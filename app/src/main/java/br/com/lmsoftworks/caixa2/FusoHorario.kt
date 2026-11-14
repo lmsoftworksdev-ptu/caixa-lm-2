@@ -43,14 +43,14 @@ object FusoHorario {
 
     /** Pergunta pela internet qual é a diferença do lugar onde a caixa está; [aoMudar] roda (no thread principal) se o fuso mudou. */
     fun buscarAutomatico(ctx: Context, principal: android.os.Handler, aoMudar: () -> Unit) {
-        Thread {
+        Tarefas.executar {
             try {
                 val req = Request.Builder().url("https://ipwho.is/?fields=success,timezone").header("User-Agent", "CaixaLM").build()
-                val corpo = Rede.cliente(ctx, leituraSeg = 10).newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } ?: return@Thread
+                val corpo = Rede.cliente(ctx, leituraSeg = 10).newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } ?: return@executar
                 val j = JSONObject(corpo)
-                if (!j.optBoolean("success", false)) return@Thread
+                if (!j.optBoolean("success", false)) return@executar
                 val seg = j.optJSONObject("timezone")?.optInt("offset", Int.MIN_VALUE) ?: Int.MIN_VALUE
-                if (seg == Int.MIN_VALUE) return@Thread
+                if (seg == Int.MIN_VALUE) return@executar
                 val min = seg / 60
                 val antes = minutos()
                 Ajustes.definirFusoAutoMin(min)
@@ -58,6 +58,6 @@ object FusoHorario {
                 Log.d(TAG, "fuso automático: ${nome(min)}")
                 if (minutos() != antes || TimeZone.getDefault().getOffset(System.currentTimeMillis()) != zonaSistema.getOffset(System.currentTimeMillis())) principal.post { aoMudar() }
             } catch (e: Exception) { Log.d(TAG, "não consegui o fuso: $e") }
-        }.start()
+        }
     }
 }

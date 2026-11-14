@@ -17,6 +17,8 @@ object Ajustes {
     @Volatile var ociosoSeg = 60; private set
     /** No modo ocioso, baixa o brilho da tela (senão só fica preto com a hora). */
     @Volatile var escurecerOcioso = true; private set
+    /** Economia de bateria: com menu aberto ou música tocando, 30 s sem toque baixam o brilho a 15% (um toque devolve). Vídeo nunca escurece. */
+    @Volatile var economiaBrilho = true; private set
     /** Toquinhos de ativação, confirmação e erro do assistente. */
     @Volatile var sonsResposta = true; private set
     /** Toquinho a cada tecla do teclado da tela. */
@@ -27,6 +29,8 @@ object Ajustes {
     @Volatile var restaurarRedes = false; private set
     /** Fuso horário: automático (pela internet) ou manual. As diferenças para Greenwich são em minutos (-180 = UTC−3). */
     @Volatile var fusoAuto = true; private set
+    /** Troca de menus por deslizar e esmaecer (leve) em vez do cubo 3D. */
+    @Volatile var transicaoSuave = false; private set
     @Volatile var fusoManualMin = -180; private set
     @Volatile var fusoAutoMin = 99999; private set      // 99999 = ainda não lido
     /** Volume mínimo do alarme: 0 = suave, 1 = médio, 2 = alto. */
@@ -58,11 +62,13 @@ object Ajustes {
         brilho = p.getInt("brilho", 100).coerceIn(5, 100)
         ociosoSeg = p.getInt("ociosoSeg", 60)
         escurecerOcioso = p.getBoolean("escurecerOcioso", true)
+        economiaBrilho = p.getBoolean("economiaBrilho", true)
         sonsResposta = p.getBoolean("sonsResposta", true)
         sonsTeclado = p.getBoolean("sonsTeclado", true)
         nivelarAudio = p.getBoolean("nivelarAudio", false)
         restaurarRedes = p.getBoolean("restaurarRedes", false)
         fusoAuto = p.getBoolean("fusoAuto", true)
+        transicaoSuave = p.getBoolean("transicaoSuave", false)
         fusoManualMin = p.getInt("fusoManualMin", -180)
         fusoAutoMin = p.getInt("fusoAutoMin", 99999)
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
@@ -80,7 +86,9 @@ object Ajustes {
 
     fun definirBrilho(v: Int) { brilho = v.coerceIn(5, 100); guardar { putInt("brilho", brilho) } }
     fun definirOcioso(seg: Int) { ociosoSeg = seg; guardar { putInt("ociosoSeg", seg) } }
+    fun definirEconomiaBrilho(v: Boolean) { economiaBrilho = v; guardar { putBoolean("economiaBrilho", v) } }
     fun definirEscurecer(v: Boolean) { escurecerOcioso = v; guardar { putBoolean("escurecerOcioso", v) } }
+    fun definirTransicaoSuave(v: Boolean) { transicaoSuave = v; guardar { putBoolean("transicaoSuave", v) } }
     fun definirFusoAuto(v: Boolean) { fusoAuto = v; guardar { putBoolean("fusoAuto", v) } }
     fun definirFusoManual(min: Int) { fusoManualMin = min.coerceIn(-12 * 60, 14 * 60); guardar { putInt("fusoManualMin", fusoManualMin) } }
     fun definirFusoAutoMin(min: Int) { fusoAutoMin = min; guardar { putInt("fusoAutoMin", min) } }

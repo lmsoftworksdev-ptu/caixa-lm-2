@@ -451,6 +451,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
 
     /** Termina na hora: toquinho de confirmação, a tela do assistente some e o volume da música volta. */
     private fun fechar() {
+        TonsVoz.pararPensando()      // comando de controle (play, pausar...) que termina em silêncio: o som de "pensando" não pode ficar repetindo
         TonsVoz.confirmacao()
         faixa.esconder()
         acoes.abafar(false)
@@ -495,6 +496,7 @@ class Assistente(private val ctx: Context, private val faixa: FaixaAssistente, p
             // "tocar X": o Gemini já descobriu qual música é (corrige artista errado, nome mal ouvido)
             is ComandoVoz.Tocar -> resolverMidia(texto, comando.consulta, comando, minha)
             else -> {
+                TonsVoz.pararPensando()      // o pedido já foi entendido: acabou o "pensando", antes mesmo de executar
                 val frase = acoes.executar(comando, texto)
                 if (!deveFalar(comando, frase)) { fechar(); return }
                 resposta(frase ?: "Pronto", texto, falar = frase)

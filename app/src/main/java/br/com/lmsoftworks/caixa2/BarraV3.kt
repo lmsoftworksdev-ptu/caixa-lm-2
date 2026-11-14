@@ -26,6 +26,7 @@ class BotaoBarra(c: Context, recurso: Int, private val descricao: String) : View
     private var anel: ValueAnimator? = null
     private var giro = 0f
     private var girando = false
+    private var ultimoGiro = 0L
 
     init { isClickable = true; efeitoToque(); contentDescription = descricao }
 
@@ -42,7 +43,12 @@ class BotaoBarra(c: Context, recurso: Int, private val descricao: String) : View
                 anel = ValueAnimator.ofFloat(0f, 360f).apply {
                     duration = 1000; repeatCount = ValueAnimator.INFINITE
                     interpolator = LinearInterpolator()
-                    addUpdateListener { giro = it.animatedValue as Float; invalidate() }
+                    addUpdateListener {
+                        val agora = android.os.SystemClock.uptimeMillis()
+                        if (agora - ultimoGiro < 30L) return@addUpdateListener      // 30 quadros por segundo
+                        ultimoGiro = agora
+                        giro = it.animatedValue as Float; invalidate()
+                    }
                     start()
                 }
             }

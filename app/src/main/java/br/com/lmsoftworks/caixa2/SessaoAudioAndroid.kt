@@ -10,13 +10,28 @@ internal object SessaoAudioAndroid {
     private var pidBluetooth = -1
     private var pidConsultadoEm = -10_000L
 
+    /** Quantas vezes o dumpsys foi realmente chamado e quantas respostas guardadas foram reaproveitadas (aparece no Teste de conexões). */
+    @Volatile var consultas = 0
+        private set
+    @Volatile var reaproveitadas = 0
+        private set
+
+    /** Uma linha da tabela de faixas do mixer. */
+    private class Faixa(val ativa: Boolean, val pid: Int, val stream: Int, val sessao: Int)
+
+    private var faixas: List<Faixa> = emptyList()
+    private var faixasEm = -10_000L
+
+    /** Uma resposta do mixer vale por este tempo para todos que perguntarem (o dumpsys abre um processo novo: é caro nesta caixa). */
+    private const val VALIDADE_FAIXAS_MS = 1_200L
+
     fun externa(pidDoApp: Int): Int = acharFaixa { pid, _ -> pid != pidDoApp }
 
     @Synchronized
     fun bluetooth(): Int {
         val agora = SystemClock.uptimeMillis()
         if (agora - pidConsultadoEm >= 10_000L) {
-            pidBluetooth = consultar("activity", "services", "com.android.bluetooth") { linhas ->
+            pidBluetooth = consultar("activity", "services", "com.android.bluetooth", padrao = -1) { linhas ->
                 linhas.firstNotNullOfOrNull { processoBluetooth.find(it)?.groupValues?.get(1)?.toIntOrNull() } ?: -1
             }
             pidConsultadoEm = agora
@@ -27,16 +42,25 @@ internal object SessaoAudioAndroid {
         return sessao
     }
 
-    private fun acharFaixa(aceitar: (Int, Int) -> Boolean): Int = consultar("media.audio_flinger") { linhas ->
-        linhas.mapNotNull { linha ->
-            val dados = faixa.find(linha)?.groupValues ?: return@mapNotNull null
-            if (dados[1] == "yes" && aceitar(dados[2].toInt(), dados[3].toInt()))
-                dados[4].toInt().takeIf { it > 0 }
-            else null
-        }.firstOrNull() ?: -1
+    private fun acharFaixa(aceitar: (Int, Int) -> Boolean): Int =
+        faixasAtuais().firstOrNull { it.ativa && it.sessao > 0 && aceitar(it.pid, it.stream) }?.sessao ?: -1
+
+    @Synchronized
+    private fun faixasAtuais(): List<Faixa> {
+        val agora = SystemClock.uptimeMillis()
+        if (agora - faixasEm < VALIDADE_FAIXAS_MS) { reaproveitadas++; return faixas }
+        faixas = consultar("media.audio_flinger", padrao = emptyList()) { linhas ->
+            linhas.mapNotNull { linha ->
+                val d = faixa.find(linha)?.groupValues ?: return@mapNotNull null
+                Faixa(d[1] == "yes", d[2].toInt(), d[3].toInt(), d[4].toInt())
+            }.toList()
+        }
+        faixasEm = SystemClock.uptimeMillis()
+        return faixas
     }
 
-    private fun consultar(vararg args: String, ler: (Sequence<String>) -> Int): Int = try {
+    private fun <T> consultar(vararg args: String, padrao: T, ler: (Sequence<String>) -> T): T = try {
+        consultas++
         val processo = ProcessBuilder(listOf("/system/bin/dumpsys", "-t", "2") + args)
             .redirectErrorStream(true).start()
         try {
@@ -46,6 +70,6 @@ internal object SessaoAudioAndroid {
         }
     } catch (e: Exception) {
         Log.w("SessaoAudioAndroid", "Não foi possível consultar o mixer", e)
-        -1
+        padrao
     }
 }

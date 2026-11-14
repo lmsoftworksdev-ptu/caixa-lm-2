@@ -61,6 +61,14 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     val posicaoMs: Long get() = player?.currentPosition ?: 0L
     val sessaoAudio: Int get() = player?.audioSessionId ?: 0
 
+    /** A qualidade da imagem que está sendo mostrada agora, como "720p · H.264"; vazio se ainda não há imagem. */
+    val qualidadeVideo: String get() {
+        val f = player?.videoFormat ?: return ""
+        val altura = minOf(f.width, f.height).takeIf { it > 0 } ?: return ""      // pela menor medida: 1280x720 e 720x1280 são os dois "720p"
+        val codec = when (f.sampleMimeType) { "video/avc" -> "H.264"; "video/x-vnd.on2.vp9" -> "VP9"; "video/av01" -> "AV1"; "video/hevc" -> "H.265"; else -> "" }
+        return "${altura}p" + if (codec.isNotEmpty()) " · $codec" else ""
+    }
+
     /** Cria o ExoPlayer antes de precisar: montá-lo na primeira troca música <-> vídeo travava a tela e o esmaecimento saía sem animação. */
     fun aquecer() { criar() }
 
@@ -79,12 +87,17 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         28 * 1024 * 1024, false, 0, false      // o Moto G3 tem 1 GB: com 56 MB de buffer o sistema matava o app por falta de memória
     ) {
         @Volatile var tetoUs = Long.MAX_VALUE
+        /** Só som (música do YouTube): o fluxo é leve (~20 KB/s), então começa com 3 s guardados em vez de 10 s. Nas paradas depois de começar, a regra de sempre. */
+        @Volatile var somLeve = false
+        override fun shouldStartPlayback(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
+            if (somLeve && !parameters.rebuffering) parameters.bufferedDurationUs >= 3_000_000L else super.shouldStartPlayback(parameters)
         override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
             if (parameters.bufferedDurationUs >= tetoUs) false else super.shouldContinueLoading(parameters)
     }
 
     private var ultimoControle: ControleCarga? = null
     private val efeitosLocais = HashMap<ExoPlayer, Amplificador.SessaoLocal>()
+    private val controlesDe = HashMap<ExoPlayer, ControleCarga>()
 
     private fun novoExo(): ExoPlayer {
         val controle = ControleCarga()
@@ -101,6 +114,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         }
         val p = ExoPlayer.Builder(ctx, renderers).setLoadControl(controle).build()
         efeitosLocais[p] = efeitos
+        controlesDe[p] = controle
         p.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 efeitosLocais[p]?.ligar(audioSessionId)
@@ -158,6 +172,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun liberarExo(p: ExoPlayer?) {
         if (p == null) return
         efeitosLocais.remove(p)?.desligar()
+        controlesDe.remove(p)
         try { p.release() } catch (_: RuntimeException) {}
     }
 
@@ -196,10 +211,17 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         return f
     }
 
+    /** O endereço guardado da faixa de som: o mesmo pré-pedido do vídeo traz o áudio junto, então a música também abre sem esperar os ~2 s. */
+    private fun audioGuardado(url: String): Fonte? {
+        val f = enderecoGuardado(url) ?: return null
+        val a = f.audioUrl ?: return null
+        return f.copy(videoUrl = null, audioUrl = null, unicaUrl = a)
+    }
+
     /** Resolve o endereço do vídeo antes de ele ser pedido, para ele abrir mais rápido. */
     fun prefetchVideo(r: Resultado) {
         if (enderecoGuardado(r.url) != null || !resolvendoVideo.add(r.url)) return
-        Thread {
+        Tarefas.executar {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             var f: Fonte? = null
             try { f = YouTube.resolver(r.url, soAudio = false) } catch (e: Exception) { }
@@ -212,7 +234,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                     while (videoPre.size > 80) { val velho = videoPre.keys.first(); videoPre.remove(velho); videoPreEm.remove(velho) }
                 } else falhasSeguidas++
             }
-        }.start()
+        }
     }
 
     /**
@@ -322,7 +344,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val minha = ++geracao
         cancelarRampa(); fracaoVolume = 1f
         val pronta = preparada?.takeIf { it.item.url == r.url && !video }
-        val videoPronto = if (video) enderecoGuardado(r.url) else null
+        val videoPronto = if (video) enderecoGuardado(r.url) else audioGuardado(r.url)
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false
         infoExtra = ""      // visualizações e data só aparecem quando o dado verdadeiro chegar (o da lista de busca pode vir errado)
@@ -342,7 +364,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         player?.stop(); player?.clearMediaItems()
         aoMudar()
         carregarCapa(r, minha)
-        Thread {
+        Tarefas.executar {
             try {
                 val t0 = SystemClock.uptimeMillis()
                 // música é música e vídeo é vídeo: o áudio vem sempre da própria faixa pedida
@@ -355,7 +377,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 if (!ehFluxoDireto(r.url)) Falhas.youtubeFalhou(e)
                 handler.post { if (minha == geracao) { carregando = false; erro = "Não foi possível reproduzir"; aoMudar() } }
             }
-        }.start()
+        }
     }
 
     /** Capas já baixadas (por endereço da faixa): ao voltar para uma música, a capa aparece na hora, sem o quadrado de cor sólida. */
@@ -368,14 +390,14 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     private fun carregarCapa(r: Resultado, minha: Int) {
         capas.get(r.url)?.let { capa = it; return }
         if (r.miniaturas.isEmpty()) return
-        Thread {
+        Tarefas.executar {
             try {
                 var bytes: ByteArray? = null
                 for (url in r.miniaturas) {
                     try { bytes = URL(url).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.getInputStream().use { it.readBytes() }; break } catch (e: Exception) { }
                 }
-                if (bytes == null) return@Thread
-                val b = BitmapFactory.decodeByteArray(bytes, 0, bytes!!.size) ?: return@Thread
+                if (bytes == null) return@executar
+                val b = BitmapFactory.decodeByteArray(bytes, 0, bytes!!.size) ?: return@executar
                 // o YouTube manda 16:9 (às vezes com tarja preta em cima e embaixo): recorta o centro, quadrado, para a capa
                 val lado = minOf(b.width, b.height)
                 val recorte = Bitmap.createBitmap(b, (b.width - lado) / 2, (b.height - lado) / 2, lado, lado)
@@ -384,7 +406,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
                 if (b !== quadrada && b !== recorte) b.recycle()
                 handler.post { capas.put(r.url, quadrada); if (minha == geracao) { capa = quadrada; aoMudar() } }
             } catch (e: Exception) { Log.w(TAG, "sem capa", e) }
-        }.start()
+        }
     }
 
     /** O player começou a tocar (música ou vídeo): quem dá play por último manda, então o celular pára. */
@@ -421,6 +443,7 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
         val p = criar()
         p.playWhenReady = false
+        controlesDe[p]?.somLeve = !ehVideo && !ehFluxoDireto(item?.url.orEmpty())
         val origem = origemDe(fonte)
         p.repeatMode = if (repetindo && !ehVideo) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !ehVideo).setMaxVideoSize(if (ehCanalTv) 1280 else Int.MAX_VALUE, if (ehCanalTv) 720 else Int.MAX_VALUE).build()      // canal ao vivo: no máximo 720p (o aparelho e a internet agradecem)
@@ -545,12 +568,17 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** As palavras que identificam a música no título: sem (parênteses), [colchetes], "clipe oficial", "ao vivo" e afins. */
-    private fun palavrasDoTitulo(t: String): Set<String> {
-        val ruido = setOf("clipe", "oficial", "official", "video", "videoclipe", "audio", "lyrics", "lyric", "letra", "ao", "vivo", "live", "hd", "4k", "dvd", "com", "feat", "part", "the", "and", "dos", "das")
-        return java.text.Normalizer.normalize(t.lowercase().replace(Regex("""[\(\[][^\)\]]*[\)\]]"""), " "), java.text.Normalizer.Form.NFD)
-            .replace(Regex("""\p{M}+"""), "").replace(Regex("[^a-z0-9]+"), " ").trim().split(" ")
-            .filter { it.length > 2 && it !in ruido }.toSet()
-    }
+    private val ruidoTitulo = setOf("clipe", "oficial", "official", "video", "videoclipe", "audio", "lyrics", "lyric", "letra", "ao", "vivo", "live", "hd", "4k", "dvd", "com", "feat", "part", "the", "and", "dos", "das")
+    private val reParenteses = Regex("""[\(\[][^\)\]]*[\)\]]""")      // as expressões são montadas uma vez só (montar a cada chamada pesava no fim da lista)
+    private val reAcentos = Regex("""\p{M}+""")
+    private val reNaoAlfanum = Regex("[^a-z0-9]+")
+    private val palavrasGuardadas = android.util.LruCache<String, Set<String>>(200)
+
+    private fun palavrasDoTitulo(t: String): Set<String> = palavrasGuardadas.get(t) ?: run {
+        java.text.Normalizer.normalize(t.lowercase().replace(reParenteses, " "), java.text.Normalizer.Form.NFD)
+            .replace(reAcentos, "").replace(reNaoAlfanum, " ").trim().split(" ")
+            .filter { it.length > 2 && it !in ruidoTitulo }.toSet()
+    }.also { palavrasGuardadas.put(t, it) }
 
     /** É outra versão de uma música que já tocou nesta fila (mesmas palavras do título)? */
     private fun repetida(r: Resultado): Boolean {
@@ -562,7 +590,17 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
     }
 
     /** O que o YouTube sugere depois, sem as outras versões do que já tocou: segue com músicas diferentes do mesmo estilo. */
-    private fun relacionadosNovos(): List<Resultado> = relacionados.filter { !repetida(it) && (!modoMusica || YouTube.pareceMusica(it.titulo, it.canal, it.duracaoSeg, item?.canal.orEmpty())) }
+    private fun relacionadosNovos(): List<Resultado> {
+        // o resultado só muda quando mudam a lista de sugestões, a fila, a faixa ou o modo; fora isso reaproveita (esta conta roda várias vezes por segundo)
+        val rel = relacionados
+        val chave = listOf(System.identityHashCode(rel), indice, fila.size, item?.url, modoMusica)
+        if (chave == chaveRelacionados) return resultadoRelacionados
+        val r = rel.filter { !repetida(it) && (!modoMusica || YouTube.pareceMusica(it.titulo, it.canal, it.duracaoSeg, item?.canal.orEmpty())) }
+        chaveRelacionados = chave; resultadoRelacionados = r
+        return r
+    }
+    private var chaveRelacionados: List<Any?>? = null
+    private var resultadoRelacionados: List<Resultado> = emptyList()
 
     /** O que está tocando é música: as sugestões também têm que ser (nada de reação, entrevista, aula...). Outros assuntos seguem livres. */
     private var modoMusica = true
@@ -672,6 +710,16 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         val p = player ?: return
         if (ehVideo) { verificarPreVideo(); return }
         if (!tocando || item == null || erro != null || repetindo) return
+        // última faixa da fila: a lista das próximas já se forma sozinha com as sugestões (como nos vídeos), uma vez só
+        if (indice + 1 >= fila.size) {
+            val novos = relacionadosNovos()
+            if (novos.isNotEmpty()) { fila = fila + novos; relacionados = emptyList(); aoMudar() }
+        }
+        if (!ehFluxoDireto(item?.url.orEmpty()) && p.currentPosition >= 3000) {
+            // como no vídeo: descobre antes o endereço das próximas faixas (só texto, quase não gasta internet), para trocar sem esperar
+            if (falhasSeguidas == 0) proximoDaFila()?.let { prefetchVideo(it) }
+            resolverFila()
+        }
         if (emFade) { passoDoFade(); return }
         val dur = p.duration
         if (dur == C.TIME_UNSET || dur < 25_000) return
@@ -681,13 +729,13 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         if (resta < 25_000 && preparada?.item?.url != prox.url && !preparando) {
             preparando = true
             val minha = geracao
-            Thread {
-                val f = try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
+            Tarefas.executar {
+                val f = audioGuardado(prox.url) ?: try { YouTube.resolver(prox.url, soAudio = true) } catch (e: Exception) { null }
                 handler.post {
                     preparando = false
                     if (f != null && minha == geracao && !ehVideo) { preparada = Preparada(prox, f); prepararProximo() }
                 }
-            }.start()
+            }
         }
         // nos últimos 3 s, com a próxima já carregada, começa a emenda
         val novo = proximoPlayer

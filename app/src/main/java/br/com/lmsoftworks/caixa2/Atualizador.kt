@@ -75,7 +75,7 @@ object Atualizador {
         if (REPOSITORIO.startsWith("SEU-USUARIO") || conferindo) return
         conferindo = true
         val app = c.applicationContext
-        Thread {
+        Tarefas.executar {
             try {
                 val con = URL("https://api.github.com/repos/$REPOSITORIO/releases/latest").openConnection() as HttpURLConnection
                 con.connectTimeout = 8000; con.readTimeout = 10000
@@ -97,13 +97,13 @@ object Atualizador {
                 Log.w(TAG, "nao foi possivel conferir atualizacao", e)
                 principal.post { aviso?.invoke("Não consegui verificar agora. Confira a internet.") }
             } finally { conferindo = false }
-        }.start()
+        }
     }
 
     /** Baixa o APK (mostrando o andamento) e entrega ao instalador do Android. */
     fun baixarEInstalar(c: Context, v: VersaoNova, aoProgresso: (Int) -> Unit, aoErro: (String) -> Unit) {
         val app = c.applicationContext
-        Thread {
+        Tarefas.executar {
             try {
                 val pasta = File(app.cacheDir, "atualizacao").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
                 val arquivo = File(pasta, "CaixaLM2.apk")
@@ -130,7 +130,7 @@ object Atualizador {
                 Log.w(TAG, "falha ao baixar", e)
                 principal.post { aoErro("Não consegui baixar. Confira a internet e tente de novo.") }
             }
-        }.start()
+        }
     }
 
     /**

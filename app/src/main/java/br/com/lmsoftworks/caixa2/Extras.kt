@@ -174,6 +174,7 @@ object Cubo {
      */
     fun aplicar(a: View, b: View, grau: Float, dir: Int, metade: Float) {
         val g = grau.coerceIn(0f, 90f)
+        if (Ajustes.transicaoSuave) { aplicarSuave(a, b, g / 90f, dir, metade * 2f); return }
         val r = Math.toRadians(g.toDouble())
         val l = metade * 2f
         val aresta = metade + dir * metade * (sin(r) - cos(r)).toFloat()
@@ -192,6 +193,19 @@ object Cubo {
         b.alpha = suave(f / .22f)                       // a que entra só aparece depois de 22% do giro
         escurecer(a, tintaA, .55f * f)                  // a que sai escurece até 45% do brilho
         escurecer(b, tintaB, .55f * (1f - f))           // a que entra clareia de 45% a 100%
+    }
+
+    /**
+     * Transição leve (opção em Configurações > Tela): em vez de girar o cubo, a tela que sai desliza um pouco e esmaece, e a que entra vem do lado
+     * e aparece. Só deslocamento e transparência (a placa de vídeo faz tudo), sem rotação, perspectiva nem escurecimento a cada quadro.
+     */
+    private fun aplicarSuave(a: View, b: View, f: Float, dir: Int, l: Float) {
+        val desloc = l * 0.14f
+        a.rotationY = 0f; b.rotationY = 0f
+        a.translationX = dir * desloc * f
+        b.translationX = -dir * desloc * (1f - f)
+        a.alpha = 1f - suave(f / .8f)
+        b.alpha = suave((f - .15f) / .85f)
     }
 
     fun limpar(v: View) {

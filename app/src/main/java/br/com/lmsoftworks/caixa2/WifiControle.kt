@@ -136,10 +136,10 @@ class WifiControle(contexto: Context, private val aoMudar: () -> Unit) {
         if (v && wm.wifiState == WifiManager.WIFI_STATE_DISABLING) { handler.postDelayed({ definirLigado(true) }, 1500); return }
         if (!v) { conectadoSsid = null; conectando = null; redes = emptyList() }
         // a chamada ao sistema pode levar 1-2 s: fora da thread da tela, para o botão não congelar no meio do movimento
-        Thread {
+        Tarefas.executar {
             try { wm.isWifiEnabled = v } catch (e: Exception) { Log.w("CaixaWifi", "ligar/desligar falhou", e) }
             handler.post { aoMudar() }
-        }.start()
+        }
         aoMudar()
     }
 

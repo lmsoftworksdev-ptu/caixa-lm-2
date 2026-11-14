@@ -36,6 +36,9 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
     val emSenha: Boolean get() = telaTexto.aberto
     val emDetalhe: Boolean get() = detalhe.aberto
 
+    // declarada ANTES do init: a tela agora nasce já conectada e o init desenha o "Sinal ..." (antes nascia sem rede e nunca lia isto)
+    private val qualidade = arrayOf("Fraco", "Fraco", "Bom", "Muito bom", "Excelente")
+
     init {
         principal.setPadding(Tema.MARGEM_LATERAL.d(), 40.d(), Tema.MARGEM_LATERAL.d(), Tema.MARGEM_BASE.d())
 
@@ -127,7 +130,6 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
         if (emDetalhe && detalheEstado != estadoConexao()) fecharDetalhe()
     }
 
-    private val qualidade = arrayOf("Fraco", "Fraco", "Bom", "Muito bom", "Excelente")
 
     private fun montarHero() {
         hero.removeAllViews()

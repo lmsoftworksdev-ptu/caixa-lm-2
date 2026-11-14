@@ -1,0 +1,4 @@
+# Botão de energia da Caixa LM 2: vira play/pause para o app (toque curto = play/pause; segurar 3 s = desligar, tratado no app).
+# O Android não apaga mais a tela com o botão. Para voltar ao normal, apague este arquivo e reinicie.
+key 114   VOLUME_DOWN
+key 116   MEDIA_PLAY_PAUSE

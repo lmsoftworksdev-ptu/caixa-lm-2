@@ -163,14 +163,14 @@ object Amplificador {
         }
         if (!v || consultandoBluetooth || SystemClock.uptimeMillis() < consultarDepoisDe) return
         consultandoBluetooth = true
-        Thread {
+        Tarefas.executar {
             val sessao = SessaoAudioAndroid.bluetooth()
             principal.post {
                 consultandoBluetooth = false
                 if (fonteBluetooth) {
                     val agora = SystemClock.uptimeMillis()
                     val tentarRapido = sessao <= 0 && agora < tentarRapidoAte
-                    consultarDepoisDe = agora + if (sessao > 0) 3000L else if (tentarRapido) 180L else 1000L
+                    consultarDepoisDe = agora + if (sessao > 0) 6000L else if (tentarRapido) 180L else 1000L
                     if (tentarRapido) principal.postDelayed(reconsultaBluetooth, 180L)
                     if (sessao > 0 && (sessao != sessaoBluetooth || efeitosBluetooth == null)) {
                         efeitosBluetooth?.liberar()
@@ -182,7 +182,7 @@ object Amplificador {
                     }
                 }
             }
-        }.start()
+        }
     }
 
     fun definirLigado(v: Boolean) { ligado = v; aplicar(); guardar() }
