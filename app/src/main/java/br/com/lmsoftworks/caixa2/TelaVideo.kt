@@ -247,9 +247,23 @@ class TelaVideo(
 
     private var esperando = false
 
+    /**
+     * O quadro que o player já desenhou é do vídeo NOVO? Ao escolher outro vídeo, o player ainda tem "já desenhei um quadro" do vídeo anterior
+     * (e a superfície guarda essa imagem parada): sem esta conta a cortina preta sumia e aparecia a imagem velha com a rodinha de carregando.
+     * Enquanto o item for o que estava tocando quando o carregamento começou, só vale tela preta.
+     */
+    private var ignorarQuadroDe: String? = null
+    private var urlVista: String? = null
+    private fun quadroPronto(): Boolean {
+        val url = player.item?.url
+        if (url != urlVista) { urlVista = url; if (url != ignorarQuadroDe) ignorarQuadroDe = null }
+        return player.primeiroQuadro && (ignorarQuadroDe == null || url != ignorarQuadroDe)
+    }
+
     /** Abre já na tela de carregamento (rodinha e título), enquanto o clipe ainda está sendo achado. */
     fun esperar(tituloEspera: String, canalEspera: String) {
         esperando = true
+        ignorarQuadroDe = player.item?.url      // a imagem do vídeo anterior não pode aparecer enquanto o novo carrega
         val entrando = visibility != View.VISIBLE
         visibility = View.VISIBLE
         cortina.visibility = View.VISIBLE
@@ -281,7 +295,7 @@ class TelaVideo(
     }
 
     /** Cobre a imagem de preto (a superfície de vídeo não gira junto com a tela no efeito de cubo). */
-    fun cobrir(sim: Boolean) { cortinaForcada = sim; cortina.visibility = if (sim || !player.primeiroQuadro) View.VISIBLE else View.GONE }
+    fun cobrir(sim: Boolean) { cortinaForcada = sim; cortina.visibility = if (sim || !quadroPronto()) View.VISIBLE else View.GONE }
 
     private val amostra = android.graphics.Bitmap.createBitmap(48, 27, android.graphics.Bitmap.Config.ARGB_8888)
     private var amostrando = false
@@ -292,7 +306,7 @@ class TelaVideo(
      * for cinza ou escuro, a cor média). Usado pelo modo Ambilight da fita.
      */
     fun amostrarCor(aoCor: (Int) -> Unit) {
-        if (!player.primeiroQuadro) { aoCor(Color.BLACK); return }      // carregando outro vídeo: tela preta, fita apagada
+        if (!quadroPronto()) { aoCor(Color.BLACK); return }      // carregando outro vídeo: tela preta, fita apagada
         if (amostrando || !player.tocando || player.carregando || cortinaForcada) return
         amostrando = true
         try {
@@ -365,7 +379,7 @@ class TelaVideo(
     /** Chamada quando o player muda de estado. */
     fun atualizar() {
         if (!aberto || esperando) return
-        cortina.visibility = if (cortinaForcada || !player.primeiroQuadro) View.VISIBLE else View.GONE
+        cortina.visibility = if (cortinaForcada || !quadroPronto()) View.VISIBLE else View.GONE
         val r = player.item
         titulo.text = r?.titulo ?: ""
         canal.text = listOfNotNull(r?.canal?.takeIf { it.isNotEmpty() }, player.infoExtra.takeIf { it.isNotEmpty() }).joinToString("  ·  ")

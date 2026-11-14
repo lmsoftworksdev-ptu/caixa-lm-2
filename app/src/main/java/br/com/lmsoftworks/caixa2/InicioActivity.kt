@@ -1606,6 +1606,15 @@ class InicioActivity : Activity() {
             mudarEstado("midia")
             telaMidia.visibility = View.VISIBLE
         }
+        // puxar de cima para baixo com o vídeo aberto: o vídeo esmaece e já aparece o menu principal (antes aparecia a tela de onde o vídeo
+        // veio, a Mídia por exemplo, e só depois vinha a transição para o início)
+        val direto = irAoInicio && atual != "inicio"
+        if (direto) {
+            val saindo = tela(atual)
+            origemConfig = false
+            mudarEstado("inicio")
+            saindo.visibility = View.INVISIBLE
+        }
         girando = true
         tela(atual).visibility = View.VISIBLE
         telaVideo.esmaecerSaida {
@@ -1616,7 +1625,10 @@ class InicioActivity : Activity() {
                 relogio.removeCallbacks(amostradorVideo)
                 atualizarLedDaMusica()
             } else fecharVideo()
-            if (irAoInicio) ir("inicio")
+            if (direto) {
+                aoChegar("inicio")
+                if (apareceu && !ocioso) fundo.iniciar()
+            } else if (irAoInicio) ir("inicio")
             else if (abrirMidia) aoChegar("midia")
         }
     }
