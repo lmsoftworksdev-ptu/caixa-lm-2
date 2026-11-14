@@ -1936,7 +1936,8 @@ class InicioActivity : Activity() {
     /** Play/pause do que estiver tocando (cartão da tela inicial e botão físico de energia). */
     private fun alternarReproducao() {
         semAbrirMusicaAte = android.os.SystemClock.uptimeMillis() + 4000
-        if (videoRecolhido) playerMidia.alternar() else musica.alternar()
+        // vídeo em tela cheia, recolhido ou só tocando como vídeo: é o player do app; senão, a música (celular ou local)
+        if (telaVideo.aberto || videoRecolhido || playerMidia.ehVideo) playerMidia.alternar() else musica.alternar()
     }
 
     private var energiaLongaDisparada = false
