@@ -2055,11 +2055,21 @@ class InicioActivity : Activity() {
 
     /** Toca o som de início só quando o aparelho acabou de ligar (não quando o app é só reaberto ou reinstalado). */
     private fun aparelhoAcabouDeLigar(): Boolean {
+        // Sem bateria, a caixa perde a hora a cada corte de energia e o relógio começa sempre na mesma data: comparar horários de
+        // boot fazia o app achar que não era boot novo e calar o som. O identificador do boot vem do kernel e muda a cada ligada.
         val prefs = getSharedPreferences("sistema", MODE_PRIVATE)
-        val boot = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
-        if (Math.abs(boot - prefs.getLong("boot", 0L)) <= 15_000) return false
-        prefs.edit().putLong("boot", boot).apply()
-        return true
+        val agora = android.os.SystemClock.elapsedRealtime()
+        val id = try { java.io.File("/proc/sys/kernel/random/boot_id").readText().trim() } catch (e: Throwable) { "" }
+        val idAntigo = prefs.getString("boot_id", "") ?: ""
+        val ultimo = prefs.getLong("ultimo_tempo", -1L)
+        prefs.edit().putString("boot_id", id).putLong("ultimo_tempo", agora).apply()
+        val novo = when {
+            id.isNotEmpty() && idAntigo.isNotEmpty() -> id != idAntigo
+            ultimo >= 0 -> agora < ultimo            // sem identificador: o contador de tempo ligado só volta atrás se o aparelho reiniciou
+            else -> agora < 120_000L                  // primeira vez com este código: só conta se acabou de ligar
+        }
+        android.util.Log.d("CaixaSom", "boot novo=$novo (id=${id.take(8)} antigo=${idAntigo.take(8)} tempo=$agora ultimo=$ultimo)")
+        return novo
     }
 
     private var bootNovo = false

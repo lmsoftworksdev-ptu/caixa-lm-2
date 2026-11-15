@@ -66,7 +66,7 @@ object Som {
             @Suppress("DEPRECATION")
             mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
             mp.setOnCompletionListener { p -> principal.postDelayed({ tocando.remove(p); p.release(); fim() }, FOLGA_FIM_MS) }      // soltar o player e avisar "terminou" só depois da folga: fazer isso na hora cortava o final do som
-            mp.setOnErrorListener { p, _, _ -> tocando.remove(p); p.release(); fim(); true }
+            mp.setOnErrorListener { p, what, extra -> Log.w(TAG, "erro ao tocar o som: $what/$extra"); tocando.remove(p); p.release(); fim(); true }
             mp.setOnPreparedListener { it.start() }
             mp.prepareAsync()
         } catch (e: Throwable) {

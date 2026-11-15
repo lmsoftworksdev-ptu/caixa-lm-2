@@ -41,7 +41,7 @@ class EscutaAssistente(
         const val GANHO_MAXIMO = 28f
         const val NIVEL_ALVO = 7000f
         const val NIVEL_SILENCIO = 25f
-        const val SILENCIO_FINAL_MS = 1200L     // quanto silêncio depois da fala encerra o pedido
+        const val SILENCIO_FINAL_MS = 900L      // quanto silêncio depois da fala encerra o pedido
         const val SILENCIO_COMANDO_MS = 700L    // idem, quando o reconhecimento offline já fechou um comando fixo completo
         const val LIMITE_OWW = 0.5f             // nota do openWakeWord a partir da qual vale como "Alexa"
         const val ESPERA_FALA_MS = 9000L        // quanto espera a pessoa começar a falar
@@ -73,6 +73,8 @@ class EscutaAssistente(
     private var pisoRuido = Float.MAX_VALUE
     private var blocosVistos = 0
     private var blocosFala = 0
+    private var picoFala = 0f              // pico recente da voz do pedido (cai aos poucos), para separar voz de ruído de fundo
+    private var altosSeguidos = 0
     @Volatile private var pedidoNovo = false
     /** Liga o texto ao vivo (reconhecedor sem gramática): só na busca por voz, para não pesar nos pedidos normais. */
     @Volatile var textoAoVivo = false
@@ -218,7 +220,7 @@ class EscutaAssistente(
 
     private fun iniciarGravacao() {
         gravacao = ByteArrayOutputStream()
-        falou = false; silencioDesde = 0L; pisoRuido = Float.MAX_VALUE; blocosVistos = 0; blocosFala = 0
+        falou = false; silencioDesde = 0L; pisoRuido = Float.MAX_VALUE; blocosVistos = 0; blocosFala = 0; picoFala = 0f; altosSeguidos = 0
         inicioPedido = System.currentTimeMillis()
         fila.offer(Bloco(null, Bloco.ZERAR))      // o reconhecimento zera os reconhecedores antes do 1º bloco do pedido
     }
@@ -227,8 +229,13 @@ class EscutaAssistente(
         val agora = System.currentTimeMillis()
         blocosVistos++
         if (blocosVistos > 2 && rmsBruto < pisoRuido) pisoRuido = rmsBruto
-        // "falando" = bem acima do ruído de fundo da sala (que a própria sala define) e acima de um mínimo
-        val falando = blocosVistos > 2 && rmsBruto > max(110f, pisoRuido * 2.5f)
+        // "falando" = bem acima do ruído de fundo da sala e acima de um quinto do pico da própria voz, por 2 blocos seguidos (0,2 s):
+        // um bloco isolado de ruído (TV, ventilador, música) não reinicia mais a contagem do silêncio, que fazia o pedido ir até os 16 s
+        val limiar = max(max(110f, pisoRuido * 2.5f), picoFala * 0.22f)
+        val alto = blocosVistos > 2 && rmsBruto > limiar
+        altosSeguidos = if (alto) altosSeguidos + 1 else 0
+        picoFala = if (rmsBruto > picoFala) min(rmsBruto, 1500f) else picoFala * 0.985f
+        val falando = altosSeguidos >= 2
         if (falando) blocosFala++
         if (blocosVistos % 10 == 0) Log.d(TAG, "pedido: volume=${rmsBruto.toInt()} piso=${if (pisoRuido == Float.MAX_VALUE) -1 else pisoRuido.toInt()} falando=$falando fila=${fila.size}")
         val bytes = ByteArray(n * 2)
