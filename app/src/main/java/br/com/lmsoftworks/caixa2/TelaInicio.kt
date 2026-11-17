@@ -28,7 +28,9 @@ import java.util.Locale
  * Texto de uma linha que, se for maior que o campo, desliza sozinho (devagar, com uma pausa no começo) para o usuário ler tudo.
  * As pontas somem num degradê (desfoque) em vez de serem cortadas de uma vez.
  */
-class TextoRolante(c: Context, private val texto: String, tamanho: Int, cor: Int, media: Boolean = false) : View(c) {
+class TextoRolante(c: Context, private val texto: String, tamanho: Int, cor: Int, media: Boolean = false, private val rolar: Boolean = true) : View(c) {
+    private var curto = texto
+    private var larguraCurto = -1
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = tamanho.d().toFloat(); color = cor; typeface = if (media) FONTE_MEDIA else FONTE_NORMAL
     }
@@ -55,6 +57,14 @@ class TextoRolante(c: Context, private val texto: String, tamanho: Int, cor: Int
     override fun onDraw(canvas: Canvas) {
         val base = -p.fontMetrics.ascent + 1.d()
         if (largura <= width) { canvas.drawText(texto, 0f, base, p); return }
+        if (!rolar) {      // sem animação: o que não cabe vira reticências
+            if (width != larguraCurto) {
+                larguraCurto = width
+                curto = android.text.TextUtils.ellipsize(texto, android.text.TextPaint(p), width.toFloat(), android.text.TextUtils.TruncateAt.END).toString()
+            }
+            canvas.drawText(curto, 0f, base, p)
+            return
+        }
         val ciclo = largura + folga
         val periodo = PAUSA_MS + (ciclo / VELOCIDADE * 1000f).toLong()
         val m = (android.os.SystemClock.uptimeMillis() - inicio) % periodo
@@ -294,13 +304,13 @@ class TelaInicio(private val c: Context, private val aoAbrir: (String) -> Unit) 
             val topo = LinearLayout(c).apply {
                 gravity = Gravity.BOTTOM
                 addView(texto(c, "${cl.temp}°", 44, Tema.TEXTO).apply { typeface = FONTE_LEVE })
-                addView(TextoRolante(c, cl.descricao(), 25, Tema.TEXTO),
+                addView(TextoRolante(c, cl.descricao(), 25, Tema.TEXTO, rolar = false),
                     LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 12.d(); bottomMargin = 4.d() })
             }
             addView(topo)
-            if (cl.cidade.isNotBlank()) addView(TextoRolante(c, cl.cidade, 18, Color.parseColor("#DDE5F7")), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
+            if (cl.cidade.isNotBlank()) addView(TextoRolante(c, cl.cidade, 18, Color.parseColor("#DDE5F7"), rolar = false),LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
             val detalhe = listOfNotNull(cl.min?.let { "Mín $it°" }, cl.max?.let { "Máx $it°" }, cl.chuva?.let { "Chuva $it%" }).joinToString(" · ")
-            if (detalhe.isNotEmpty()) addView(TextoRolante(c, detalhe, 18, Tema.TEXTO2), LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
+            if (detalhe.isNotEmpty()) addView(TextoRolante(c, detalhe, 18, Tema.TEXTO2, rolar = false),LinearLayout.LayoutParams(-1, -2).apply { topMargin = 3.d() })
         }
         return linha("clima", caixaIcone(cor, fundo, IconeClima(c, tipo, 46)), false, miolo)
     }

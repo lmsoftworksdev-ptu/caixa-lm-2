@@ -155,6 +155,13 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
             override fun onPlayerError(e: PlaybackException) {
                 if (p !== player) { if (p === proximoPlayer) cancelarFade() else if (p === preVideo?.player) liberarPreVideo(); return }
                 Log.w(TAG, "erro no player", e)
+                // A thread do player ficou presa no decodificador de vídeo (flush/troca de superfície sem resposta): esse player não volta mais, e
+                // tentar de novo nele deixava o vídeo carregando para sempre. Descarta e segue com um player novo.
+                if (generateSequence<Throwable>(e) { it.cause }.any { it is androidx.media3.exoplayer.ExoTimeoutException }) {
+                    Log.w(TAG, "player travado no decodificador: trocando por um novo")
+                    player = null
+                    liberarExo(p)
+                }
                 // endereço vencido ou rede que caiu: pede um novo e retoma de onde parou (até 3 vezes)
                 val r = item
                 if (r != null && recuperacoes < 3) { recuperacoes++; retomarEm = p.currentPosition; iniciarItem(r, ehVideo, true); return }
@@ -343,8 +350,10 @@ class PlayerMidia(contexto: Context, private val aoMudar: () -> Unit) {
         try { audioMgr.requestAudioFocus(foco, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN) } catch (e: Throwable) { }
         val minha = ++geracao
         cancelarRampa(); fracaoVolume = 1f
-        val pronta = preparada?.takeIf { it.item.url == r.url && !video }
-        val videoPronto = if (video) enderecoGuardado(r.url) else audioGuardado(r.url)
+        // retomando depois de um erro (endereço vencido, 403): descarta o endereço guardado, senão o mesmo endereço ruim é usado de novo nas 3 tentativas
+        if (recuperando) { videoPre.remove(r.url); videoPreEm.remove(r.url) }
+        val pronta = if (recuperando) null else preparada?.takeIf { it.item.url == r.url && !video }
+        val videoPronto = if (recuperando) null else if (video) enderecoGuardado(r.url) else audioGuardado(r.url)
         cancelarFade()
         item = r; ehVideo = video; erro = null; carregando = true; tocando = false
         infoExtra = ""      // visualizações e data só aparecem quando o dado verdadeiro chegar (o da lista de busca pode vir errado)

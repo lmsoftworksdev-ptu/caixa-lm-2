@@ -104,7 +104,7 @@ class TelaVideo(
     private val handler = Handler(Looper.getMainLooper())
     private val esconder = Runnable { mostrarControles(false) }
     private val tique = object : Runnable {
-        override fun run() { atualizarTempo(); volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
+        override fun run() { atualizarTempo(); if (aberto && !esperando && !cortinaForcada && cortina.visibility == View.VISIBLE && quadroPronto()) cortina.visibility = View.GONE; volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
     }
     private var controlesVisiveis = true
 
@@ -254,16 +254,27 @@ class TelaVideo(
      */
     private var ignorarQuadroDe: String? = null
     private var urlVista: String? = null
+    private var seguroDesde = 0L
     private fun quadroPronto(): Boolean {
         val url = player.item?.url
         if (url != urlVista) { urlVista = url; if (url != ignorarQuadroDe) ignorarQuadroDe = null }
-        return player.primeiroQuadro && (ignorarQuadroDe == null || url != ignorarQuadroDe)
+        // sem quadro desenhado: o próximo que chegar já é do vídeo novo, não há imagem velha para esconder
+        if (!player.primeiroQuadro) { ignorarQuadroDe = null; seguroDesde = 0L; return false }
+        if (ignorarQuadroDe == null || url != ignorarQuadroDe) return true
+        // Música -> clipe do MESMO vídeo (ou reabrir o mesmo vídeo) tem o mesmo endereço do que estava tocando: a conta acima nunca liberava e a
+        // tela ficava preta com o som tocando. Se o player já desenhou um quadro, está tocando e não está carregando, a imagem é a de agora.
+        val agora = android.os.SystemClock.uptimeMillis()
+        if (player.tocando && !player.carregando) {
+            if (seguroDesde == 0L) seguroDesde = agora
+            if (agora - seguroDesde > 1200L) { ignorarQuadroDe = null; return true }
+        } else seguroDesde = 0L
+        return false
     }
 
     /** Abre já na tela de carregamento (rodinha e título), enquanto o clipe ainda está sendo achado. */
     fun esperar(tituloEspera: String, canalEspera: String) {
         esperando = true
-        ignorarQuadroDe = player.item?.url      // a imagem do vídeo anterior não pode aparecer enquanto o novo carrega
+        ignorarQuadroDe = if (player.primeiroQuadro) player.item?.url else null      // a imagem do vídeo anterior não pode aparecer enquanto o novo carrega
         val entrando = visibility != View.VISIBLE
         visibility = View.VISIBLE
         cortina.visibility = View.VISIBLE

@@ -275,6 +275,8 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
                     interruptor(Ajustes.escurecerOcioso) { Ajustes.definirEscurecer(it) }))
                 opcoes.addView(linha("Transição leve entre telas", "Desliza e esmaece em vez de girar o cubo 3D: pesa menos no processador",
                     interruptor(Ajustes.transicaoSuave) { Ajustes.definirTransicaoSuave(it) }))
+                opcoes.addView(linha("Fundo animado", "Desligado, o fundo fica parado: pesa bem menos na placa de vídeo e deixa volume e menus mais fluidos",
+                    interruptor(Ajustes.fundoAnimado) { Ajustes.definirFundoAnimado(it) }))
                 opcoes.addView(linha("Cidade do clima", if (Ajustes.cidadeFixa) "Fixa em ${Ajustes.cidadeNome}" else "Automática, pela internet", LinearLayout(c).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     if (Ajustes.cidadeFixa) addView(botao(c, "Automática", Tema.BOTAO) { Ajustes.usarCidadeAutomatica(); aoMudarCidade(); montar() })

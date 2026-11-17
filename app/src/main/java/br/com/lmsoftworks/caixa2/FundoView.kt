@@ -57,13 +57,30 @@ class FundoView(c: Context) : View(c) {
     private var segurado = false      // quadro congelado (teclado aberto): a animação continua de onde parou quando o teclado fecha
     private var agendado = false
 
+    private var modoAplicado = false
+    private var camadaAnimada = false      // modo em que o tipo de camada (layer) da view está agora (a primeira passada acerta o tipo se for animado)
+    private val T_PARADO = 6000f           // instante do movimento em que o fundo fica parado quando a animação está desligada
+
+    /** Parado: só redesenha enquanto a cor ainda está trocando ou a capa ainda esmaece. */
+    private fun mudando(): Boolean =
+        SystemClock.elapsedRealtime() - tTroca < DURACAO_TROCA_MS + 80L || Math.abs(baseOpaca - (if (sobreCapa) 0f else 1f)) > .004f
+
     private val passo = object : Runnable {
         override fun run() {
             agendado = false
             if (!rodando || segurado) return
-            invalidate()
+            val animar = Ajustes.fundoAnimado
+            if (!modoAplicado || animar != camadaAnimada) {
+                // parado, a view vira uma textura guardada na placa de vídeo: o que se mexe por cima (volume, menus) não refaz as manchas a cada quadro
+                modoAplicado = true
+                camadaAnimada = animar
+                setLayerType(if (animar) LAYER_TYPE_NONE else LAYER_TYPE_HARDWARE, null)
+                invalidate()
+            }
+            val trabalhando = animar || mudando()
+            if (trabalhando) invalidate()
             agendado = true
-            postDelayed(this, 1000L / (if (lento) 15 else Cfg.FPS))
+            postDelayed(this, if (trabalhando) 1000L / (if (lento) 15 else Cfg.FPS) else 400L)
         }
     }
 
@@ -124,7 +141,7 @@ class FundoView(c: Context) : View(c) {
         if (shader2 == null || c2 != cor2Shader) { shader2 = gradienteUnitario(c2); cor2Shader = c2 }
         // por cima da capa as manchas ficam bem mais transparentes: só tingem o fundo, que já tem as cores da capa
         val brilho = atual[6] * (1f - .62f * (1f - baseOpaca))
-        val t = (SystemClock.elapsedRealtime() - inicio).toFloat()
+        val t = if (camadaAnimada) (SystemClock.elapsedRealtime() - inicio).toFloat() else T_PARADO
 
         baseOpaca += ((if (sobreCapa) 0f else 1f) - baseOpaca) * .06f
         if (Math.abs(baseOpaca - (if (sobreCapa) 0f else 1f)) < .004f) baseOpaca = if (sobreCapa) 0f else 1f
@@ -134,7 +151,22 @@ class FundoView(c: Context) : View(c) {
         canvas.drawColor((Tema.FUNDO and 0xFFFFFF) or ((baseOpaca * 255f).toInt() shl 24))
         val ex = width / quadroL
         val ey = height / quadroA
-        for (i in 0 until 6) {
+        if (!camadaAnimada) {
+            // Parado: duas luzes grandes em cantos opostos (cor 1 em cima à esquerda, cor 2 embaixo à direita), desenhadas uma vez.
+            val luzes = arrayOf(
+                floatArrayOf(quadroL * .12f, quadroA * .15f, 256f, .55f), floatArrayOf(quadroL * .90f, quadroA * .92f, 272f, .45f)
+            )
+            for (k in 0 until 2) {
+                val l = luzes[k]
+                pMancha.shader = if (k == 0) shader1 else shader2
+                pMancha.alpha = ((l[3] * brilho).coerceIn(0f, 1f) * 255f).toInt()
+                canvas.save()
+                canvas.translate(l[0] * ex, l[1] * ey)
+                canvas.scale(l[2] * ex, l[2] * ey)
+                canvas.drawCircle(0f, 0f, 1f, pMancha)
+                canvas.restore()
+            }
+        } else for (i in 0 until 6) {
             val sp = 1f + (i % 4) * .15f
             val x = quadroL * bx[i] + sin(t * .00056f * sp + i * 1.9f) * quadroL * .15f
             val y = quadroA * by[i] + cos(t * .0007f * sp + i * 2.4f) * quadroA * .24f

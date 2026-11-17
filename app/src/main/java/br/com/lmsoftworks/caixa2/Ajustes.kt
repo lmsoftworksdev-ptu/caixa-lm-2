@@ -31,6 +31,8 @@ object Ajustes {
     @Volatile var fusoAuto = true; private set
     /** Troca de menus por deslizar e esmaecer (leve) em vez do cubo 3D. */
     @Volatile var transicaoSuave = false; private set
+    /** Fundo de manchas de luz em movimento. Desligado, ele fica parado (desenhado uma vez e guardado): a placa de vídeo da caixa é fraca e a animação disputa quadros com tudo que se mexe na tela. */
+    @Volatile var fundoAnimado = false; private set
     @Volatile var fusoManualMin = -180; private set
     @Volatile var fusoAutoMin = 99999; private set      // 99999 = ainda não lido
     /** Volume mínimo do alarme: 0 = suave, 1 = médio, 2 = alto. */
@@ -69,6 +71,7 @@ object Ajustes {
         restaurarRedes = p.getBoolean("restaurarRedes", false)
         fusoAuto = p.getBoolean("fusoAuto", true)
         transicaoSuave = p.getBoolean("transicaoSuave", false)
+        fundoAnimado = p.getBoolean("fundoAnimado", false)
         fusoManualMin = p.getInt("fusoManualMin", -180)
         fusoAutoMin = p.getInt("fusoAutoMin", 99999)
         volumeAlarme = p.getInt("volumeAlarme", 1).coerceIn(0, 2)
@@ -89,6 +92,7 @@ object Ajustes {
     fun definirEconomiaBrilho(v: Boolean) { economiaBrilho = v; guardar { putBoolean("economiaBrilho", v) } }
     fun definirEscurecer(v: Boolean) { escurecerOcioso = v; guardar { putBoolean("escurecerOcioso", v) } }
     fun definirTransicaoSuave(v: Boolean) { transicaoSuave = v; guardar { putBoolean("transicaoSuave", v) } }
+    fun definirFundoAnimado(v: Boolean) { fundoAnimado = v; guardar { putBoolean("fundoAnimado", v) } }
     fun definirFusoAuto(v: Boolean) { fusoAuto = v; guardar { putBoolean("fusoAuto", v) } }
     fun definirFusoManual(min: Int) { fusoManualMin = min.coerceIn(-12 * 60, 14 * 60); guardar { putInt("fusoManualMin", fusoManualMin) } }
     fun definirFusoAutoMin(min: Int) { fusoAutoMin = min; guardar { putInt("fusoAutoMin", min) } }

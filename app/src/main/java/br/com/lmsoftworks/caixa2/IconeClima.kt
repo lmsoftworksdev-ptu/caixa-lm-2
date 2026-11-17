@@ -20,7 +20,7 @@ import kotlin.math.sin
  * tamanho). Sol amarelo com degradê, nuvens brancas com sombra azulada, gotas azuis, raio amarelo, lua clara. Anima de leve (raios girando, nuvem
  * balançando, gotas caindo). [tipo] é o mesmo de [tipoDoCodigo].
  */
-class IconeClima(c: Context, private val tipo: String, private val tam: Int, private val animado: Boolean = true) : View(c) {
+class IconeClima(c: Context, private val tipo: String, private val tam: Int, private val animado: Boolean = false) : View(c) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val traco = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
 
