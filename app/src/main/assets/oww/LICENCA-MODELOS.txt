@@ -1,0 +1,7 @@
+Modelos do openWakeWord (melspectrogram, embedding_model, alexa_v0.1)
+Origem: https://github.com/dscripka/openWakeWord (versao v0.5.1), de David Scripka.
+O codigo do projeto e Apache-2.0. Estes modelos prontos estao sob a licenca
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+(https://creativecommons.org/licenses/by-nc-sa/4.0/): uso NAO comercial, com atribuicao.
+O modelo melspectrogram.tflite aqui incluido tem so a forma da entrada fixada em [1, 1760]
+(os pesos e a conta sao os mesmos do original). O modelo de embedding e a "speech_embedding" do Google (Apache-2.0).

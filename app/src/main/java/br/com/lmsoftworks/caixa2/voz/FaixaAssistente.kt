@@ -1,0 +1,366 @@
+package br.com.lmsoftworks.caixa2.voz
+
+import br.com.lmsoftworks.caixa2.Ajustes
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RadialGradient
+import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
+import android.os.SystemClock
+import android.view.Gravity
+import android.view.TextureView
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.RawResourceDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import br.com.lmsoftworks.caixa2.R
+import br.com.lmsoftworks.caixa2.d
+import br.com.lmsoftworks.caixa2.texto
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sin
+
+/** Brilho colorido em volta da esfera e as ondas de choque (desenhados por baixo do vídeo). */
+private class BrilhoOndas(c: Context) : View(c) {
+    var nivel = 0f; var rotacao = 0f; var raio = 0f; var entrada = 0f; var pensando = false
+    val ondas = ArrayList<Float>()      // instantes (em segundos) em que cada onda nasceu
+    var agora = 0f
+    private val cores = intArrayOf(0xFF0A84FF.toInt(), 0xFFFF375F.toInt(), 0xFF64D2FF.toInt())
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
+    // Os três gradientes são criados UMA vez (raio 100, ao redor da origem) e só ampliados/movidos a cada quadro: antes cada quadro
+    // alocava três gradientes grandes novos, o que pesava e fazia a animação travar.
+    private val brilhos = Array(3) { i ->
+        val cor = cores[i]
+        RadialGradient(0f, 0f, 100f, intArrayOf(cor or 0xFF000000.toInt(), cor or 0xFF000000.toInt(), cor and 0xFFFFFF), floatArrayOf(0f, 0.09f, 1f), Shader.TileMode.CLAMP)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (raio <= 0f) return
+        val cx = width / 2f; val cy = height * 410f / 720f
+        p.style = Paint.Style.FILL
+        for (i in 0 until 3) {
+            val a = rotacao * (0.6f + i * 0.25f) + i * 2.1f
+            val ox = cos(a) * raio * 0.5f; val oy = sin(a * 1.1f) * raio * 0.4f
+            val rr = raio * (2.7f + 0.6f * nivel)
+            p.shader = brilhos[i]
+            p.alpha = ((0.2f + 0.2f * nivel) * entrada * 255).toInt().coerceIn(0, 255)
+            canvas.save()
+            canvas.translate(cx + ox, cy + oy)
+            val s = rr / 100f
+            canvas.scale(s, s)
+            canvas.drawCircle(0f, 0f, 100f, p)
+            canvas.restore()
+        }
+        p.shader = null; p.style = Paint.Style.STROKE
+        for (nasc in ondas) {
+            val u = (agora - nasc) / 1.3f
+            if (u !in 0f..1f) continue
+            val e = 1f - (1f - u).pow(3)
+            p.color = Color.argb((0.45f * (1 - u) * entrada * 255).toInt().coerceIn(0, 255), 0xCF, 0xE0, 0xFF)
+            p.strokeWidth = (2f + 5f * (1 - u)).d().toFloat()
+            canvas.drawCircle(cx, cy, raio * (1f + 1.5f * e), p)
+        }
+    }
+}
+
+/**
+ * O assistente, como na animação de referência (animacao-assistente.html): ao chamar, o fundo desfoca e escurece e no centro aparece
+ * a esfera de luz do vídeo (assistente_siri.mp4, misturado com o fundo no modo "screen"), que cresce e acelera com o volume da voz,
+ * com brilho colorido em volta e ondas de choque quando a voz sobe de repente. O texto fica no alto: "Ouvindo…", "Pensando…" e a
+ * resposta. Um toque na tela fecha a assistente em qualquer etapa.
+ * [nivelMic] dá o volume do microfone (0..1); [alvo] é a parte da tela que será desfocada.
+ */
+@UnstableApi
+class FaixaAssistente(private val c: Context, private val nivelMic: () -> Float, private val alvo: () -> View) : FrameLayout(c) {
+
+    private companion object {
+        const val RAIO = 165f            // raio da esfera em repouso (px do quadro de 1280x720)
+        const val CRESCIMENTO = 0.22f    // quanto a esfera cresce com a voz
+        const val SUAVIZAR = 0.2f
+        const val LADO_VIDEO = 461       // 36% da largura
+    }
+
+    private val fundo = ImageView(c)
+    private val escurecer = View(c)
+    private val brilho = BrilhoOndas(c)
+    private val video = TextureView(c)
+    /** Caixa que leva o vídeo: é ELA que mistura (modo "screen") com o fundo; a mistura direto no TextureView falhava ao reabrir. */
+    private val caixaVideo = FrameLayout(c)
+    private val rotulo = texto(c, "", 26, Color.parseColor("#B8C6E6"))
+    private val linha = texto(c, "", 40, Color.WHITE, true)
+    private var player: ExoPlayer? = null
+
+    private var estado = 0              // 0 fechado, 1 ouvindo, 2 pensando, 3 falando
+    private var nivel = 0f
+    private var nivelAnt = 0f
+    private var rotacao = 0f
+    private var tAbre = 0f
+    private var tOnda = -10f
+    private var tAnterior = 0f
+    private var taxaAnt = 1f
+    private var tUltimoQuadro = 0f
+    private var tTaxa = 0f
+    // Brilho e cor da esfera ficam FIXOS: trocar a pintura da camada do vídeo várias vezes por segundo (como era, seguindo a voz) refazia a
+    // camada de hardware inteira e era a maior causa de travadas. A voz continua mexendo no tamanho, na velocidade e nas ondas.
+    private var brilhoAtual = 1.45f; private var corAtual = 1.15f
+
+    /**
+     * Mistura o vídeo com o fundo no modo "screen" (o preto some). O TextureView só aceita a pintura nova se for OUTRO objeto
+     * (ele compara a referência), por isso cria uma pintura nova a cada vez; senão, depois de fechar e abrir, o retângulo preto aparecia.
+     */
+    private fun pintura(brilho: Float = brilhoAtual, saturacao: Float = corAtual): Paint {
+        brilhoAtual = brilho; corAtual = saturacao
+        val m = ColorMatrix().apply { setSaturation(saturacao) }
+        m.postConcat(ColorMatrix().apply { setScale(brilho, brilho, brilho, 1f) })
+        return Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN); colorFilter = ColorMatrixColorFilter(m) }
+    }
+    private val fechar = Runnable { esconder() }
+    private val parar = Runnable { if (!aberta) player?.pause() }
+
+    /** Toque para fechar a assistente. */
+    var aoToque: (() -> Unit)? = null
+    var aoMudarSessao: ((Boolean) -> Unit)? = null
+    private var sessaoAtiva = false
+
+    // A tela do assistente fica SEMPRE "visível" (só transparente quando fechada): se ela sumisse de verdade (GONE), o Android
+    // desmontava a camada do vídeo e, ao reabrir, aparecia um retângulo preto até a mistura ser aplicada de novo.
+    private var abertoFlag = false
+    private var saindo = false
+    val aberta: Boolean get() = abertoFlag
+
+    init {
+        alpha = 0f
+        setOnClickListener { if (aberta) aoToque?.invoke() }
+        isClickable = false      // (setOnClickListener liga o clique: tem que desligar DEPOIS, senão a tela inteira fica "tampada" e o toque não passa)
+        fundo.scaleType = ImageView.ScaleType.FIT_XY
+        addView(fundo, LayoutParams(-1, -1))
+        escurecer.background = GradientDrawable().apply {
+            gradientType = GradientDrawable.RADIAL_GRADIENT
+            setGradientCenter(0.5f, 0.56f)
+            gradientRadius = 900.d().toFloat()
+            colors = intArrayOf(Color.argb(128, 26, 20, 70), Color.argb(209, 3, 5, 18))
+        }
+        addView(escurecer, LayoutParams(-1, -1))
+        addView(brilho, LayoutParams(-1, -1))
+        video.isOpaque = false
+        caixaVideo.addView(video, LayoutParams(-1, -1))
+        caixaVideo.alpha = 0f
+        caixaVideo.setLayerType(View.LAYER_TYPE_HARDWARE, pintura())
+        addView(caixaVideo, LayoutParams(LADO_VIDEO.d(), LADO_VIDEO.d(), Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = (410 - LADO_VIDEO / 2).d() })
+        val topo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        linha.gravity = Gravity.CENTER
+        linha.maxLines = 3; linha.ellipsize = android.text.TextUtils.TruncateAt.END
+        rotulo.gravity = Gravity.CENTER
+        topo.addView(rotulo, LinearLayout.LayoutParams(-1, -2))
+        topo.addView(linha, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8.d() })
+        addView(topo, LayoutParams(-1, -2, Gravity.TOP).apply { topMargin = 65.d(); leftMargin = 100.d(); rightMargin = 100.d() })
+    }
+
+    /** Deixa o vídeo da esfera carregado antes do primeiro chamado (a primeira animação aparece sem demora). */
+    fun preparar() {
+        if (player != null) return
+        // vídeo mudo: sem o ouvinte de aparelhos de áudio do ExoPlayer (ele faz a tela principal listar as portas de áudio a cada mudança de saída)
+        val renderers = object : androidx.media3.exoplayer.DefaultRenderersFactory(c) {
+            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
+                androidx.media3.exoplayer.audio.DefaultAudioSink.Builder()
+                    .setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES).build()
+        }
+        val p = ExoPlayer.Builder(c, renderers).build()
+        p.repeatMode = Player.REPEAT_MODE_ONE
+        p.volume = 0f
+        p.setVideoTextureView(video)
+        p.setMediaItem(MediaItem.fromUri(RawResourceDataSource.buildRawResourceUri(R.raw.assistente_siri)))
+        p.prepare()
+        p.playWhenReady = false
+        player = p
+    }
+
+    /** Desfoque em CPU: foto em 1/8 do tamanho, três passadas de média (box blur) fora da thread principal e esticada com filtro. */
+    private fun desfocar() {
+        try {
+            val v = alvo()
+            if (v.width <= 0 || v.height <= 0) return
+            val f = 12      // foto menor: copiar a tela para o desfoque travava o instante em que a assistente aparece
+            val w = v.width / f; val h = v.height / f
+            val foto = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val cv = Canvas(foto)
+            cv.scale(1f / f, 1f / f)
+            v.draw(cv)
+            fundo.setImageBitmap(foto)      // já aparece suave; o desfoque forte entra em seguida
+            Thread {
+                try {
+                    val px = IntArray(w * h)
+                    foto.getPixels(px, 0, w, 0, 0, w, h)
+                    val tmp = IntArray(w * h)
+                    repeat(3) { caixa(px, tmp, w, h, 4, true); caixa(tmp, px, w, h, 4, false) }
+                    val saida = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
+                    post { if (abertoFlag) fundo.setImageBitmap(saida) }
+                } catch (_: Throwable) {}
+            }.start()
+        } catch (e: Throwable) { fundo.setImageDrawable(null) }
+    }
+
+    /** Média móvel de raio [r] na horizontal ou na vertical (as bordas repetem o último pixel). */
+    private fun caixa(ent: IntArray, sai: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
+        val n = if (horizontal) w else h
+        val linhas = if (horizontal) h else w
+        val passo = if (horizontal) 1 else w
+        val janela = 2 * r + 1
+        for (l in 0 until linhas) {
+            val base = if (horizontal) l * w else l
+            var ra = 0; var ga = 0; var ba = 0
+            for (k in -r..r) { val p = ent[base + k.coerceIn(0, n - 1) * passo]; ra += p shr 16 and 255; ga += p shr 8 and 255; ba += p and 255 }
+            for (i in 0 until n) {
+                sai[base + i * passo] = (0xFF shl 24) or ((ra / janela) shl 16) or ((ga / janela) shl 8) or (ba / janela)
+                val sai0 = ent[base + (i - r).coerceIn(0, n - 1) * passo]
+                val ent0 = ent[base + (i + r + 1).coerceIn(0, n - 1) * passo]
+                ra += (ent0 shr 16 and 255) - (sai0 shr 16 and 255)
+                ga += (ent0 shr 8 and 255) - (sai0 shr 8 and 255)
+                ba += (ent0 and 255) - (sai0 and 255)
+            }
+        }
+    }
+
+    private fun abrir(novo: Int) {
+        removeCallbacks(fechar)
+        removeCallbacks(parar)
+        if (!aberta) {
+            animate().cancel()
+            saindo = false
+            removeCallbacks(quadro)
+            desfocar()
+            preparar()
+            abertoFlag = true
+            isClickable = true
+            animate().alpha(1f).setDuration(550).start()
+            tAbre = SystemClock.uptimeMillis() / 1000f
+            tAnterior = tAbre
+            nivel = 0f; nivelAnt = 0f; tOnda = -10f; brilho.ondas.clear(); taxaAnt = 1f; tTaxa = 0f; tUltimoQuadro = 0f
+            // o vídeo só mistura com o fundo (modo "screen") se a camada tiver a pintura: reaplica a cada abertura, antes do 1º quadro
+            caixaVideo.alpha = 0f
+            caixaVideo.setLayerPaint(pintura())
+            player?.seekTo(0); player?.play()
+            postOnAnimation(quadro)
+        }
+        estado = novo
+    }
+
+    fun ouvindo(dito: String = "") {
+        if (!sessaoAtiva) {
+            sessaoAtiva = true
+            aoMudarSessao?.invoke(true)
+        }
+        abrir(1)
+        rotulo.text = ""; linha.text = ""
+        linha.setTextColor(Color.WHITE)
+    }
+
+    /** O que a pessoa fala não é mais escrito na tela: a esfera já reage à voz. */
+    fun digitando(texto: String) {}
+
+    fun pensando(dito: String) {
+        abrir(2)
+        rotulo.text = ""; linha.text = ""
+        linha.setTextColor(Color.WHITE)
+    }
+
+    fun respondendo(resposta: String, dito: String = "") {
+        abrir(3)
+        rotulo.text = ""; linha.text = if (Ajustes.mostrarResposta) resposta else ""
+        linha.setTextColor(Color.parseColor("#D6E4FF"))
+    }
+
+    /** Fecha sozinha depois de [ms]. */
+    fun fecharEm(ms: Long) { removeCallbacks(fechar); postDelayed(fechar, ms) }
+
+    fun esconder() {
+        removeCallbacks(fechar)
+        if (!aberta) return
+        abertoFlag = false
+        saindo = true
+        animate().cancel()
+        animate().alpha(0f).setDuration(550).withEndAction {
+            saindo = false
+            estado = 0
+            isClickable = false
+            removeCallbacks(quadro)
+            fundo.setImageDrawable(null)
+            caixaVideo.alpha = 0f
+            if (sessaoAtiva) {
+                sessaoAtiva = false
+                aoMudarSessao?.invoke(false)
+            }
+            postDelayed(parar, 700)
+        }.start()
+    }
+
+    // ---------------------------------------------------------------- animação, quadro a quadro
+
+    private fun fala(t: Float): Float {      // volume simulado da fala da caixa (a voz online não dá o nível real)
+        val sil = Math.abs(sin(t * 7.3f) * sin(t * 2.9f + 1f)); val pausa = if (sin(t * 1.15f) > -0.35f) 1f else 0.12f
+        return ((0.18f + 0.75f * sil) * pausa * (0.65f + 0.35f * sin(t * 1.7f))).coerceIn(0f, 1f)
+    }
+
+    private val quadro = object : Runnable {
+        override fun run() {
+            if (!aberta && !saindo) return
+            val t = SystemClock.uptimeMillis() / 1000f
+            // 30 quadros por segundo, sempre iguais: redesenhar a tela inteira a 60 com o aparelho no limite dava quadros irregulares (travadas)
+            if (t - tUltimoQuadro < 0.028f) { postOnAnimation(this); return }
+            tUltimoQuadro = t
+            val dt = min(0.1f, t - tAnterior); tAnterior = t
+            val pensando = estado == 2
+            if (saindo) {
+                // O vídeo continua rodando. Mantém a rotação do brilho sem reconstruir a pintura do vídeo durante o fade.
+                rotacao += dt * (if (pensando) 2.4f else 0.8f + nivel * 1.6f)
+                brilho.rotacao = rotacao
+                brilho.agora = t
+                brilho.invalidate()
+                postOnAnimation(this)
+                return
+            }
+            val alvoNivel = when (estado) {
+                1 -> (nivelMic() * 1.3f).coerceIn(0f, 1f)
+                3 -> fala(t) * 0.85f
+                2 -> 0.1f
+                else -> 0.04f
+            }
+            nivel += (alvoNivel - nivel) * SUAVIZAR
+            rotacao += dt * (if (pensando) 2.4f else 0.8f + nivel * 1.6f)
+
+            val k = ((t - tAbre) / 0.9f).coerceIn(0f, 1f)
+            val e = 1f - (1f - k).pow(3)
+            val mola = 1f - exp(-6f * k) * cos(9f * k)
+            val r = RAIO * (0.45f + 0.55f * mola) * (if (pensando) 0.94f + 0.04f * sin(t * 5f) else 1f + CRESCIMENTO * nivel)
+
+            // vídeo: tamanho, velocidade, brilho e cor seguem a voz
+            // velocidade do vídeo em degraus de 0,25 e no máximo 2 trocas por segundo (cada troca mexe no player)
+            val taxa = Math.round((if (pensando) 2.2f else 0.85f + nivel * 1.5f) / 0.25f) * 0.25f
+            if (taxa != taxaAnt && t - tTaxa > 0.5f) { try { player?.setPlaybackSpeed(taxa) } catch (_: Throwable) {}; taxaAnt = taxa; tTaxa = t }
+            caixaVideo.alpha = e
+            caixaVideo.scaleX = r / RAIO; caixaVideo.scaleY = r / RAIO
+
+            if (nivel > 0.55f && nivelAnt <= 0.55f && t - tOnda > 0.35f && !pensando) { brilho.ondas.add(t); tOnda = t }
+            nivelAnt = nivel
+            brilho.ondas.removeAll { t - it > 1.3f }
+            brilho.nivel = nivel; brilho.rotacao = rotacao; brilho.raio = r.d().toFloat(); brilho.entrada = e; brilho.pensando = pensando; brilho.agora = t
+            brilho.invalidate()
+            postOnAnimation(this)
+        }
+    }
+}

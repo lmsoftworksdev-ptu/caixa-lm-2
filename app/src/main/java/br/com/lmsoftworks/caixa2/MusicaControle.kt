@@ -1,0 +1,500 @@
+package br.com.lmsoftworks.caixa2
+
+import android.content.ComponentName
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadata
+import android.media.browse.MediaBrowser
+import android.media.session.MediaController
+import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import android.util.LruCache
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.security.MessageDigest
+import java.net.URL
+import java.net.URLEncoder
+
+/**
+ * O que está tocando pelo Bluetooth: título, artista, álbum, tempo e botões, lidos da sessão de
+ * mídia que o receptor A2DP do Android cria. A capa não vem pelo Bluetooth nesta versão do
+ * Android, então ela é buscada na internet (iTunes) pelo nome da música.
+ */
+class MusicaControle(contexto: Context, private val aoMudar: () -> Unit) {
+
+    companion object {
+        private const val TAG = "CaixaMusica"
+        private val SERVICO = ComponentName("com.android.bluetooth", "com.android.bluetooth.a2dpsink.mbs.A2dpMediaBrowserService")
+    }
+
+    private val ctx = contexto.applicationContext
+    private val handler = Handler(Looper.getMainLooper())
+    private var navegador: MediaBrowser? = null
+    private var controle: MediaController? = null
+
+    var titulo = ""; private set
+    var artista = ""; private set
+    var album = ""; private set
+    var duracaoMs = 0L; private set
+    var capa: Bitmap? = null; private set
+    var estado = PlaybackState.STATE_NONE; private set
+    private var posicaoBase = 0L
+    private var atualizadoEm = 0L
+    private var velocidade = 1f
+    private var chaveCapa = ""
+    private val cacheMemoria = LruCache<String, Bitmap>(8)
+    private val pasta = File(ctx.cacheDir, "capas2").apply { mkdirs() }      // capas2: descarta as capas erradas guardadas antes da busca criteriosa
+    private val esperarBusca = Runnable { buscarPendente() }
+    private var pendente: Array<String>? = null
+
+    /** De onde vem o que a tela mostra: a última música que TOCOU na caixa, seja pelo celular ou pelo player do app. */
+    private enum class Origem { NENHUMA, CELULAR, LOCAL }
+    private var origem = Origem.NENHUMA
+    private var ultimaFila: List<Resultado> = emptyList()
+    private var ultimoIndice = 0
+
+    private fun foneTocando(s: PlaybackState?) = s?.state == PlaybackState.STATE_PLAYING || s?.state == PlaybackState.STATE_BUFFERING
+
+    /** O áudio do celular está chegando (aviso do A2DP, que vem antes e sem depender do estado da música): também vale como "o celular está tocando". */
+    var celularSomTocando: () -> Boolean = { false }
+    var celularSomConfirmado: () -> Boolean = { false }
+    /** O celular passou a tocar de verdade (o estado dele continua "tocando" depois de um instante): o que o app toca (vídeo) tem que pausar. */
+    var aoCelularComecou: (() -> Unit)? = null
+    private val confirmarCelular = Runnable {
+        if (!celularSomConfirmado() || !foneTocando(controle?.playbackState)) return@Runnable
+        if (appRecente()) controle?.transportControls?.pause()      // foi o eco do app começando a tocar
+        else aoCelularComecou?.invoke()
+    }
+
+    /**
+     * O celular está tocando AGORA? O estado que o iPhone manda pelo controle (AVRCP) chega na hora e vale quando é "tocando" ou
+     * "pausado"; o áudio do Bluetooth ([audioTocando]) só muda uns 5 s depois de a música parar, então só serve quando o estado do
+     * controle não diz nada (parado/sem estado).
+     */
+    fun celularTocandoAgora(audioTocando: Boolean): Boolean = when (estado) {
+        PlaybackState.STATE_PLAYING, PlaybackState.STATE_BUFFERING -> true
+        PlaybackState.STATE_PAUSED -> false
+        else -> audioTocando
+    }
+
+    /**
+     * Regra única: quem deu play por último manda. O app (vídeo ou música) começou a tocar → o celular pára. O celular que "voltar" logo
+     * depois não foi a pessoa (é o Bluetooth devolvendo o som ao fim do assistente): é pausado de novo.
+     */
+    fun appComecou() {
+        iniciouLocalEm = SystemClock.uptimeMillis()
+        if (celularAtivo(controle?.playbackState)) controle?.transportControls?.pause()
+    }
+
+    /** O app vai tocar (vídeo ou música, ainda carregando): o celular pára já e o que ele "devolver" nos próximos segundos é eco do Bluetooth. */
+    fun appVaiTocar() {
+        iniciouLocalEm = SystemClock.uptimeMillis()
+        controle?.transportControls?.pause()
+    }
+
+    private var porVozAte = 0L
+    /** O assistente de voz vai mandar o app tocar: aí o Bluetooth devolve o som ao celular no fim da fala, e isso não é a pessoa dando play. */
+    fun marcarPorVoz() { porVozAte = SystemClock.uptimeMillis() + 25_000L }
+
+    /**
+     * O que o celular "devolver" agora é eco, e não a pessoa dando play? Se o app começou por toque, só vale o instante em que o estado
+     * velho do celular ainda chega (play no celular é imediato). Se começou por voz, vale até o som do app estar de pé.
+     */
+    fun appRecente(): Boolean {
+        val agora = SystemClock.uptimeMillis()
+        val desde = agora - iniciouLocalEm
+        if (agora > porVozAte) return desde < 800L
+        return desde < JANELA_APP_MS || local?.carregando == true
+    }
+    /** O celular desconectou: o título, a capa e o estado dele não valem mais (o cartão de música sumia só muito depois). */
+    fun celularDesconectou() {
+        if (emLocal || origem != Origem.CELULAR) return
+        titulo = ""; artista = ""; album = ""; duracaoMs = 0L; capa = null; chaveCapa = ""; pendente = null
+        estado = PlaybackState.STATE_NONE; posicaoBase = 0L
+        origem = Origem.NENHUMA
+        aoMudar()
+    }
+
+    /**
+     * O iPhone não passou nenhum estado (nem "pausado")? Conectado direito, ele manda "pausado" na hora; com o registro de avisos do
+     * Bluetooth do Android incompleto o estado fica "parado" até o fim. Serve para detectar a falha antes mesmo de dar play.
+     */
+    val semEstadoDoCelular: Boolean get() = controle?.playbackState?.state.let { it == null || it == PlaybackState.STATE_NONE || it == PlaybackState.STATE_STOPPED }
+    private fun celularAtivo(s: PlaybackState?) = foneTocando(s) || celularSomTocando()
+
+    fun sincronizarCelularConfirmado() {
+        val c = controle ?: return
+        if (emLocal) local?.parar()
+        origem = Origem.CELULAR
+        lerMetadados(c.metadata)
+        lerEstado(c.playbackState)
+        aoMudar()
+    }
+
+    /** O player do YouTube (menu Mídia). Quando ele está tocando uma música, ele manda no lugar do celular. */
+    var local: PlayerMidia? = null
+    /** Quando o app começou a tocar uma música dele (o celular que voltar a tocar logo depois não foi a pessoa: foi o fim do assistente). */
+    private var iniciouLocalEm = 0L
+    private val JANELA_APP_MS = 8_000L
+    /** O Bluetooth está ligado? Com ele desligando ou desligado o app NÃO deve ficar tentando ligar ao serviço dele (isso trava o Android daqui). */
+    var bluetoothLigado: () -> Boolean = { true }
+    val emLocal: Boolean get() = local?.let { it.ativo && !it.ehVideo } == true
+
+    /** Erro da música tocada pelo app (endereço não abriu, rede...): a tela de música avisa e oferece tentar de novo. */
+    val erroLocal: String? get() = local?.takeIf { it.ativo && !it.ehVideo }?.erro
+    fun tentarDeNovoLocal() { local?.alternar() }
+
+    /** A música do app que toca agora é uma rádio ao vivo. */
+    val ehRadio: Boolean get() = emLocal && local?.ehRadio == true
+
+    val temMusica: Boolean get() = titulo.isNotEmpty()
+    val tocando: Boolean get() = estado == PlaybackState.STATE_PLAYING || estado == PlaybackState.STATE_BUFFERING
+    val conectado: Boolean get() = controle != null
+
+    /** posição atual em ms, calculada a partir do último aviso do celular */
+    fun posicaoMs(): Long {
+        if (emLocal) return local!!.posicaoMs
+        if (!tocando) return posicaoBase
+        val p = posicaoBase + ((SystemClock.elapsedRealtime() - atualizadoEm) * velocidade).toLong()
+        return if (duracaoMs > 0) p.coerceIn(0, duracaoMs) else p
+    }
+
+    private val retorno = object : MediaController.Callback() {
+        override fun onMetadataChanged(m: MediaMetadata?) {
+            if (emLocal) return
+            // o celular manda título e capa também quando só é desbloqueado: isso não é "tocar". Só vale quando ele está tocando.
+            if (origem == Origem.CELULAR || celularSomConfirmado()) { origem = Origem.CELULAR; lerMetadados(m); aoMudar() }
+        }
+        override fun onPlaybackStateChanged(s: PlaybackState?) {
+            if (emLocal) {
+                // o celular voltou a tocar de verdade: ele passa a mandar de novo e a música do YouTube para
+                if (!celularSomConfirmado() || !foneTocando(s)) return
+                if (appRecente()) {
+                    // acabou de começar (ou ainda está carregando) a música do app e o celular "voltou": não foi a pessoa dando play, então o celular é pausado de novo
+                    controle?.transportControls?.pause()
+                    return
+                }
+                aoCelularComecou?.invoke()      // o app pára e a tela vai para a música do celular, na hora
+                local?.parar()
+                origem = Origem.CELULAR
+                lerMetadados(controle?.metadata)
+                lerEstado(s); aoMudar()
+                return
+            }
+            handler.removeCallbacks(confirmarCelular)
+            if (foneTocando(s)) handler.postDelayed(confirmarCelular, 250)      // só filtra um "tocando" que some em seguida
+            if (celularSomConfirmado() && origem != Origem.CELULAR) { origem = Origem.CELULAR; lerMetadados(controle?.metadata) }
+            if (origem == Origem.CELULAR) lerEstado(s)
+            aoMudar()
+        }
+        override fun onSessionDestroyed() { desligar(); if (bluetoothLigado()) iniciar() }
+    }
+
+    private val conexao = object : MediaBrowser.ConnectionCallback() {
+        override fun onConnected() {
+            try {
+                val c = MediaController(ctx, navegador!!.sessionToken)
+                controle = c
+                c.registerCallback(retorno, handler)
+                if (celularSomConfirmado() && !emLocal) { origem = Origem.CELULAR; lerMetadados(c.metadata); lerEstado(c.playbackState) }
+            } catch (e: Exception) { Log.w(TAG, "nao foi possivel abrir a sessao", e) }
+            aoMudar()
+        }
+        override fun onConnectionFailed() {
+            Log.w(TAG, "falha ao conectar na sessao de midia do Bluetooth")
+            desligar()      // limpa a tentativa que falhou: sem isso o iniciar() seguinte achava que já havia uma ligação e não tentava mais
+            handler.postDelayed({ if (bluetoothLigado()) iniciar() }, 5000)
+        }
+        override fun onConnectionSuspended() { desligar(); handler.postDelayed({ if (bluetoothLigado()) iniciar() }, 2000) }
+    }
+
+    /** Aquece DNS e conexão segura para a primeira capa chegar mais rápido. */
+    private fun aquecer() {
+        Tarefas.executar {
+            try {
+                val con = URL("https://itunes.apple.com/search?term=a&limit=1").openConnection() as HttpURLConnection
+                con.connectTimeout = 4000; con.readTimeout = 4000
+                con.inputStream.use { it.readBytes() }
+            } catch (e: Exception) { }
+        }
+    }
+
+    fun iniciar() {
+        if (navegador != null) return
+        if (!bluetoothLigado()) return      // com o Bluetooth desligado não se liga ao serviço dele; o aviso de "ligou" chama de novo
+        aquecer()
+        try {
+            navegador = MediaBrowser(ctx, SERVICO, conexao, null).also { it.connect() }
+        } catch (e: Exception) { Log.w(TAG, "sem acesso a sessao de midia", e) }
+    }
+
+    fun desligar() {
+        handler.removeCallbacksAndMessages(null)
+        try { controle?.unregisterCallback(retorno) } catch (e: Exception) { }
+        try { navegador?.disconnect() } catch (e: Exception) { }
+        controle = null
+        navegador = null
+    }
+
+    /** Quando não há música, o celular manda textos como "Not Supported" no lugar do título: isso conta como vazio. */
+    private fun textoReal(s: String?): String {
+        val t = s?.trim() ?: return ""
+        val sem = t.lowercase().replace(Regex("[^a-z]"), "")
+        return if (sem in setOf("notsupported", "notprovided", "notavailable", "na", "none", "null")) "" else t
+    }
+
+    private fun lerMetadados(m: MediaMetadata?) {
+        val novoTitulo = textoReal(m?.getString(MediaMetadata.METADATA_KEY_TITLE))
+        val novoArtista = textoReal(m?.getString(MediaMetadata.METADATA_KEY_ARTIST))
+        titulo = novoTitulo
+        artista = novoArtista
+        album = textoReal(m?.getString(MediaMetadata.METADATA_KEY_ALBUM))
+        duracaoMs = m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        val nativa = m?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        val novoAlbum = textoReal(m?.getString(MediaMetadata.METADATA_KEY_ALBUM))
+        val chave = "$novoArtista|$novoTitulo|$novoAlbum"
+        if (nativa != null) { capa = nativa; chaveCapa = chave }
+        else if (chave != chaveCapa) {
+            chaveCapa = chave
+            capa = cacheMemoria.get(chave) ?: lerDoDisco(chave)?.also { cacheMemoria.put(chave, it) }
+            if (capa == null && novoTitulo.isNotEmpty()) {
+                // o celular manda título e artista em avisos separados: espera um instante para buscar uma vez só
+                pendente = arrayOf(novoArtista, novoTitulo, novoAlbum, chave)
+                handler.removeCallbacks(esperarBusca)
+                handler.postDelayed(esperarBusca, 300)
+            }
+        }
+    }
+
+    private fun lerEstado(s: PlaybackState?) {
+        estado = s?.state ?: PlaybackState.STATE_NONE
+        posicaoBase = s?.position?.takeIf { it >= 0 } ?: 0L
+        atualizadoEm = s?.lastPositionUpdateTime ?: SystemClock.elapsedRealtime()
+        velocidade = s?.playbackSpeed ?: 1f
+    }
+
+    private fun buscarPendente() {
+        val p = pendente ?: return
+        pendente = null
+        if (p[3] != chaveCapa) return
+        buscarCapa(p[0], p[1], p[2], p[3])
+    }
+
+    private fun arquivoDe(chave: String): File {
+        val h = MessageDigest.getInstance("MD5").digest(chave.toByteArray()).joinToString("") { "%02x".format(it) }
+        return File(pasta, "$h.jpg")
+    }
+
+    private fun lerDoDisco(chave: String): Bitmap? {
+        val f = arquivoDe(chave)
+        return if (f.exists()) BitmapFactory.decodeFile(f.path, opcoes()) else null
+    }
+
+    private fun opcoes() = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
+
+    // ---------------------------------------------------------------- capa do álbum
+    //
+    // O celular NÃO manda a imagem da capa pelo Bluetooth (o perfil da caixa só recebe título, artista e álbum). Então o app
+    // procura a capa no iTunes pelo nome. Antes ele pegava o PRIMEIRO resultado, que às vezes era outra gravação (cover,
+    // karaokê, coletânea). Agora ele pede vários resultados, dá nota a cada um (título, artista e álbum parecidos com os que o
+    // celular mostra) e só aceita um que combine; se nenhum combinar, fica sem capa em vez de mostrar uma errada.
+
+    private fun norm(s: String): String {
+        val sem = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        return sem.replace(Regex("\\(.*?\\)|\\[.*?]"), " ").replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+    }
+
+    /** 3 = iguais; 2 = um contém o outro; até 1,5 = palavras em comum; 0 = nada a ver. */
+    private fun parecido(nosso: String, deles: String): Double {
+        val a = norm(nosso); val b = norm(deles)
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        if (a == b) return 3.0
+        if (a.contains(b) || b.contains(a)) return 2.0
+        val ta = a.split(" ").toSet(); val tb = b.split(" ").toSet()
+        return 1.5 * ta.intersect(tb).size / ta.union(tb).size
+    }
+
+    private val SUSPEITAS = listOf("karaoke", "tribute", "cover", "instrumental", "lullaby", "originally performed", "made famous", "8 bit", "8-bit", "playback")
+
+    private fun notaDoResultado(r: JSONObject, artista: String, titulo: String, album: String): Double {
+        val musica = r.optString("trackName"); val quem = r.optString("artistName"); val disco = r.optString("collectionName")
+        val pTitulo = parecido(titulo, musica)
+        // com vários artistas ("A, B e C") basta um deles combinar com o artista do resultado
+        val pArtista = if (artista.isBlank()) 2.0 else maxOf(parecido(artista, quem), separarArtistas(artista).maxOfOrNull { parecido(it, quem) } ?: 0.0)
+        if (pTitulo < 2.0 || pArtista < 1.0) return -1.0            // não é a mesma música/artista: descarta
+        var nota = 2 * pTitulo + 2 * pArtista
+        if (album.isNotBlank()) nota += parecido(album, disco)
+        val nossoTexto = norm("$titulo $artista $album")
+        val textoDeles = norm("$musica $quem $disco")
+        for (palavra in SUSPEITAS) if (textoDeles.contains(palavra) && !nossoTexto.contains(palavra)) nota -= 4
+        return nota
+    }
+
+    private fun consultar(termo: String, pais: String?): List<JSONObject> {
+        val t = URLEncoder.encode(termo, "UTF-8")
+        val url = URL("https://itunes.apple.com/search?term=$t&entity=song&limit=15" + (if (pais != null) "&country=$pais" else ""))
+        val con = url.openConnection() as HttpURLConnection
+        con.connectTimeout = 4000; con.readTimeout = 6000
+        val arr = JSONObject(con.inputStream.bufferedReader().use { it.readText() }).optJSONArray("results") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+    }
+
+    /** "A, B e C" / "A x B" / "A feat. B" vira [A, B, C]: a busca com todos os nomes juntos quase nunca acha nada. */
+    private fun separarArtistas(artista: String): List<String> =
+        artista.split(Regex("\\s*(,|&|\\+|;|\\bx\\b|\\be\\b|\\bfeat\\.?|\\bft\\.?|\\bcom\\b)\\s*", RegexOption.IGNORE_CASE)).map { it.trim() }.filter { it.isNotBlank() }
+
+    /** O Deezer também não pede chave e tem muito mais funk e música brasileira recente que o iTunes. Devolve no mesmo formato do iTunes. */
+    private fun consultarDeezer(termo: String): List<JSONObject> {
+        val t = URLEncoder.encode(termo, "UTF-8")
+        val con = URL("https://api.deezer.com/search?q=$t&limit=15").openConnection() as HttpURLConnection
+        con.connectTimeout = 4000; con.readTimeout = 6000
+        val arr = JSONObject(con.inputStream.bufferedReader().use { it.readText() }).optJSONArray("data") ?: return emptyList()
+        return (0 until arr.length()).map {
+            val d = arr.getJSONObject(it)
+            val alb = d.optJSONObject("album")
+            JSONObject()
+                .put("trackName", d.optString("title"))
+                .put("artistName", d.optJSONObject("artist")?.optString("name") ?: "")
+                .put("collectionName", alb?.optString("title") ?: "")
+                .put("artworkUrl100", alb?.optString("cover_big") ?: "")
+        }
+    }
+
+    /** Procura a capa (iTunes e, se não achar, Deezer), em segundo plano, escolhendo o resultado que mais combina; guarda no cache. */
+    private fun buscarCapa(artista: String, titulo: String, album: String, chave: String) {
+        Tarefas.executar {
+            var imagem: Bitmap? = null
+            try {
+                var melhor: JSONObject? = null
+                val primeiro = separarArtistas(artista).firstOrNull() ?: artista
+                val tituloLimpo = titulo.replace(Regex("\\(.*?\\)|\\[.*?]"), " ").replace(Regex("\\s+"), " ").trim().ifEmpty { titulo }
+                // da busca mais exata para a mais aberta; para na primeira que traz um resultado que combine
+                val tentativas = listOf<Pair<String, () -> List<JSONObject>>>(
+                    "iTunes BR" to { consultar("$artista $titulo".trim(), "BR") },
+                    "iTunes BR (1º artista)" to { consultar("$primeiro $tituloLimpo".trim(), "BR") },
+                    "iTunes" to { consultar("$primeiro $tituloLimpo".trim(), null) },
+                    "Deezer (1º artista)" to { consultarDeezer("$primeiro $tituloLimpo".trim()) },
+                    "Deezer (só o título)" to { consultarDeezer(tituloLimpo) }
+                )
+                for ((nome, buscar) in tentativas) {
+                    val achados = try { buscar() } catch (e: Exception) { Log.w(TAG, "capa: $nome falhou: ${e.message}"); emptyList() }
+                    var notaMelhor = 0.0
+                    for (r in achados) {
+                        val n = notaDoResultado(r, artista, titulo, album)
+                        if (n > notaMelhor) { notaMelhor = n; melhor = r }
+                    }
+                    if (melhor != null) { Log.d(TAG, "capa de '$artista - $titulo' achada em $nome"); break }
+                }
+                val arte = melhor?.optString("artworkUrl100") ?: ""
+                if (arte.isNotEmpty()) {
+                    val c2 = URL(arte.replace("100x100bb", "400x400bb")).openConnection() as HttpURLConnection
+                    c2.connectTimeout = 4000; c2.readTimeout = 8000
+                    val bytes = c2.inputStream.use { it.readBytes() }
+                    imagem = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opcoes())
+                    if (imagem != null) try { arquivoDe(chave).writeBytes(bytes) } catch (e: Exception) { }
+                } else Log.d(TAG, "nenhuma capa combina com '$artista - $titulo ($album)': fica sem capa")
+            } catch (e: Exception) {
+                Log.w(TAG, "capa nao encontrada", e)
+            }
+            handler.post {
+                if (imagem != null) cacheMemoria.put(chave, imagem)
+                if (chave == chaveCapa && imagem != null) { capa = imagem; aoMudar() }
+            }
+        }
+    }
+
+    // ---- música do YouTube (menu Mídia) ----
+
+    /** Toca uma música do YouTube; a do celular, se estiver tocando, é pausada. */
+    /** A fila do player da caixa (a do YouTube) e a posição atual nela; vazia quando quem toca é o celular. */
+    val filaLocal: List<Resultado> get() = local?.takeIf { it.ativo && !it.ehVideo }?.fila.orEmpty()
+    val indiceLocal: Int get() = local?.indice ?: -1
+    fun irParaLocal(i: Int) { local?.irPara(i) }
+
+    fun tocarDoYoutube(lista: List<Resultado>, i: Int, inicioMs: Long = 0L, tocar: Boolean = true) {
+        iniciouLocalEm = SystemClock.uptimeMillis()
+        controle?.transportControls?.pause()
+        local?.tocarMusica(lista, i, inicioMs, tocar)
+    }
+
+    /** O player do YouTube mudou: copia o que ele toca para os mesmos campos que a tela de música já lê. */
+    fun sincronizarLocal() {
+        val l = local ?: return
+        val r = l.item
+        if (r != null && !l.ehVideo) {
+            titulo = r.titulo
+            artista = r.canal.removeSuffix(" - Topic")
+            album = ""
+            duracaoMs = l.duracaoMs
+            capa = l.capa
+            estado = when {
+                l.erro != null -> PlaybackState.STATE_ERROR
+                l.tocando -> PlaybackState.STATE_PLAYING
+                l.carregando -> PlaybackState.STATE_BUFFERING
+                else -> PlaybackState.STATE_PAUSED
+            }
+            posicaoBase = l.posicaoMs
+            atualizadoEm = SystemClock.elapsedRealtime()
+            velocidade = 1f
+            chaveCapa = "yt|" + r.url
+            origem = Origem.LOCAL
+            ultimaFila = l.fila; ultimoIndice = l.indice
+        } else if (origem == Origem.LOCAL) {
+            // a música do app parou: continua na tela a última que tocou (pausada), e não o que o celular tiver
+            estado = PlaybackState.STATE_PAUSED
+        }
+        aoMudar()
+    }
+
+    // ---- botões ----
+    fun tocar() {
+        if (emLocal) { if (!local!!.tocando) local!!.alternar() }
+        else if (origem == Origem.LOCAL && ultimaFila.isNotEmpty()) tocarDoYoutube(ultimaFila, ultimoIndice, posicaoBase)      // a última foi a do app: volta nela
+        else controle?.transportControls?.play()
+    }
+    /** Manda "pausar" ao celular sem checar o estado (ele pode estar tocando sem avisar). */
+    fun pausarCelular() {
+        pausouEm = SystemClock.uptimeMillis()
+        if (!emLocal && tocando) { estado = PlaybackState.STATE_PAUSED; aoMudar() }      // a tela já mostra "pausado"; o estado de verdade do celular chega logo depois e corrige
+        controle?.transportControls?.pause()
+    }
+    /** Quando foi o último "pausar" mandado ao celular: o áudio do Bluetooth ainda sai por uns segundos depois disso e NÃO quer dizer que ele está tocando. */
+    private var pausouEm = 0L
+
+    fun pausar() { if (emLocal) { if (local!!.tocando) local!!.alternar() } else controle?.transportControls?.pause() }
+    /** O celular manda som mas não avisou o estado (o iPhone às vezes não manda): pausa mesmo assim, em vez de "dar play" por cima. */
+    fun alternar() {
+        if (emLocal) { local!!.alternar(); return }
+        // Logo depois de pausar, o áudio do Bluetooth demora uns 5 s para acabar: se isso contasse como "tocando", o play virava outro pause
+        // e era preciso clicar várias vezes. Dentro dessa janela só vale o estado que o celular informa.
+        val recemPausado = SystemClock.uptimeMillis() - pausouEm < 7_000L
+        if (tocando || (!recemPausado && celularSomTocando())) pausarCelular() else tocar()
+    }
+    /** O que tocava no player do app deixou de existir (o Mix baixado foi excluído): a tela esquece a música em vez de mostrar uma que não toca mais. */
+    fun esquecerLocal() {
+        if (origem != Origem.LOCAL) return
+        titulo = ""; artista = ""; album = ""; duracaoMs = 0L; capa = null
+        estado = PlaybackState.STATE_NONE
+        chaveCapa = ""; origem = Origem.NENHUMA; ultimaFila = emptyList(); ultimoIndice = 0
+        aoMudar()
+    }
+
+    /** Na última música da lista do app (um Mix baixado, por exemplo) não há para onde ir: a tela bloqueia o botão de próxima. */
+    val temProximaLocal: Boolean get() = local?.temProxima ?: true
+    fun proxima() { if (emLocal) local!!.proxima() else controle?.transportControls?.skipToNext() }
+    fun anterior() { if (emLocal) local!!.anterior() else controle?.transportControls?.skipToPrevious() }
+
+    /** Pula para um ponto da música (em ms). A tela já mostra o novo ponto enquanto o celular responde. */
+    fun buscar(ms: Long) {
+        if (emLocal) { local!!.buscar(ms); return }
+        posicaoBase = ms
+        atualizadoEm = SystemClock.elapsedRealtime()
+        controle?.transportControls?.seekTo(ms)
+        aoMudar()
+    }
+}
