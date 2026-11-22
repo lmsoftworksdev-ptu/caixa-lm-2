@@ -57,7 +57,7 @@ jobs:
         if: steps.np.outputs.publicar == 'sim'
         run: |
           chmod +x gradlew
-          VERSAO=$((200 + GITHUB_RUN_NUMBER))
+          VERSAO=$((400 + GITHUB_RUN_NUMBER))
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
           ./gradlew assembleDebug --no-daemon -PversionCode=$VERSAO -PversionName="1.$VERSAO"
           cp app/build/outputs/apk/debug/app-debug.apk CaixaLM2.apk
