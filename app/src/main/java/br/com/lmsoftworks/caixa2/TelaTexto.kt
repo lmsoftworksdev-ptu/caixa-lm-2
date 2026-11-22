@@ -28,12 +28,19 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
     private val botaoAcao: TextView
     private val teclado = TecladoView(c)
     private val caixa = FrameLayout(c)
+    private val microfone: FrameLayout = EntradaVoz.botao(c, 60) { ouvirVoz() }
+    private val animacaoMic = EntradaVoz.AnimacaoMic(microfone, 60)
+    private val painel = FrameLayout(c)
     private val handler = Handler(Looper.getMainLooper())
 
     private var dica = ""
     private var ehSenha = false
     private var mostrar = false
     private var conteudo = ""
+    /** Onde está o cursor dentro do texto (0 = antes da primeira letra). Tocar no texto o leva até o ponto tocado. */
+    private var posCursor = 0
+    private fun pos() = posCursor.coerceIn(0, conteudo.length)
+    private var ultimoX = 0f
     private var maximo = 100
     private var cursor = true
     private var capitalizar = true
@@ -50,13 +57,8 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
     init {
         visibility = View.GONE
         isClickable = true
-        // painel escuro que começa logo abaixo da barra de cima (a tela fica 64 px abaixo do topo): a barra nunca é cortada
-        addView(View(c).apply {
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#FA050916"))
-                cornerRadii = floatArrayOf(30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 0f, 0f, 0f, 0f)
-            }
-        }, LayoutParams(-1, -1).apply { topMargin = 40.d() })
+        // fora do painel: um toque fecha (igual aos teclados da Mídia e das Receitas, sem botão X); o menu de trás continua à vista
+        addView(View(c).apply { isClickable = true; setOnClickListener { fechar() } }, LayoutParams(-1, -1))
         val coluna = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(48.d(), 36.d(), 48.d(), 0) }
 
         val linhaTitulo = LinearLayout(c).apply {
@@ -67,6 +69,11 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
         // o título fica de fora para liberar espaço (a barra de cima fica visível); a dica dentro da caixa diz o que digitar
 
         caixa.addView(caixaTexto, LayoutParams(-1, -1).apply { leftMargin = 26.d(); rightMargin = 26.d() })
+        // tocar no texto leva o cursor até o ponto tocado (no fim, se o toque foi depois do texto)
+        caixa.setOnTouchListener { _, e ->
+            if (e.actionMasked == android.view.MotionEvent.ACTION_UP) { ultimoX = e.x; cursorPeloToque() }
+            true
+        }
         olho.apply {
             setPadding(14.d(), 14.d(), 14.d(), 14.d())
             setColorFilter(Tema.TEXTO2)
@@ -75,26 +82,60 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
         }
         caixa.addView(olho, LayoutParams(60.d(), 60.d(), Gravity.END))
         botaoAcao = botao(c, "OK", Cfg.AZUL) { enviar() }
-        val x = FrameLayout(c).apply {
-            background = fundoArredondado(Tema.BOTAO, Tema.RAIO_BOTAO.d(), Tema.BOTAO_BORDA)
-            isClickable = true
-            setOnClickListener { fechar() }
-            efeitoToque()
-            addView(icone(c, R.drawable.ic_fechar, 28, Tema.TEXTO), LayoutParams(28.d(), 28.d(), Gravity.CENTER))
-        }
         val linhaCampo = LinearLayout(c).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(caixa, LinearLayout.LayoutParams(0, 60.d(), 1f))
-            addView(x, LinearLayout.LayoutParams(60.d(), 60.d()).apply { leftMargin = 14.d() })
+            addView(microfone, LinearLayout.LayoutParams(60.d(), 60.d()).apply { leftMargin = 14.d() })
         }
         coluna.addView(linhaCampo, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 16.d() })
         coluna.addView(aviso, LinearLayout.LayoutParams(-1, 28.d()).apply { topMargin = 4.d(); leftMargin = 6.d() })
         coluna.addView(teclado, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 2.d() })
-        addView(coluna, LayoutParams(-1, -1))
+        // o campo e o teclado ficam num painel que sobe de baixo (altura só do conteúdo), como nos outros menus
+        addView(painel.apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#FA050916"))
+                cornerRadii = floatArrayOf(30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 0f, 0f, 0f, 0f)
+            }
+            isClickable = true
+            addView(coluna, LayoutParams(-1, -2).apply { bottomMargin = 12.d() })
+        }, LayoutParams(-1, -2, Gravity.BOTTOM))
 
-        teclado.aoDigitar = { s -> if (conteudo.length < maximo) { conteudo += s; aviso.text = ""; aposMudar() } }
-        teclado.aoApagar = { if (conteudo.isNotEmpty()) { conteudo = conteudo.dropLast(1); aposMudar() } }
+        teclado.aoDigitar = { s -> if (conteudo.length < maximo) { val p = pos(); conteudo = conteudo.substring(0, p) + s + conteudo.substring(p); posCursor = p + s.length; cursor = true; aviso.text = ""; aposMudar() } }
+        teclado.aoApagar = { val p = pos(); if (p > 0) { conteudo = conteudo.removeRange(p - 1, p); posCursor = p - 1; cursor = true; aposMudar() } }
         teclado.aoAcao = { enviar() }
+    }
+
+    /**
+     * Microfone: o que for falado entra no texto onde está o cursor (números falados viram algarismos). Na senha do Wi-Fi o texto entra
+     * LIMPO, sem espaços e sem esconder em bolinhas, para a pessoa conferir se o reconhecimento acertou.
+     */
+    private fun ouvirVoz() {
+        val ligado = EntradaVoz.ouvir ?: run { aviso.text = "Voz indisponível agora."; return }
+        ligado({ animacaoMic.ouvindo() }, { }, { falado ->
+            animacaoMic.parar()
+            if (falado.isNullOrBlank()) { aviso.text = "Não ouvi. Toque no microfone e fale de novo."; return@ligado }
+            val novo = EntradaVoz.numerosEmDigitos(falado, ehSenha)
+            val p = pos()
+            val cabe = (maximo - conteudo.length).coerceAtLeast(0)
+            val inserir = novo.take(cabe)
+            conteudo = conteudo.substring(0, p) + inserir + conteudo.substring(p)
+            posCursor = p + inserir.length
+            if (ehSenha) mostrar = true      // a senha falada aparece em claro: dá para ver se ficou certa
+            cursor = true; aviso.text = ""
+            aposMudar()
+        }, { animacaoMic.pesquisando() })
+    }
+
+    private fun cursorPeloToque() {
+        if (conteudo.isEmpty()) return
+        val layout = caixaTexto.layout ?: return
+        if (layout.getEllipsisCount(0) > 0) { posCursor = conteudo.length; cursor = true; desenharTexto(); return }      // texto comprido cortado no começo: vai para o fim
+        val x = ultimoX - caixaTexto.left - caixaTexto.totalPaddingLeft
+        var desenhado = layout.getOffsetForHorizontal(0, x.coerceAtLeast(0f))
+        if (desenhado > pos()) desenhado--      // a letra invisível do cursor não conta
+        posCursor = desenhado.coerceIn(0, conteudo.length)
+        cursor = true
+        desenharTexto()
     }
 
     private fun aposMudar() {
@@ -104,7 +145,6 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
 
     private fun desenharTexto() {
         val mostra = if (ehSenha && !mostrar) "•".repeat(conteudo.length) else conteudo
-        val cur = if (cursor) "|" else " "
         if (conteudo.isEmpty()) {
             caixaTexto.setTextColor(Tema.TEXTO3)
             caixaTexto.letterSpacing = 0f
@@ -112,7 +152,7 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
         } else {
             caixaTexto.setTextColor(Tema.TEXTO)
             caixaTexto.letterSpacing = if (ehSenha && !mostrar) .15f else 0f
-            caixaTexto.text = mostra + cur
+            caixaTexto.text = comCursor(mostra, true, cursor, pos())
         }
         olho.setImageResource(if (mostrar) R.drawable.ic_olho_fechado else R.drawable.ic_olho)
     }
@@ -128,7 +168,7 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
     ) {
         iconeTitulo.setImageResource(iconeRes); iconeTitulo.setColorFilter(Tema.TEXTO)
         this.titulo.text = titulo; subtitulo.text = destaque
-        this.dica = dica; ehSenha = senha; mostrar = false; conteudo = inicial; this.maximo = maximo
+        this.dica = dica; ehSenha = senha; mostrar = false; conteudo = inicial; posCursor = inicial.length; this.maximo = maximo
         capitalizar = maiusculaNoInicio
         this.validar = validar; confirmar = aoConfirmar
         botaoAcao.text = acao
@@ -146,8 +186,11 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
         desenharTexto()
         if (!aberto) {
             visibility = View.VISIBLE
-            alpha = 0f; scaleX = .96f; scaleY = .96f
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(Tema.MODAL_MS).setInterpolator(Tema.CURVA).start()
+            alpha = 1f
+            painel.post {
+                painel.translationY = painel.height.toFloat()
+                painel.animate().translationY(0f).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).start()
+            }
         }
         handler.removeCallbacks(piscar); handler.postDelayed(piscar, 530)
     }
@@ -162,9 +205,9 @@ class TelaTexto(private val c: Context) : FrameLayout(c) {
 
     private fun esconder() {
         handler.removeCallbacks(piscar)
-        animate().cancel()
+        animate().cancel(); painel.animate().cancel(); painel.translationY = 0f
         visibility = View.GONE
-        conteudo = ""
+        conteudo = ""; posCursor = 0
     }
 
     /** X ou voltar: fecha sem enviar. */

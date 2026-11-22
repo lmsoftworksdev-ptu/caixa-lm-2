@@ -71,8 +71,6 @@ class TelaAmplificador(private val c: Context) : FrameLayout(c) {
     private val interruptor = Interruptor(c)
 
     init {
-        addView(texto(c, "Equalizador", 44, Tema.TEXTO, true), LayoutParams(-2, -2).apply { leftMargin = Tema.MARGEM_LATERAL.d(); topMargin = 28.d() })
-        addView(texto(c, "Ajuste o som da caixa: graves, médios e agudos", 21, Tema.TEXTO3), LayoutParams(-2, -2).apply { leftMargin = Tema.MARGEM_LATERAL.d(); topMargin = 88.d() })
 
         // liga e desliga
         val ligar = LinearLayout(c).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -80,7 +78,7 @@ class TelaAmplificador(private val c: Context) : FrameLayout(c) {
         ligar.addView(interruptor, LinearLayout.LayoutParams(76.d(), 42.d()))
         interruptor.ligado = Amplificador.ligado
         interruptor.aoMudar = { v -> Amplificador.definirLigado(v); interruptor.ligado = v; atualizar() }
-        addView(ligar, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 40.d() })
+        addView(ligar, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 14.d() })
 
         // predefinições
         val linhaChips = LinearLayout(c)
@@ -97,7 +95,7 @@ class TelaAmplificador(private val c: Context) : FrameLayout(c) {
             chips.add(chip)
             linhaChips.addView(chip, LinearLayout.LayoutParams(-2, 56.d()).apply { if (i > 0) leftMargin = 10.d() })
         }
-        addView(linhaChips, LayoutParams(-2, -2).apply { leftMargin = Tema.MARGEM_LATERAL.d(); topMargin = 142.d() })
+        addView(linhaChips, LayoutParams(-2, -2).apply { leftMargin = Tema.MARGEM_LATERAL.d(); topMargin = 66.d() })
 
         // cartão com as faixas
         val cartao = LinearLayout(c).apply {
@@ -109,7 +107,7 @@ class TelaAmplificador(private val c: Context) : FrameLayout(c) {
         for (b in 0 until Amplificador.nBandas) cartao.addView(coluna(Amplificador.nomeDaFaixa(b), false, b), LinearLayout.LayoutParams(0, -1, 1f))
         cartao.addView(coluna("Graves", true, -1), LinearLayout.LayoutParams(0, -1, 1f))
         cartao.addView(coluna("Volume+", true, -1, reforco = true), LinearLayout.LayoutParams(0, -1, 1f))
-        addView(cartao, LayoutParams(-1, -1).apply { leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 222.d(); bottomMargin = Tema.MARGEM_BASE.d() })
+        addView(cartao, LayoutParams(-1, -1).apply { leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 138.d(); bottomMargin = Tema.MARGEM_BASE.d() })
 
         if (!Amplificador.disponivel) {
             addView(texto(c, "O equalizador não está disponível neste aparelho.", 22, Tema.ERRO), LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { leftMargin = Tema.MARGEM_LATERAL.d(); bottomMargin = 8.d() })

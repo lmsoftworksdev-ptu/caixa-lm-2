@@ -332,6 +332,7 @@ class TelaMidia(
             addView(caixa, LayoutParams(-2, -2, Gravity.CENTER))
         }
         montarTeclado()
+        // faixa da esquerda reservada para o gesto de voltar: invisível (sem cor); o toque ali nunca chega nos cartões de baixo (ver dispatchTouchEvent)
         addView(teclado, LayoutParams(-1, (720 - 192).d(), Gravity.BOTTOM))      // começa abaixo da barra e das etiquetas (que terminam em y 180)
         teclado.visibility = View.GONE
         addView(carregandoTela, LayoutParams(-1, -1))
@@ -527,6 +528,7 @@ class TelaMidia(
         erro?.let { mostrarErro(it); atualizarProntidao(); return }
         val musica = modoMusica
         if (carregando) {
+            if (q.isEmpty()) { esqueletoInicio(musica); return }      // início: já na forma final, só com cartões de espera
             area.addView(cabecalho(if (q.isEmpty()) (if (musica) "Músicas em alta" else "Vídeos em alta") else (if (musica) "Músicas" else "Vídeos"), ""), cabLp())
             area.addView(fileira(if (q.isEmpty()) List(if (musica) 12 else 6) { esqueleto(true, musica = musica) } else List(3) { esqueleto(true, grande = true, musica = musica) }), fileiraLp())      // na pesquisa o esqueleto já tem o tamanho das capas grandes
             piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
@@ -545,6 +547,8 @@ class TelaMidia(
             return
         }
         // sem pesquisa (ou sem resultado): o em alta do tipo escolhido e, abaixo, uma fileira por gênero
+        // ainda não pediu o em alta (primeira entrada): cartões de espera na forma final, e não o aviso de falha que depois sumia
+        if (altaDoModo() == null && q.isEmpty()) { esqueletoInicio(musica); return }
         val alta = altaDoModo().orEmpty()
         area.addView(cabecalho(if (musica) "Músicas em alta" else "Vídeos em alta", if (q.isNotEmpty()) "Nada encontrado para “$q”" else ""), cabLp())
         if (alta.isEmpty()) area.addView(avisoLinha("Não consegui carregar o em alta agora. Toque para tentar de novo.") { if (musica) altaM = null else altaV = null; carregarAlta() })
@@ -560,6 +564,27 @@ class TelaMidia(
         area.addView(View(c), LinearLayout.LayoutParams(-1, 28.d()))      // folga no fim da coluna
         area.post { area.post { verificarVisiveis() } }
         atualizarProntidao()
+    }
+
+    /**
+     * Início da Mídia carregando: a página já aparece na forma final (em alta + uma fileira por gênero), só com cartões de espera; quando o
+     * conteúdo chega, os cartões viram capas no mesmo lugar e nada pula (antes aparecia um aviso e a coluna se rearrumava).
+     */
+    private fun esqueletoInicio(musica: Boolean) {
+        area.addView(cabecalho(if (musica) "Músicas em alta" else "Vídeos em alta", ""), cabLp())
+        area.addView(fileira(List(if (musica) 12 else 6) { esqueleto(true, musica = musica) }), fileiraLp())
+        piscar = ValueAnimator.ofFloat(.35f, .75f).apply {
+            duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { v -> if (!isShown) return@addUpdateListener; fileiras.forEach { f -> (f.getChildAt(0) as LinearLayout).let { l -> for (i in 0 until l.childCount) l.getChildAt(i).alpha = v.animatedValue as Float } } }
+            start()
+        }
+        for ((nome, _) in GENEROS) {
+            area.addView(cabecalho(nome, ""), cabLp().apply { topMargin = 36.d() })
+            val slot = FrameLayout(c)
+            slot.addView(fileira(List(if (musica) 12 else 8) { esqueleto(true, musica = musica) }, registrar = false).apply { alpha = .5f })
+            area.addView(slot, fileiraLp())
+        }
+        area.addView(View(c), LinearLayout.LayoutParams(-1, 28.d()))
     }
 
     /** Nada trava a Mídia enquanto carrega: os cartões de espera aparecem e o conteúdo entra conforme chega (sem tela de bloqueio). */
@@ -629,7 +654,12 @@ class TelaMidia(
     private fun fileira(cartoes: List<View>, registrar: Boolean = true): HorizontalScrollView {
         val linha = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; setPadding(48.d(), 0, 30.d(), 0) }
         cartoes.forEach { linha.addView(it) }
-        return HorizontalScrollView(c).apply {
+        return object : HorizontalScrollView(c) {
+            // máscara de esmaecer só na esquerda: o que rolou para a borda some aos poucos (sem cor escura e sem desfoque ao vivo)
+            override fun getRightFadingEdgeStrength(): Float = 0f
+        }.apply {
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength(64.d())
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             isFillViewport = false

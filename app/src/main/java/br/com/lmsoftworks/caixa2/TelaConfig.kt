@@ -405,7 +405,6 @@ class TelaConfig(private val c: Context, private val aoAbrir: (String) -> Unit) 
     // ------------------------------------------------------------------ digitação e janelas
 
     private fun pedirTexto(iconeRes: Int, dica: String, acao: String, inicial: String, aviso: String, maximo: Int, aoSalvar: (String) -> Unit) {
-        raizView.visibility = View.INVISIBLE
         telaTexto.abrir(iconeRes = iconeRes, titulo = dica, dica = dica, acao = acao, inicial = inicial, maximo = maximo,
             validar = { t -> if (t.isBlank()) aviso else null }) { t -> raizView.visibility = View.VISIBLE; aoSalvar(t.trim()) }
     }

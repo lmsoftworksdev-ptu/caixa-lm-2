@@ -179,6 +179,10 @@ class TelaVideo(
         override fun run() { atualizarTempo(); if (aberto && !esperando && !cortinaForcada && cortina.visibility == View.VISIBLE && quadroPronto()) { cortina.visibility = View.GONE; if (player.erro == null && !player.carregando) rodinha.visibility = View.GONE }; volume.fracao = lerVolume() / 100f; botaoLista?.visibility = if (player.fila.size > 1 && !lateralAberta) View.VISIBLE else View.GONE; if (lateralAberta) lateral.atualizar(player.fila, player.indice); handler.postDelayed(this, 500) }
     }
     private var controlesVisiveis = true
+    /** Url do vídeo que estava na tela: se muda com a tela aberta, é troca de um vídeo para o próximo (não é um começo). */
+    private var urlAnterior: String? = null
+    /** Troca de vídeo: título e controles não aparecem sozinhos; só voltam quando a pessoa toca na tela. */
+    private var semInfo = false
 
     val aberto: Boolean get() = visibility == View.VISIBLE
 
@@ -276,7 +280,7 @@ class TelaVideo(
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.actionMasked == MotionEvent.ACTION_UP) { if (lateralAberta) alternarLateral(false) else mostrarControles(!controlesVisiveis) }      // tocar fora da lista fecha a lista
+        if (e.actionMasked == MotionEvent.ACTION_UP) { if (lateralAberta) alternarLateral(false) else { semInfo = false; mostrarControles(!controlesVisiveis) } }      // tocar fora da lista fecha a lista
         return true
     }
 
@@ -380,6 +384,8 @@ class TelaVideo(
      */
     fun abrir(esmaecendo: Boolean = false) {
         esperando = false
+        semInfo = false      // começo de verdade: as informações aparecem
+        urlAnterior = player.item?.url
         if (lateralAberta) alternarLateral(false)
         visibility = View.VISIBLE
         if (esmaecendo) {
@@ -479,6 +485,16 @@ class TelaVideo(
         if (!aberto || esperando) return
         cortina.visibility = if (cortinaForcada || !quadroPronto()) View.VISIBLE else View.GONE
         val r = player.item
+        // troca de um vídeo para o próximo (botão, fim do vídeo ou lista): passa direto, sem mostrar título nem controles
+        val urlAtual = r?.url
+        if (urlAnterior != null && urlAtual != null && urlAtual != urlAnterior && !esperando) {
+            semInfo = true
+            handler.removeCallbacks(esconder)
+            controles.animate().cancel()
+            controlesVisiveis = false
+            controles.visibility = View.GONE
+        }
+        if (urlAtual != null) urlAnterior = urlAtual
         titulo.text = r?.titulo ?: ""
         canal.text = listOfNotNull(r?.canal?.takeIf { it.isNotEmpty() }, player.infoExtra.takeIf { it.isNotEmpty() }).joinToString("  ·  ")
         iconePlay.setImageResource(if (player.tocando) R.drawable.ic_pausar else R.drawable.ic_tocar)
@@ -496,7 +512,7 @@ class TelaVideo(
         // vídeo muito longo (mais de 10 min) não é uma música: o botão da nota fica indisponível
         seletor.musicaDisponivel = player.duracaoMs <= 0 || player.duracaoMs <= 600_000L
         botaoPlay.visibility = View.VISIBLE      // sempre aparece: pausa/play enquanto toca; play no meio quando parado ou carregando
-        if (erro != null || player.carregando) { mostrarControles(true); controles.alpha = 1f }
+        if (erro != null || (player.carregando && !semInfo)) { mostrarControles(true); controles.alpha = 1f }
         else if (player.tocando) agendarEsconder()
         atualizarTempo()
     }

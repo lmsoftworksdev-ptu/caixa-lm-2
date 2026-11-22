@@ -86,7 +86,6 @@ class TelaWifi(private val c: Context, private val wifi: WifiControle) : FrameLa
 
     private fun abrirSenha(r: WifiControle.Rede) {
         redeSenha = r
-        principal.visibility = View.INVISIBLE
         telaTexto.abrir(
             iconeRes = R.drawable.ic_lock, titulo = "Senha para", destaque = r.ssid, dica = "Digite a senha", acao = "Conectar",
             senha = true, maximo = 63,

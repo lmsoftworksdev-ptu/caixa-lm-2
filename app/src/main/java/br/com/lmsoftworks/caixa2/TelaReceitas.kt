@@ -23,13 +23,17 @@ import android.widget.ScrollView
 class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resultado>, Int) -> Unit) : FrameLayout(c) {
 
     private companion object {
-        const val LARGURA = 300
-        const val ALTURA_FOTO = 170
+        const val LARGURA = 235
+        const val ALTURA_FOTO = 132
         val SUGESTOES = listOf("Bolo de cenoura", "Frango assado", "Lasanha", "Brigadeiro", "Pão de queijo", "Feijoada", "Strogonoff", "Panqueca")
     }
 
     private val principal = Handler(Looper.getMainLooper())
     private var consulta = ""
+        set(v) { field = v; posCursor = v.length }      // texto novo (sugestão, limpar, pesquisa): o cursor vai para o fim
+    /** Onde está o cursor dentro da consulta (0 = antes da primeira letra). Tocar no texto da barra o leva até ali. */
+    private var posCursor = 0
+    private fun pos() = posCursor.coerceIn(0, consulta.length)
     private var seq = 0
     private var resultados: List<Receita>? = null
     private var carregando = false
@@ -40,10 +44,19 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
     private val esqueletos = ArrayList<HorizontalScrollView>()
     private var piscar: ValueAnimator? = null
 
+    private var animacaoMic: EntradaVoz.AnimacaoMic? = null
+    private var microfoneTeclado: FrameLayout? = null      // (declarado antes do init, que usa)
     private val textoBusca = texto(c, "", 23, Tema.TEXTO).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val dica = texto(c, "Pesquisar receitas", 23, Tema.TEXTO3)
     private val botaoLimpar = FrameLayout(c)
-    private val barra = FrameLayout(c)
+    /** A barra de pesquisa guarda onde o dedo tocou (x), para o cursor ir para o ponto do texto que foi tocado. */
+    private val barra = object : FrameLayout(c) {
+        var ultimoX = 0f
+        override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN || e.actionMasked == android.view.MotionEvent.ACTION_UP) ultimoX = e.x
+            return super.dispatchTouchEvent(e)
+        }
+    }
     private val area = LinearLayout(c)
     private val teclado = FrameLayout(c)
     private val tecladoV3 = TecladoView(c)
@@ -57,7 +70,20 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
     private val piscarCursor = object : Runnable {
         override fun run() { cursorVisivel = !cursorVisivel; escreverBusca(); if (tecladoAberto) principal.postDelayed(this, 530) }
     }
-    private fun escreverBusca(t: String = consulta) { textoBusca.text = comCursor(t, tecladoAberto, cursorVisivel) }
+    private fun escreverBusca(t: String = consulta) { textoBusca.text = comCursor(t, tecladoAberto, cursorVisivel, if (t == consulta) pos() else t.length) }
+
+    /** Toque na barra: o cursor vai para o ponto do texto que foi tocado (no fim, se o toque foi depois do texto). */
+    private fun cursorPeloToque() {
+        if (consulta.isEmpty()) return
+        val layout = textoBusca.layout ?: return
+        val x = barra.ultimoX - textoBusca.left - textoBusca.totalPaddingLeft
+        var desenhado = layout.getOffsetForHorizontal(0, x.coerceAtLeast(0f))
+        // com o teclado aberto o texto desenhado tem uma letra invisível no lugar do cursor: ela não conta
+        if (tecladoAberto && desenhado > pos()) desenhado--
+        posCursor = desenhado.coerceIn(0, consulta.length)
+        cursorVisivel = true
+        escreverBusca()
+    }
     private var detalheAberto = false
     private var seqDetalhe = 0
 
@@ -65,7 +91,7 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         barra.apply {
             background = fundoArredondado(Color.parseColor("#26FFFFFF"), 32.d(), Cfg.LINHA)
             isClickable = true
-            setOnClickListener { abrirTeclado() }
+            setOnClickListener { cursorPeloToque(); abrirTeclado() }
             efeitoToque()
         }
         barra.addView(icone(c, R.drawable.ic_busca, 28, Color.parseColor("#D6E0F7")),
@@ -154,8 +180,8 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         if (lista == null && !buscando && falha == null) { mostrarInicio(); return }
         if (lista != null && lista.isEmpty() && !temVideos && !buscando) { mostrarMensagem("Nenhuma receita encontrada", "Tente outro nome, por exemplo “bolo de chocolate”.", false); return }
 
-        // duas linhas que rolam para os lados: as receitas dos sites e, embaixo, os vídeos de receita do mesmo prato
-        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 16.d()) }
+        // duas linhas que rolam para os lados (cartões pequenos para as DUAS caberem na tela sem rolar para cima e para baixo): as receitas dos sites e, embaixo, os vídeos de receita do mesmo prato
+        val conteudo = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 6.d()) }
         conteudo.addView(rotulo("Receitas"), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 48.d(); topMargin = 6.d() })
         conteudo.addView(when {
             carregando -> linhaDeEsqueletos()
@@ -163,7 +189,7 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
             lista.isNullOrEmpty() -> aviso("Nenhuma receita encontrada")
             else -> fileira(lista.map { cartao(it) })
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8.d() })
-        conteudo.addView(rotulo("Vídeos de receita"), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 48.d(); topMargin = 14.d() })
+        conteudo.addView(rotulo("Vídeos de receita"), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = 48.d(); topMargin = 10.d() })
         conteudo.addView(when {
             carregandoVideos -> linhaDeEsqueletos()
             listaVideos.isNullOrEmpty() -> aviso("Nenhum vídeo de receita encontrado")
@@ -183,7 +209,7 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         }
     }
 
-    private fun rotulo(t: String): View = texto(c, t, 24, Color.parseColor("#FFB05A"), true)
+    private fun rotulo(t: String): View = texto(c, t, 22, Color.parseColor("#FFB05A"), true)
 
     /** Frase no lugar de uma linha que não trouxe nada. */
     private fun aviso(t: String): View = LinearLayout(c).apply {
@@ -224,7 +250,12 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
     private fun fileira(cartoes: List<View>): HorizontalScrollView {
         val linha = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; setPadding(48.d(), 0, 30.d(), 0) }
         cartoes.forEach { linha.addView(it) }
-        return HorizontalScrollView(c).apply {
+        return object : HorizontalScrollView(c) {
+            // máscara de esmaecer só na esquerda: o que rolou para a borda some aos poucos (sem cor escura e sem desfoque ao vivo)
+            override fun getRightFadingEdgeStrength(): Float = 0f
+        }.apply {
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength(64.d())
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(linha, LayoutParams(-2, -2))
@@ -258,9 +289,9 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
         if (r.imagem.isNotEmpty()) Miniaturas.carregar(listOf(r.imagem, r.imagemReserva).filter { it.isNotEmpty() }, imagem)
         addView(quadro, LinearLayout.LayoutParams(LARGURA.d(), ALTURA_FOTO.d()))
-        addView(texto(c, r.titulo, 21, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END },
+        addView(texto(c, r.titulo, 18, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END },
             LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 10.d() })
-        addView(texto(c, r.fonte, 17, Tema.TEXTO3).apply { maxLines = 1 }, LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 2.d() })
+        addView(texto(c, r.fonte, 15, Tema.TEXTO3).apply { maxLines = 1 }, LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 2.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
@@ -276,15 +307,15 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         val imagem = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
         quadro.addView(imagem, FrameLayout.LayoutParams(-1, -1))
         if (r.miniaturas.isNotEmpty()) Miniaturas.carregar(r.miniaturas, imagem)
-        val duracao = texto(c, r.duracaoTexto, 17, Color.WHITE, true).apply {
+        val duracao = texto(c, r.duracaoTexto, 15, Color.WHITE, true).apply {
             setPadding(8.d(), 2.d(), 8.d(), 2.d())
             background = fundoArredondado(Color.parseColor("#CC000000"), 8.d())
         }
         quadro.addView(duracao, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { rightMargin = 8.d(); bottomMargin = 8.d() })
         addView(quadro, LinearLayout.LayoutParams(LARGURA.d(), ALTURA_FOTO.d()))
-        addView(texto(c, YouTube.emPortugues(r.titulo), 21, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END },
+        addView(texto(c, YouTube.emPortugues(r.titulo), 18, Color.WHITE, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END },
             LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 10.d() })
-        addView(texto(c, r.canal, 17, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 2.d() })
+        addView(texto(c, r.canal, 15, Tema.TEXTO3).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(LARGURA.d(), -2).apply { topMargin = 2.d() })
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 18.d() }
     }
 
@@ -395,10 +426,24 @@ class TelaReceitas(private val c: Context, private val aoTocarVideo: (List<Resul
         }
         teclado.isClickable = true
         tecladoV3.acao = "Buscar"
-        tecladoV3.aoDigitar = { s -> consulta += s; atualizarBarra() }
-        tecladoV3.aoApagar = { if (consulta.isNotEmpty()) { consulta = consulta.dropLast(1); atualizarBarra() } }
+        tecladoV3.aoDigitar = { s -> val p = pos(); consulta = consulta.substring(0, p) + s + consulta.substring(p); posCursor = p + s.length; cursorVisivel = true; atualizarBarra() }      // escreve onde está o cursor
+        tecladoV3.aoApagar = { val p = pos(); if (p > 0) { consulta = consulta.removeRange(p - 1, p); posCursor = p - 1; cursorVisivel = true; atualizarBarra() } }
         tecladoV3.aoAcao = { fecharTeclado(); buscar() }
+        val microfone = EntradaVoz.botao(c) { ouvirVoz() }
+        microfoneTeclado = microfone
+        teclado.addView(microfone, LayoutParams(56.d(), 56.d(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 8.d() })
         teclado.addView(tecladoV3, LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = 12.d() })
+    }
+
+    /** Microfone do teclado: o que for falado aparece na barra e a pesquisa já roda (números falados viram algarismos). */
+    private fun ouvirVoz() {
+        val mic = microfoneTeclado
+        val ligado = EntradaVoz.ouvir ?: run { Aviso.mostrar(c, "Busca por voz indisponível"); return }
+        val anim = animacaoMic ?: mic?.let { EntradaVoz.AnimacaoMic(it) }.also { animacaoMic = it }
+        ligado({ anim?.ouvindo() }, { parcial -> consulta = parcial; atualizarBarra() }, { texto ->
+            anim?.parar()
+            if (!texto.isNullOrBlank()) pesquisar(texto) else Aviso.mostrar(c, "Não ouvi. Toque no microfone e fale de novo.")
+        }, { anim?.pesquisando() })
     }
 
     fun abrirTeclado() {

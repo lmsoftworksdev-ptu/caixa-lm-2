@@ -21,13 +21,39 @@ import android.widget.TextView
 /** A TV (canais abertos do mundo) está pronta mas desligada: para trazer de volta o seletor Rádio | TV, troque por true. */
 const val TV_ATIVA = false
 
+/** Sem o título "Rádios" no alto, a barra de busca sobe (antes em 100) e o teclado começa logo abaixo dela. */
+private const val TOPO_BARRA = 28
+private const val ALTURA_TECLADO = 656 - TOPO_BARRA - 64 - 8
+
 class TelaRadios(
     private val c: Context,
     private val aoTocar: (List<Radios.Estacao>, Int) -> Unit,
     private val aoTocarTv: (List<TV.Canal>, Int) -> Unit
 ) : FrameLayout(c) {
     private val principal = Handler(Looper.getMainLooper())
-    private val telaTexto = TelaTexto(c)
+    // teclado igual ao das Receitas: sobe de baixo só até a barra de busca da própria tela e escreve nela (sem caixa de texto própria)
+    private var animacaoMic: EntradaVoz.AnimacaoMic? = null
+    private var microfoneTeclado: FrameLayout? = null
+    private val botaoLimpar = FrameLayout(c)      // o X da barra: limpa a pesquisa e volta à lista normal      // (declarado antes do init, que usa)
+    private val teclado = FrameLayout(c)
+    private val tecladoV3 = TecladoView(c)
+    private var tecladoAberto = false
+    private var edicao = ""            // o que está na barra enquanto o teclado está aberto
+    private var posCursor = 0
+    private fun pos() = posCursor.coerceIn(0, edicao.length)
+    private var cursorVisivel = true
+    private val piscarCursor = object : Runnable {
+        override fun run() { cursorVisivel = !cursorVisivel; atualizarCampoBusca(); if (tecladoAberto) principal.postDelayed(this, 530) }
+    }
+    private var engolirToque = false
+    /** A barra de busca guarda onde o dedo tocou (x), para o cursor ir para o ponto do texto que foi tocado. */
+    private val barra = object : FrameLayout(c) {
+        var ultimoX = 0f
+        override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN || e.actionMasked == android.view.MotionEvent.ACTION_UP) ultimoX = e.x
+            return super.dispatchTouchEvent(e)
+        }
+    }
     private val raiz = FrameLayout(c)
     private val chipsPaises = LinearLayout(c)
     private val chipsCategorias = LinearLayout(c)
@@ -55,16 +81,15 @@ class TelaRadios(
     private var pedido = 0
     private var iniciou = false
 
-    val emTexto: Boolean get() = telaTexto.aberto
+    val emTexto: Boolean get() = tecladoAberto
 
     fun voltar(): Boolean {
-        if (telaTexto.aberto) { telaTexto.fechar(); return true }
+        if (tecladoAberto) { fecharTeclado(); return true }
         return false
     }
 
     init {
         addView(raiz, LayoutParams(-1, -1))
-        raiz.addView(texto(c, if (TV_ATIVA) "Rádio / TV" else "Rádios", 44, Tema.TEXTO, true), LayoutParams(-2, -2).apply { leftMargin = Tema.MARGEM_LATERAL.d(); topMargin = 24.d() })
 
         // seletor Rádio | TV
         val seletor = LinearLayout(c).apply { background = fundoArredondado(Tema.BOTAO, 26.d(), Tema.BOTAO_BORDA) }
@@ -77,38 +102,67 @@ class TelaRadios(
         if (TV_ATIVA) raiz.addView(seletor, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 30.d() })
 
         // barra de busca (toque abre o teclado)
-        val barra = FrameLayout(c).apply {
+        barra.apply {
             background = fundoArredondado(Color.parseColor("#26FFFFFF"), 32.d(), Cfg.LINHA)
             isClickable = true
-            setOnClickListener { abrirTeclado() }
+            setOnClickListener { aoTocarBarra() }
             efeitoToque()
         }
         barra.addView(icone(c, R.drawable.ic_busca, 28, Color.parseColor("#D6E0F7")), LayoutParams(28.d(), 28.d(), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 26.d() })
         barra.addView(dica, LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d() })
-        barra.addView(textoBusca, LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d(); rightMargin = 24.d() })
+        barra.addView(textoBusca, LayoutParams(-1, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = 74.d(); rightMargin = 70.d() })
+        botaoLimpar.apply {
+            background = fundoArredondado(Color.parseColor("#26FFFFFF"), 24.d())
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener {
+                edicao = ""; posCursor = 0
+                if (tv) consultaTv = "" else { consulta = ""; if (codigoPais == null) codigoPais = "BR" }
+                atualizarCampoBusca()
+                if (tv) aplicarFiltroTv() else { montarChips(); buscar() }
+            }
+            addView(icone(c, R.drawable.ic_fechar, 24, Color.WHITE), LayoutParams(24.d(), 24.d(), Gravity.CENTER))
+        }
+        barra.addView(botaoLimpar, LayoutParams(48.d(), 48.d(), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = 8.d() })
         textoBusca.maxLines = 1; textoBusca.ellipsize = TextUtils.TruncateAt.END
-        raiz.addView(barra, LayoutParams(-1, 64.d()).apply { leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = 100.d() })
+        raiz.addView(barra, LayoutParams(-1, 64.d()).apply { leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d(); topMargin = TOPO_BARRA.d() })
 
         // países
         val faixa = HorizontalScrollView(c).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         chipsPaises.orientation = LinearLayout.HORIZONTAL
         chipsPaises.setPadding(Tema.MARGEM_LATERAL.d(), 0, Tema.MARGEM_LATERAL.d(), 0)
         faixa.addView(chipsPaises)
-        raiz.addView(faixa, LayoutParams(-1, 52.d()).apply { topMargin = 176.d() })
+        raiz.addView(faixa, LayoutParams(-1, 52.d()).apply { topMargin = (TOPO_BARRA + 76).d() })
 
         // categorias (só na TV)
         faixaCategorias.apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; visibility = View.GONE }
         chipsCategorias.orientation = LinearLayout.HORIZONTAL
         chipsCategorias.setPadding(Tema.MARGEM_LATERAL.d(), 0, Tema.MARGEM_LATERAL.d(), 0)
         faixaCategorias.addView(chipsCategorias)
-        raiz.addView(faixaCategorias, LayoutParams(-1, 46.d()).apply { topMargin = 238.d() })
+        raiz.addView(faixaCategorias, LayoutParams(-1, 46.d()).apply { topMargin = (TOPO_BARRA + 138).d() })
 
         // resultados
         rolagem.addView(lista, LayoutParams(-1, -2))
-        raiz.addView(rolagem, LayoutParams(-1, -1).apply { topMargin = 242.d(); leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d() })
+        raiz.addView(rolagem, LayoutParams(-1, -1).apply { topMargin = (TOPO_BARRA + 142).d(); leftMargin = Tema.MARGEM_LATERAL.d(); rightMargin = Tema.MARGEM_LATERAL.d() })
 
-        telaTexto.aoFechar = { raiz.visibility = View.VISIBLE }
-        addView(telaTexto, LayoutParams(-1, -1))
+        // teclado: começa logo abaixo da barra de busca e vai até o fim da tela
+        teclado.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(Color.parseColor("#080D1E"))
+            cornerRadii = floatArrayOf(30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 30.d().toFloat(), 0f, 0f, 0f, 0f)
+        }
+        teclado.isClickable = true
+        teclado.visibility = View.GONE
+        tecladoV3.acao = "Buscar"
+        tecladoV3.aoDigitar = { s ->
+            if (edicao.length < 60) { val p = pos(); edicao = edicao.substring(0, p) + s + edicao.substring(p); posCursor = p + s.length; cursorVisivel = true; atualizarCampoBusca() }
+        }
+        tecladoV3.aoApagar = { val p = pos(); if (p > 0) { edicao = edicao.removeRange(p - 1, p); posCursor = p - 1; cursorVisivel = true; atualizarCampoBusca() } }
+        tecladoV3.aoAcao = { val t = edicao; fecharTeclado(); executarBusca(t) }
+        val microfone = EntradaVoz.botao(c) { ouvirVoz() }
+        microfoneTeclado = microfone
+        teclado.addView(microfone, LayoutParams(56.d(), 56.d(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = 8.d() })
+        teclado.addView(tecladoV3, LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = 12.d() })
+        addView(teclado, LayoutParams(-1, ALTURA_TECLADO.d(), Gravity.BOTTOM))
         pintarSeletor(); atualizarCampoBusca(); montarChips()
     }
 
@@ -131,11 +185,30 @@ class TelaRadios(
         atualizarCampoBusca(); montarChips(); buscar()
     }
 
+    private fun consultaAtual() = if (tv) consultaTv else consulta
+
     private fun atualizarCampoBusca() {
-        val q = if (tv) consultaTv else consulta
-        textoBusca.text = q
+        val q = if (tecladoAberto) edicao else consultaAtual()
+        textoBusca.text = if (tecladoAberto) comCursor(q, true, cursorVisivel, pos()) else q
         dica.text = if (tv) "Nome do canal" else "Cidade, estado ou nome da rádio"
         dica.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
+        botaoLimpar.visibility = if (q.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Toque na barra: abre o teclado e leva o cursor ao ponto tocado (no fim, se o toque foi depois do texto). */
+    private fun aoTocarBarra() {
+        if (!tecladoAberto) { edicao = consultaAtual(); posCursor = edicao.length }
+        if (edicao.isNotEmpty()) {
+            val layout = textoBusca.layout
+            if (layout != null) {
+                val x = barra.ultimoX - textoBusca.left - textoBusca.totalPaddingLeft
+                var desenhado = layout.getOffsetForHorizontal(0, x.coerceAtLeast(0f))
+                if (tecladoAberto && desenhado > pos()) desenhado--      // a letra invisível do cursor não conta
+                posCursor = desenhado.coerceIn(0, edicao.length)
+            }
+        }
+        cursorVisivel = true
+        abrirTeclado()
     }
 
     private fun chip(rotulo: String, selecionado: Boolean, i: Int, ao: () -> Unit, h: Int = 52): TextView = texto(c, rotulo, if (h < 50) 20 else 22, Tema.TEXTO, true).apply {
@@ -172,14 +245,61 @@ class TelaRadios(
         }
     }
 
+    /** Microfone do teclado: o que for falado aparece na barra e a busca já roda (números falados viram algarismos). */
+    private fun ouvirVoz() {
+        val mic = microfoneTeclado
+        val ligado = EntradaVoz.ouvir ?: run { Aviso.mostrar(c, "Busca por voz indisponível"); return }
+        val anim = animacaoMic ?: mic?.let { EntradaVoz.AnimacaoMic(it) }.also { animacaoMic = it }
+        ligado({ anim?.ouvindo() }, { parcial -> edicao = parcial; posCursor = parcial.length; atualizarCampoBusca() }, { texto ->
+            anim?.parar()
+            if (!texto.isNullOrBlank()) { fecharTeclado(); executarBusca(texto) } else Aviso.mostrar(c, "Não ouvi. Toque no microfone e fale de novo.")
+        }, { anim?.pesquisando() })
+    }
+
     private fun abrirTeclado() {
-        raiz.visibility = View.INVISIBLE
-        telaTexto.abrir(
-            iconeRes = R.drawable.ic_busca, titulo = if (tv) "Buscar canais" else "Buscar rádios",
-            dica = if (tv) "Nome do canal" else "Cidade, estado, país ou nome da rádio", acao = "Buscar",
-            inicial = if (tv) consultaTv else consulta, maximo = 60
-        ) { t ->
-            raiz.visibility = View.VISIBLE
+        if (tecladoAberto) { atualizarCampoBusca(); return }
+        tecladoAberto = true
+        cursorVisivel = true; atualizarCampoBusca(); principal.removeCallbacks(piscarCursor); principal.postDelayed(piscarCursor, 530)
+        tecladoV3.acao = "Buscar"      // remonta o teclado: a tecla Buscar pega a cor de destaque do menu de agora
+        tecladoV3.capitalizar(false)
+        teclado.visibility = View.VISIBLE
+        teclado.post {
+            teclado.translationY = teclado.height.toFloat()
+            teclado.animate().translationY(0f).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA).start()
+        }
+        barra.background = fundoArredondado(Color.parseColor("#33FFFFFF"), 33.d(), Color.parseColor("#88FFFFFF"))
+    }
+
+    fun fecharTeclado() {
+        if (!tecladoAberto) return
+        tecladoAberto = false
+        principal.removeCallbacks(piscarCursor); atualizarCampoBusca()
+        barra.background = fundoArredondado(Color.parseColor("#26FFFFFF"), 32.d(), Cfg.LINHA)
+        teclado.animate().translationY(teclado.height.toFloat()).setDuration(Tema.TECLADO_MS).setInterpolator(Tema.CURVA)
+            .withEndAction { if (!tecladoAberto) teclado.visibility = View.GONE }.start()
+    }
+
+    /** Com o teclado aberto, tocar fora dele (e fora da barra) só fecha o teclado. */
+    override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            engolirToque = false
+            if (tecladoAberto) {
+                val p = IntArray(2); teclado.getLocationOnScreen(p)
+                val b = IntArray(2); barra.getLocationOnScreen(b)
+                val fora = e.rawY < p[1] && !(e.rawY >= b[1] && e.rawY <= b[1] + barra.height)
+                if (fora) { fecharTeclado(); engolirToque = true }
+            }
+        }
+        if (engolirToque) {
+            if (e.actionMasked == android.view.MotionEvent.ACTION_UP || e.actionMasked == android.view.MotionEvent.ACTION_CANCEL) engolirToque = false
+            return true
+        }
+        return super.dispatchTouchEvent(e)
+    }
+
+    /** O texto foi enviado (tecla Buscar): país, rádio ou canal. */
+    private fun executarBusca(t: String) {
+
             val pais = Radios.paisDoTexto(t)
             if (tv) {
                 if (pais != null) { paisTv = pais.codigo; consultaTv = ""; categoria = null; atualizarCampoBusca(); montarChips(); buscar() }
@@ -193,7 +313,6 @@ class TelaRadios(
                 }
                 atualizarCampoBusca(); montarChips(); buscar()
             }
-        }
     }
 
     private fun aviso(msg: String) {

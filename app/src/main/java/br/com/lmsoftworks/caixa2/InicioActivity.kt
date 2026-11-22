@@ -94,6 +94,7 @@ class InicioActivity : Activity() {
     private var corCapa: Pair<Int, Int>? = null
     /** A cor da capa como ela é (a que vai para a fita): o fundo da tela usa a versão mais clara. */
     private var corCapaFiel: Int? = null
+    private var corCapaNeutra: Triple<Int, Int, Int>? = null
     private var girando = false
     private var modoCubo = false
     private var grauAtual = 0f
@@ -310,9 +311,12 @@ class InicioActivity : Activity() {
         barra.translationZ = 30f; painelVolume.translationZ = 20f; gesto.translationZ = 30f      // acima das telas que deslizam
         inicio = TelaInicio(this) { abrir(it) }
         inicio.aoFecharMusica = {
+            val eraRadio = musica.ehRadio
             musicaDispensada = if (musica.temMusica) musica.titulo + musica.artista else "sem-dados"
             musicaDispensadaAte = android.os.SystemClock.uptimeMillis() + 1500      // dá tempo de o player confirmar que parou
             if (videoRecolhido || musica.emLocal) playerMidia.parar() else musica.pausar()
+            // rádio fechada pelo cartão: o título dela não fica para trás (senão o menu Mídia abria o player de uma rádio que já parou)
+            if (eraRadio) musica.esquecerLocal()
             inicio.definirMusica(null, null)
         }
         inicio.aoPlayPause = { alternarReproducao() }
@@ -356,6 +360,8 @@ class InicioActivity : Activity() {
                 contentDescription = "Ocultar miniatura"
                 setOnClickListener {
                     bloquearToquesAte = android.os.SystemClock.uptimeMillis() + 500L
+                    // vídeo das Receitas: fechar a miniatura fecha o vídeo de vez (nas outras telas só esconde a imagem e o som segue)
+                    if (videoDeReceitas) { fecharVideo(); return@setOnClickListener }
                     playerMidia.ligarImagem(null)
                     miniVideo.visibility = View.GONE
                 }
@@ -371,10 +377,15 @@ class InicioActivity : Activity() {
         faixaAssistente.aoMudarSessao = led::definirPulsoAssistente
         assistente = br.com.lmsoftworks.caixa2.voz.Assistente(this, faixaAssistente, acoesAssistente)
         telaMidia.nivelMic = { assistente.nivelMicrofone }
+        // digitação por voz de TODOS os teclados (Receitas, Rádios, listas, lembretes, senha do Wi-Fi): números falados viram algarismos
+        EntradaVoz.nivel = { assistente.nivelMicrofone }
+        EntradaVoz.ouvir = { aoComecar, aoParcial, aoTexto, aoPesquisar ->
+            assistente.ouvirParaBusca(aoComecar, { p -> aoParcial(EntradaVoz.numerosEmDigitos(p)) }, { t -> aoTexto(t?.let { EntradaVoz.numerosEmDigitos(it) }) }, aoPesquisar)
+        }
         telaMidia.aoMicrofone = {
-            assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { parcial -> telaMidia.mostrarParcial(parcial) }, { texto ->
+            assistente.ouvirParaBusca({ telaMidia.ouvindoVoz(true) }, { parcial -> telaMidia.mostrarParcial(EntradaVoz.numerosEmDigitos(parcial)) }, { texto ->
                 telaMidia.ouvindoVoz(false)
-                if (texto != null) telaMidia.pesquisar(texto) else telaMidia.avisoBusca("Não ouvi. Toque no microfone e fale de novo.")
+                if (texto != null) telaMidia.pesquisar(EntradaVoz.numerosEmDigitos(texto)) else telaMidia.avisoBusca("Não ouvi. Toque no microfone e fale de novo.")
             }, { telaMidia.pesquisandoVoz() })
         }
         alarmes = AlarmeControle(this) { aoMudarAlarmes() }
@@ -788,9 +799,15 @@ class InicioActivity : Activity() {
             capaAnalisada = capa
             corCapa = capa?.let { try { CorCapa.analisar(it) } catch (e: Exception) { null } }
             corCapaFiel = capa?.let { try { CorCapa.analisarFiel(it) } catch (e: Exception) { null } }
+            corCapaNeutra = capa?.let { try { CorCapa.analisarNeutra(it) } catch (e: Exception) { null } }
         }
         // sem música: as cores do Bluetooth
         if (!musica.temMusica) return Triple("#3D6BFF", "#2B2FA8", "#4C7DFF")
+        // capa preta, branca ou cinza: o fundo é cinza escuro / esbranquiçado de verdade (e a cor mais forte da capa, se houver), não uma cor inventada
+        corCapaNeutra?.let { n ->
+            fun hexN(i: Int) = String.format("#%06X", 0xFFFFFF and i)
+            return Triple(hexN(n.first), hexN(n.second), hexN(n.third))
+        }
         if (corCapa == null) {
             // sem capa (ou capa sem cor): segue a cor do banner padrão que o próprio app cria para a música
             val h = CapaView.matiz(musica.titulo + musica.artista)
@@ -1979,8 +1996,12 @@ class InicioActivity : Activity() {
     }
 
     /** A borda esquerda volta uma tela e a borda superior volta ao Início. */
+    /** O toque começou na faixa da esquerda de um menu: serve só para o gesto de voltar e não chega nos cartões, vídeos ou músicas que estão embaixo. */
+    private var faixaVoltar = false
+
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
         ultimoToque = android.os.SystemClock.uptimeMillis()
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) faixaVoltar = false
         // brilho baixado pela economia: o toque devolve o brilho e só acorda (não aciona nada embaixo, a tela estava quase apagada)
         if (economiaBrilho) { aplicarBrilho(); if (e.actionMasked == MotionEvent.ACTION_DOWN) engolindo = true }
         if (ultimoToque < bloquearToquesAte) {
@@ -2012,6 +2033,7 @@ class InicioActivity : Activity() {
         // teclado da Mídia aberto: tocar no cabeçalho fecha o teclado (o toque segue para o botão tocado)
         if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "midia" && telaMidia.tecladoVisivel && e.rawY < 104.d()) telaMidia.fecharTeclado()
         if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "receitas" && telaReceitas.tecladoVisivel && e.rawY < 104.d()) telaReceitas.fecharTeclado()
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && atual == "radios" && telaRadios.emTexto && e.rawY < 104.d()) telaRadios.fecharTeclado()
         if (girando && !capturado) return true       // durante a animação, toques são ignorados
         if (e.actionMasked == MotionEvent.ACTION_DOWN) {
             toqueTopo = e.rawY < 36.d() && (atual != "inicio" || telaVideo.aberto) && !faixaAssistente.aberta && alarmeTocando == null
@@ -2033,7 +2055,12 @@ class InicioActivity : Activity() {
         if ((atual != "inicio" || telaVideo.aberto) && !modalEnergia.aberto && !modalAtualizacao.aberto && !faixaAssistente.aberta && alarmeTocando == null) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    arrastando = e.rawX < BORDA_GESTO.d() && !(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY)) && !(atual == "receitas" && telaReceitas.areaProtegida(e.rawX, e.rawY))
+                    // faixa da esquerda de TODOS os menus com botão Voltar: só serve para o gesto de voltar (não chega nos cartões de baixo).
+                    // Com teclado ou campo de texto aberto ela não atua (ali não há cartões e as teclas não podem ficar bloqueadas).
+                    val tecladoNaTela = when (atual) { "midia" -> telaMidia.tecladoVisivel; "receitas" -> telaReceitas.tecladoVisivel; "radios" -> telaRadios.emTexto; else -> false }
+                    faixaVoltar = atual != "inicio" && !telaVideo.aberto && !tecladoNaTela && e.rawX < BORDA_GESTO.d()
+                    arrastando = e.rawX < BORDA_GESTO.d() && (faixaVoltar ||
+                        (!(atual == "midia" && !telaVideo.aberto && telaMidia.areaProtegida(e.rawX, e.rawY)) && !(atual == "receitas" && !telaVideo.aberto && telaReceitas.areaProtegida(e.rawX, e.rawY))))
                     capturado = false
                     x0 = e.rawX; y0 = e.rawY
                 }
@@ -2078,6 +2105,10 @@ class InicioActivity : Activity() {
                     if (tratou) { if (modoCubo) soltarCubo(); return true }
                 }
             }
+        }
+        if (faixaVoltar) {      // toque na faixa: nada passa para os cartões de baixo
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) faixaVoltar = false
+            return true
         }
         return super.dispatchTouchEvent(e)
     }

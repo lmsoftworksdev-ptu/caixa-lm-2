@@ -61,6 +61,59 @@ object CorCapa {
         return Color.HSVToColor(hsv)
     }
 
+    /**
+     * Capa predominantemente PRETA, BRANCA ou CINZA (mais da metade dos pontos lidos): o fundo segue o que a capa é de verdade, e não uma cor
+     * inventada. Preta -> cinza bem escuro; branca -> branco esbranquiçado; cinza -> cinza médio. A segunda cor é a cor mais forte que a
+     * capa tiver (um vermelho num disco preto, por exemplo); sem nenhuma, um tom do próprio cinza.
+     * Devolve (cor 1, cor 2, destaque) ou null se a capa tem cor de verdade (aí vale a análise normal).
+     */
+    fun analisarNeutra(capa: Bitmap): Triple<Int, Int, Int>? {
+        val n = 5
+        val q = Math.max(2, Math.min(capa.width, capa.height) / 10)
+        val hsv = FloatArray(3)
+        var preto = 0; var branco = 0; var cinza = 0; var colorido = 0
+        var melhor = 0xFF000000.toInt(); var melhorForca = 0f
+        for (iy in 0 until n) for (ix in 0 until n) {
+            val cx = (capa.width * (ix + .5f) / n).toInt(); val cy = (capa.height * (iy + .5f) / n).toInt()
+            var r = 0L; var g = 0L; var b = 0L; var k = 0
+            var y = cy - q / 2
+            while (y < cy + q / 2) {
+                var x = cx - q / 2
+                while (x < cx + q / 2) {
+                    val px = capa.getPixel(x.coerceIn(0, capa.width - 1), y.coerceIn(0, capa.height - 1))
+                    r += Color.red(px); g += Color.green(px); b += Color.blue(px); k++
+                    x += 2
+                }
+                y += 2
+            }
+            if (k == 0) continue
+            val c = Color.rgb((r / k).toInt(), (g / k).toInt(), (b / k).toInt())
+            Color.colorToHSV(c, hsv)
+            val s = hsv[1]; val v = hsv[2]
+            when {
+                v < 0.28f -> preto++
+                s < 0.18f && v > 0.82f -> branco++
+                s < 0.18f -> cinza++
+                else -> {
+                    colorido++
+                    val f = s * Math.min(1f, v * 1.4f)
+                    if (f > melhorForca) { melhorForca = f; melhor = c }
+                }
+            }
+        }
+        val total = n * n
+        if (colorido * 2 >= total) return null      // a capa tem cor de verdade
+        val neutros = preto + branco + cinza
+        if (neutros * 2 <= total) return null       // nada predomina (meio a meio de cores): análise normal
+        val temCor = melhorForca >= 0.18f
+        val segunda = if (temCor) realcar(melhor) else 0
+        return when {
+            preto >= branco && preto >= cinza -> Triple(Color.parseColor("#3A3A40"), if (temCor) segunda else Color.parseColor("#5A5A62"), if (temCor) segunda else Color.parseColor("#9AA6BE"))
+            branco >= preto && branco >= cinza -> Triple(Color.parseColor("#F0F0F5"), if (temCor) segunda else Color.parseColor("#C9CBD3"), if (temCor) segunda else Color.parseColor("#9AA6BE"))
+            else -> Triple(Color.parseColor("#8A8D96"), if (temCor) segunda else Color.parseColor("#B4B7C0"), if (temCor) segunda else Color.parseColor("#9AA6BE"))
+        }
+    }
+
     fun analisar(capa: Bitmap): Pair<Int, Int>? = analisar(capa, fiel = false)
 
     private fun analisar(capa: Bitmap, fiel: Boolean): Pair<Int, Int>? {

@@ -202,7 +202,6 @@ class TelaAlarmes(
     }
 
     private fun abrirTexto(icone: Int, dica: String, acao: String, inicial: String, aviso: String, aoSalvar: (String) -> Unit) {
-        principal.visibility = View.INVISIBLE
         telaTexto.abrir(
             iconeRes = icone, titulo = dica, dica = dica, acao = acao, inicial = inicial, maximo = 80,
             validar = { t -> if (t.isBlank()) aviso else null }

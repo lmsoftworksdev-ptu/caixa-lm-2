@@ -454,6 +454,17 @@ object YouTube {
     }
 
     private fun resolverDe(info: StreamInfo, soAudio: Boolean): Fonte {
+        // TRANSMISSÃO AO VIVO: o YouTube lista streams de vídeo e áudio "normais" que, numa live, não são arquivos completos (o player abria a capa
+        // e ficava parado, sem tocar). A live só toca pelo endereço HLS (lista de pedaços que se renova sozinha).
+        val aoVivo = try {
+            info.streamType == org.schabi.newpipe.extractor.stream.StreamType.LIVE_STREAM ||
+                info.streamType == org.schabi.newpipe.extractor.stream.StreamType.AUDIO_LIVE_STREAM
+        } catch (e: Throwable) { false }
+        if (aoVivo) {
+            val hls = info.hlsUrl?.takeIf { it.isNotEmpty() }
+            Log.d("Midia", "transmissão ao vivo: " + if (hls != null) "tocando pelo HLS" else "sem endereço HLS")
+            if (hls != null) return Fonte(null, null, hls)
+        }
 
         // So a faixa de audio ORIGINAL (nunca a dublada automatica); sem marcacao = a unica faixa do video.
         val todos = info.audioStreams.filter { it.content.isNotEmpty() }
